@@ -38,20 +38,18 @@ pnpm dev:api
 
 ## Env (web + api)
 
-Env файлы лежат **внутри приложений** и игнорируются git’ом:
+1) Скопируйте `.env.example` → `.env.local` (в корне репозитория):
 
-1) Web (frontend): `apps/web/.env.local`
+```bash
+copy .env.example .env.local
+```
 
-Заполните:
+2) Заполните:
 - `VITE_SUPABASE_URL` — Project URL (для фронта чтение каталога)
 - `VITE_SUPABASE_ANON_KEY` — anon public key (для фронта чтение каталога)
 - `VITE_API_BASE_URL` — base URL API (по умолчанию `http://localhost:8787`)
 
-Важно про Vite MODE: если вы запускаете Vite с `--mode <MODE>`, то он также подхватывает файл `apps/web/.env.<MODE>.local` (например `apps/web/.env.dev.local`). По умолчанию `pnpm dev:web` использует `MODE=development`.
-
-2) API (backend): `apps/api/.env`
-
-Заполните:
+Для API (backend):
 - `SUPABASE_URL` — Project URL (для сервера)
 - `SUPABASE_SERVICE_ROLE_KEY` — service role key (только на сервере!)
 - `TELEGRAM_BOT_TOKEN` — токен бота
@@ -110,7 +108,7 @@ Supabase Dashboard → Table editor → `admins` → Insert row:
 ### DEV режим админки (опционально)
 
 Чтобы тестировать админку в обычном браузере вне Telegram:
-1) В `apps/api/.env` задайте `DEV_ADMIN_TG_USER_ID=<ваш tg id>`
+1) В `.env.local` задайте `DEV_ADMIN_TG_USER_ID=<ваш tg id>`
 2) Добавьте себя в таблицу `admins` (как выше)
 3) Запустите `pnpm dev` и откройте `/admin`
 
@@ -130,8 +128,6 @@ Telegram Mini App требует публичный **HTTPS** URL.
 Варианты:
 - задеплоить (Vercel/Netlify/Cloudflare Pages/любая статика с SPA rewrite)
 - или поднять туннель на локальный `5173` (ngrok/cloudflared и т.п.)
-
-Примечание: при запуске через ngrok Vite по умолчанию блокирует незнакомые хосты (“Blocked request…”). В `apps/web/vite.config.ts` настроен `server.allowedHosts` для `*.ngrok-free.dev`.
 
 Дальше:
 1) В BotFather создайте/настройте Mini App и укажите URL.

@@ -104,7 +104,7 @@ async function answerSafe(callbackQueryId: string, text: string): Promise<void> 
 export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>("/api/telegram/webhook", async (request, reply) => {
     const secretHeader = getHeaderValue(request.headers["x-telegram-bot-api-secret-token"]);
-    if (!config.telegram.webhookSecret || !secretHeader || secretHeader !== config.telegram.webhookSecret) {
+    if (!secretHeader || secretHeader !== config.telegram.webhookSecret) {
       return reply.code(401).send({ ok: false });
     }
 

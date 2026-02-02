@@ -140,15 +140,14 @@ export type Database = {
   };
 };
 
-const supabaseUrl =
-  typeof import.meta.env.VITE_SUPABASE_URL === "string"
-    ? import.meta.env.VITE_SUPABASE_URL.trim()
-    : "";
+function readEnvString(key: string): string {
+  const raw = import.meta.env[key];
+  if (typeof raw !== "string") return "";
+  return raw.trim();
+}
 
-const supabaseAnonKey =
-  typeof import.meta.env.VITE_SUPABASE_ANON_KEY === "string"
-    ? import.meta.env.VITE_SUPABASE_ANON_KEY.trim()
-    : "";
+const supabaseUrl = readEnvString("VITE_SUPABASE_URL");
+const supabaseAnonKey = readEnvString("VITE_SUPABASE_ANON_KEY");
 
 export const supabase: SupabaseClient<Database> | null =
   supabaseUrl && supabaseAnonKey

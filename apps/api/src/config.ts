@@ -1,3 +1,7 @@
+import dotenv from "dotenv";
+import fs from "node:fs";
+import path from "node:path";
+
 export type NodeEnv = "development" | "production" | "test";
 
 export type AppConfig = {
@@ -12,7 +16,7 @@ export type AppConfig = {
   };
   telegram: {
     botToken: string;
-    webhookSecret: string | null;
+    webhookSecret: string;
     publicWebhookUrl: string | null;
     chatIdOwner: string;
     chatIdVvo: string | null;
@@ -22,6 +26,23 @@ export type AppConfig = {
     adminTgUserId: number | null;
   };
 };
+
+function loadEnvFromRepoRoot(): void {
+  // When started via `pnpm -C apps/api dev`, cwd is `apps/api`.
+  const repoRoot = path.resolve(process.cwd(), "../..");
+  const envLocal = path.join(repoRoot, ".env.local");
+  const envDefault = path.join(repoRoot, ".env");
+
+  if (fs.existsSync(envLocal)) {
+    dotenv.config({ path: envLocal });
+    return;
+  }
+  if (fs.existsSync(envDefault)) {
+    dotenv.config({ path: envDefault });
+  }
+}
+
+loadEnvFromRepoRoot();
 
 function readEnv(key: string): string | null {
   const v = process.env[key];
@@ -61,10 +82,9 @@ function parseOptionalAdminUserId(): number | null {
   const raw = readEnv("DEV_ADMIN_TG_USER_ID");
   if (!raw) return null;
   const n = Number(raw);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
-    throw new Error("Invalid env DEV_ADMIN_TG_USER_ID: expected positive integer or 0");
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    throw new Error("Invalid env DEV_ADMIN_TG_USER_ID: expected positive integer");
   }
-  if (n === 0) return null;
   return n;
 }
 
@@ -84,8 +104,6 @@ export const config: AppConfig = (() => {
     throw new Error("Missing required env: CORS_ORIGINS (comma-separated origins) for production");
   }
 
-  const webhookSecret = isDev ? readEnv("TELEGRAM_WEBHOOK_SECRET") : requireEnv("TELEGRAM_WEBHOOK_SECRET");
-
   return {
     nodeEnv,
     isDev,
@@ -98,7 +116,7 @@ export const config: AppConfig = (() => {
     },
     telegram: {
       botToken: requireEnv("TELEGRAM_BOT_TOKEN"),
-      webhookSecret,
+      webhookSecret: requireEnv("TELEGRAM_WEBHOOK_SECRET"),
       publicWebhookUrl: readEnv("PUBLIC_WEBHOOK_URL"),
       chatIdOwner: requireEnv("TELEGRAM_CHAT_ID_OWNER"),
       chatIdVvo: readEnv("TELEGRAM_CHAT_ID_VVO"),
