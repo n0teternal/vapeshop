@@ -149,6 +149,37 @@ function readEnvString(key: string): string {
 const supabaseUrl = readEnvString("VITE_SUPABASE_URL");
 const supabaseAnonKey = readEnvString("VITE_SUPABASE_ANON_KEY");
 
+function prefix(value: string, len = 12): string {
+  if (!value) return "(empty)";
+  return value.length <= len ? value : `${value.slice(0, len)}…`;
+}
+
+function extractProjectRef(url: string): string {
+  const m = url.match(/^https?:\/\/([^./]+)\.supabase\.co\b/i);
+  return m?.[1] ?? "";
+}
+
+// DEV-only diagnostics to ensure env points to the expected Supabase project.
+(() => {
+  if (import.meta.env.DEV !== true) return;
+
+  const g = globalThis as unknown as Record<string, unknown>;
+  const key = "__miniapp_supabase_env_logged__";
+  if (g[key] === true) return;
+  g[key] = true;
+
+  const ref = extractProjectRef(supabaseUrl);
+  // Never log the full key. URL is not secret, but keep it short to avoid noise.
+  console.info(
+    `[supabase] ref=${prefix(ref)} url=${prefix(supabaseUrl)} anonKeyLen=${supabaseAnonKey.length}`,
+  );
+  if (supabaseAnonKey.startsWith("sb_secret_")) {
+    console.warn(
+      "[supabase] VITE_SUPABASE_ANON_KEY looks like a service role key (sb_secret_*). Do NOT use it in the browser.",
+    );
+  }
+})();
+
 export const supabase: SupabaseClient<Database> | null =
   supabaseUrl && supabaseAnonKey
     ? createClient<Database>(supabaseUrl, supabaseAnonKey)

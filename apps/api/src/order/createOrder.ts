@@ -180,16 +180,19 @@ export async function createOrder(params: {
     totalPrice += unitPrice * qty;
   }
 
+  const orderRow = {
+    tg_user_id: params.tgUser.id,
+    tg_username: params.tgUser.username ?? null,
+    city_id: city.id ?? null,
+    delivery_method: params.payload.deliveryMethod,
+    comment: params.payload.comment ?? null,
+    total_price: totalPrice,
+    // статус не отправляем — пусть БД проставит default
+  };
+
   const { data: createdOrder, error: orderError } = await supabase
     .from("orders")
-    .insert({
-      tg_user_id: params.tgUser.id,
-      tg_username: params.tgUser.username,
-      city_id: city.id,
-      delivery_method: params.payload.deliveryMethod,
-      comment: params.payload.comment,
-      total_price: totalPrice,
-    })
+    .insert(orderRow)
     .select("id")
     .single();
 
@@ -232,4 +235,3 @@ export async function createOrder(params: {
     }),
   };
 }
-

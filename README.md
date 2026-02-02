@@ -81,6 +81,16 @@ copy .env.example .env.local
    - выполните `supabase/schema.sql`
    - затем выполните `supabase/seed.sql`
 
+Если после применения SQL в приложении видите ошибку вида **PGRST205 / schema cache** (“Could not find the table 'public.cities' in the schema cache”):
+1) Убедитесь, что вы заполнили `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` именно от **того же** Supabase проекта, куда применяли SQL.
+2) В Supabase Dashboard → **SQL Editor** выполните:
+
+```sql
+notify pgrst, 'reload schema';
+```
+
+Также проверьте Dashboard → **Settings → API → Exposed schemas**: должен быть включён `public`.
+
 Важно: RLS включён на всех таблицах. Для anon разрешён только read-only доступ к `cities`, `products` (только `is_active=true`) и `inventory`.
 Таблицы `orders`, `order_items`, `admins` закрыты для anon (заказы будут создаваться будущим backend’ом через `service_role`).
 

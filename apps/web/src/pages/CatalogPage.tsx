@@ -3,7 +3,7 @@ import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
 import { isSupabaseConfigured } from "../supabase/client";
-import { fetchCatalog, type CatalogItem } from "../supabase/catalog";
+import { fetchCatalog, type CatalogItem, SupabaseQueryError } from "../supabase/catalog";
 
 function formatPriceRub(value: number): string {
   return new Intl.NumberFormat("ru-RU", {
@@ -129,7 +129,9 @@ export function CatalogPage() {
   const mockItems = useMemo(() => mapMockCatalog(), []);
   const [supabaseItems, setSupabaseItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; devDetails?: string } | null>(
+    null,
+  );
 
   const supabaseEnabled = isSupabaseConfigured();
   const items = supabaseEnabled ? supabaseItems : mockItems;
@@ -156,8 +158,48 @@ export function CatalogPage() {
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        const message = e instanceof Error ? e.message : "Unknown error";
-        setError(message);
+        if (e instanceof SupabaseQueryError) {
+          const details = `table=${e.table} status=${e.status ?? "n/a"} code=${e.code ?? "n/a"} msg=${e.message}`;
+          const msgLower = e.message.toLowerCase();
+
+          const isInvalidKey =
+            e.status === 401 &&
+            (msgLower.includes("invalid api key") || msgLower.includes("apikey") && msgLower.includes("invalid"));
+          if (isInvalidKey) {
+            setError({ message: "Supabase env не задан/не тот проект", devDetails: details });
+            return;
+          }
+
+          const isSchemaCache = e.status === 404 || e.code === "PGRST205" || msgLower.includes("schema cache");
+          if (isSchemaCache) {
+            setError({
+              message: `В базе нет таблицы ${e.table} или не обновился API-кэш`,
+              devDetails: details,
+            });
+            return;
+          }
+
+          const isPermission =
+            e.status === 401 ||
+            e.status === 403 ||
+            e.code === "42501" ||
+            msgLower.includes("permission");
+          if (isPermission) {
+            setError({ message: "Нет прав (RLS)", devDetails: details });
+            return;
+          }
+
+          setError({ message: `Supabase error: ${e.message}`, devDetails: details });
+          return;
+        }
+
+        const message =
+          e instanceof Error
+            ? e.message.includes("Supabase is not configured")
+              ? "Supabase env не задан/не тот проект"
+              : e.message
+            : "Unknown error";
+        setError({ message, devDetails: e instanceof Error ? e.message : String(e) });
       })
       .finally(() => {
         if (cancelled) return;
@@ -284,7 +326,16 @@ export function CatalogPage() {
           <div className="text-sm font-semibold text-rose-900">
             Ошибка загрузки каталога
           </div>
-          <div className="mt-1 text-xs text-rose-800">{error}</div>
+          <div className="mt-1 text-xs text-rose-800">{error.message}</div>
+          {import.meta.env.DEV && error.devDetails ? (
+            <div className="mt-2 rounded-xl border border-rose-200 bg-white/60 px-3 py-2 font-mono text-[11px] text-rose-900">
+              <div>{error.devDetails}</div>
+              <div className="mt-1 text-rose-800">
+                DEV: выполните `supabase/schema.sql`, затем `supabase/seed.sql` в Supabase SQL Editor. Если
+                ошибка “schema cache” не исчезает — выполните `notify pgrst, 'reload schema';`.
+              </div>
+            </div>
+          ) : null}
           <button
             type="button"
             className="mt-3 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700"

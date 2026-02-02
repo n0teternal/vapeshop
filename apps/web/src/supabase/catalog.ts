@@ -2,6 +2,27 @@ import { supabase, type Database } from "./client";
 
 export type CitySlug = "vvo" | "blg";
 
+export type SupabaseTableName = "cities" | "inventory" | "products";
+
+export class SupabaseQueryError extends Error {
+  public readonly table: SupabaseTableName;
+  public readonly status: number | null;
+  public readonly code: string | null;
+
+  constructor(params: {
+    table: SupabaseTableName;
+    status: number | null;
+    code: string | null;
+    message: string;
+  }) {
+    super(params.message);
+    this.name = "SupabaseQueryError";
+    this.table = params.table;
+    this.status = params.status;
+    this.code = params.code;
+  }
+}
+
 export type CatalogItem = {
   id: string;
   title: string;
@@ -35,19 +56,29 @@ function numberFromUnknown(value: unknown): number {
   return n;
 }
 
+function getErrorCode(error: { code?: unknown } | null): string | null {
+  if (!error) return null;
+  return typeof error.code === "string" ? error.code : null;
+}
+
 async function fetchCity(citySlug: CitySlug): Promise<CityRow> {
   if (!supabase) {
     throw new Error("Supabase is not configured (missing env)");
   }
 
-  const { data, error } = await supabase
+  const { data, error, status } = await supabase
     .from("cities")
     .select("id,name,slug")
     .eq("slug", citySlug)
     .single();
 
   if (error) {
-    throw new Error(`Failed to load city: ${error.message}`);
+    throw new SupabaseQueryError({
+      table: "cities",
+      status: typeof status === "number" ? status : null,
+      code: getErrorCode(error),
+      message: error.message,
+    });
   }
   if (!data) {
     throw new Error("City not found");
@@ -62,26 +93,36 @@ export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogItem[]> {
 
   const city = await fetchCity(citySlug);
 
-  const { data: inventory, error: inventoryError } = await supabase
+  const { data: inventory, error: inventoryError, status: inventoryStatus } = await supabase
     .from("inventory")
     .select("product_id,in_stock,price_override")
     .eq("city_id", city.id);
 
   if (inventoryError) {
-    throw new Error(`Failed to load inventory: ${inventoryError.message}`);
+    throw new SupabaseQueryError({
+      table: "inventory",
+      status: typeof inventoryStatus === "number" ? inventoryStatus : null,
+      code: getErrorCode(inventoryError),
+      message: inventoryError.message,
+    });
   }
 
   const invRows: InventoryRow[] = inventory ?? [];
   const productIds = Array.from(new Set(invRows.map((row) => row.product_id)));
   if (productIds.length === 0) return [];
 
-  const { data: products, error: productsError } = await supabase
+  const { data: products, error: productsError, status: productsStatus } = await supabase
     .from("products")
     .select("id,title,description,base_price,image_url")
     .in("id", productIds);
 
   if (productsError) {
-    throw new Error(`Failed to load products: ${productsError.message}`);
+    throw new SupabaseQueryError({
+      table: "products",
+      status: typeof productsStatus === "number" ? productsStatus : null,
+      code: getErrorCode(productsError),
+      message: productsError.message,
+    });
   }
 
   const prodRows: ProductRow[] = products ?? [];
@@ -108,4 +149,3 @@ export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogItem[]> {
 
   return items;
 }
-

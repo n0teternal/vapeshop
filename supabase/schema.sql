@@ -67,6 +67,14 @@ create index if not exists inventory_city_product_idx
 create index if not exists products_is_active_idx
   on public.products (is_active);
 
+-- ===== Grants (PostgREST roles) =====
+-- Supabase обычно настраивает default privileges, но явные GRANT делают поведение предсказуемым:
+-- anon/authenticated могут только читать публичный каталог (cities/products/inventory).
+grant usage on schema public to anon, authenticated;
+grant select on public.cities to anon, authenticated;
+grant select on public.products to anon, authenticated;
+grant select on public.inventory to anon, authenticated;
+
 -- ===== RLS =====
 
 alter table public.cities enable row level security;
@@ -132,4 +140,3 @@ exception
   when insufficient_privilege then
     raise notice 'insufficient_privilege to manage storage policies, skipping';
 end $$;
-
