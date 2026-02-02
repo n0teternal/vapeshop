@@ -59,12 +59,12 @@ function requireEnv(key: string): string {
   return v;
 }
 
-function parseIntEnv(key: string, fallback: number): number {
-  const raw = readEnv(key);
-  if (!raw) return fallback;
+function parsePort(): number {
+  const raw = readEnv("PORT");
+  if (!raw) return 8787;
   const n = Number(raw);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
-    throw new Error(`Invalid env ${key}: expected positive integer`);
+    throw new Error("Invalid PORT");
   }
   return n;
 }
@@ -107,8 +107,8 @@ export const config: AppConfig = (() => {
   return {
     nodeEnv,
     isDev,
-    host: readEnv("HOST") ?? "0.0.0.0",
-    port: parseIntEnv("PORT", 8787),
+    host: "0.0.0.0",
+    port: parsePort(),
     corsOrigins,
     supabase: {
       url: requireEnv("SUPABASE_URL"),

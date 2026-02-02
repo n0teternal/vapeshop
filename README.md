@@ -36,6 +36,15 @@ pnpm dev:api
 - сверху будет плашка `DEV MODE`
 - `window.Telegram.WebApp` замокан (без подписи) — только чтобы UI работал
 
+## Deploy API on Railway
+
+- Root Directory: `apps/api`
+- Build: `cd ../.. && corepack enable && pnpm install --frozen-lockfile && pnpm -C apps/api build`
+- Start: `cd ../.. && pnpm -C apps/api start`
+- Healthcheck path: `/health`
+
+Порт берётся из `PORT` (Railway подставляет автоматически). В UI можно указать `8080`.
+
 ## Env (web + api)
 
 1) Скопируйте `.env.example` → `.env.local` (в корне репозитория):
