@@ -69,6 +69,11 @@ function parsePort(): number {
   return n;
 }
 
+function parseHost(): string {
+  const raw = readEnv("HOST");
+  return raw ?? "0.0.0.0";
+}
+
 function parseCsvEnv(key: string): string[] {
   const raw = readEnv(key);
   if (!raw) return [];
@@ -107,7 +112,7 @@ export const config: AppConfig = (() => {
   return {
     nodeEnv,
     isDev,
-    host: "0.0.0.0",
+    host: parseHost(),
     port: parsePort(),
     corsOrigins,
     supabase: {
