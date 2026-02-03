@@ -519,15 +519,6 @@ function AdminOrdersView() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {o.status !== "processing" ? (
-                    <button
-                      type="button"
-                      className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-                      onClick={() => void setOrderStatus(o.id, "processing")}
-                    >
-                      В работу
-                    </button>
-                  ) : null}
                   {o.status !== "done" ? (
                     <button
                       type="button"

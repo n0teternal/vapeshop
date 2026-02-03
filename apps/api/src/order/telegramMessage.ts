@@ -17,6 +17,8 @@ export type TelegramOrderMessage = {
   reply_markup: TelegramReplyMarkup;
 };
 
+type TelegramOrderActionsView = "main" | "done_confirm";
+
 function escapeHtml(input: string): string {
   return input
     .replaceAll("&", "&amp;")
@@ -44,6 +46,7 @@ function shortOrderId(orderId: string): string {
 
 export function buildOrderTelegramMessage(params: {
   status: OrderStatus;
+  actionsView?: TelegramOrderActionsView;
   cityName: string;
   citySlug: CitySlug;
   tgUser: TgUser;
@@ -53,6 +56,7 @@ export function buildOrderTelegramMessage(params: {
   totalPrice: number;
   orderId: string;
 }): TelegramOrderMessage {
+  const actionsView: TelegramOrderActionsView = params.actionsView ?? "main";
   const cityLine = `${escapeHtml(params.cityName)} (${params.citySlug.toUpperCase()})`;
   const userLine = params.tgUser.username
     ? `@${escapeHtml(params.tgUser.username)} (${params.tgUser.id})`
@@ -81,31 +85,31 @@ export function buildOrderTelegramMessage(params: {
 
   const reply_markup: TelegramReplyMarkup = {
     inline_keyboard: [
-      ...(params.status === "new"
-        ? [
-            [
-              {
-                text: "🟡 В работу",
-                callback_data: `status:processing:${params.orderId}`,
-              },
-            ],
-            [
-              {
-                text: "✅ Готово",
-                callback_data: `status:done:${params.orderId}`,
-              },
-            ],
-          ]
-        : params.status === "processing"
+      ...(params.status === "done"
+        ? []
+        : actionsView === "done_confirm"
           ? [
               [
                 {
-                  text: "✅ Готово",
+                  text: "Подтвердить ✅",
                   callback_data: `status:done:${params.orderId}`,
                 },
               ],
+              [
+                {
+                  text: "⬅ Назад",
+                  callback_data: `ui:main:${params.orderId}`,
+                },
+              ],
             ]
-          : []),
+          : [
+              [
+                {
+                  text: "✅ Готово",
+                  callback_data: `ui:done_confirm:${params.orderId}`,
+                },
+              ],
+            ]),
       [
         {
           text: "Написать клиенту",
@@ -117,4 +121,3 @@ export function buildOrderTelegramMessage(params: {
 
   return { text, reply_markup };
 }
-

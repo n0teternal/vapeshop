@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
-import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { buildOrderTelegramMessage, type CitySlug, type OrderStatus } from "../order/telegramMessage.js";
+import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { answerCallbackQuery, editMessageText } from "./api.js";
 
 type CallbackStatus = Exclude<OrderStatus, "new">;
+
+type CallbackUiView = "main" | "done_confirm";
 
 type ParsedCallbackQuery = {
   callbackQueryId: string;
@@ -12,6 +14,10 @@ type ParsedCallbackQuery = {
   data: string;
   message?: { chatId: number; messageId: number };
 };
+
+type ParsedCallbackAction =
+  | { kind: "status"; status: CallbackStatus; orderId: string }
+  | { kind: "ui"; view: CallbackUiView; orderId: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -63,21 +69,30 @@ function parseCallbackQuery(update: unknown): ParsedCallbackQuery | null {
   return message ? { ...base, message } : base;
 }
 
-type ParsedCallbackData = { status: CallbackStatus; orderId: string };
-
-function parseCallbackData(data: string): ParsedCallbackData | null {
+function parseCallbackData(data: string): ParsedCallbackAction | null {
   const parts = data.split(":");
-  if (parts.length !== 3) return null;
+  if (parts.length != 3) return null;
+
   const type = parts[0];
-  const statusRaw = parts[1];
+  const actionRaw = parts[1];
   const orderId = parts[2];
-  if (!type || !statusRaw || !orderId) return null;
-  if (type !== "status") return null;
-  if (statusRaw !== "processing" && statusRaw !== "done") return null;
+  if (!type || !actionRaw || !orderId) return null;
+
   const uuidV4ish =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
   if (!uuidV4ish) return null;
-  return { status: statusRaw, orderId };
+
+  if (type === "status") {
+    if (actionRaw !== "processing" && actionRaw !== "done") return null;
+    return { kind: "status", status: actionRaw, orderId };
+  }
+
+  if (type === "ui") {
+    if (actionRaw !== "main" && actionRaw !== "done_confirm") return null;
+    return { kind: "ui", view: actionRaw, orderId };
+  }
+
+  return null;
 }
 
 function numberFromUnknown(value: unknown): number {
@@ -87,6 +102,11 @@ function numberFromUnknown(value: unknown): number {
     if (Number.isFinite(n)) return n;
   }
   throw new Error("Expected numeric value");
+}
+
+function parseOrderStatus(value: unknown): OrderStatus {
+  if (value === "new" || value === "processing" || value === "done") return value;
+  return "new";
 }
 
 async function answerSafe(callbackQueryId: string, text: string): Promise<void> {
@@ -113,9 +133,9 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       return reply.code(200).send({ ok: true });
     }
 
-    const cb = parseCallbackData(parsed.data);
-    if (!cb) {
-      await answerSafe(parsed.callbackQueryId, "Некорректная команда");
+    const action = parseCallbackData(parsed.data);
+    if (!action) {
+      await answerSafe(parsed.callbackQueryId, "???????????? ???????");
       return reply.code(200).send({ ok: true });
     }
 
@@ -128,34 +148,68 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       .maybeSingle();
 
     if (adminError || !adminRow) {
-      await answerSafe(parsed.callbackQueryId, "Нет доступа");
+      await answerSafe(parsed.callbackQueryId, "??? ???????");
       return reply.code(200).send({ ok: true });
     }
 
-    const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .update({ status: cb.status })
-      .eq("id", cb.orderId)
-      .select(
-        "id,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,notify_chat_id,notify_message_id",
-      )
-      .maybeSingle();
+    type OrderRow = {
+      id: string;
+      status: string;
+      city_id: number | null;
+      tg_user_id: number;
+      tg_username: string | null;
+      delivery_method: string;
+      comment: string | null;
+      total_price: unknown;
+      notify_chat_id: number | null;
+      notify_message_id: number | null;
+    };
 
-    if (orderError) {
-      request.log.error({ err: orderError }, "Failed to update order status");
-      await answerSafe(parsed.callbackQueryId, "Ошибка");
-      return reply.code(200).send({ ok: true });
+    const selectCols =
+      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,notify_chat_id,notify_message_id";
+
+    let order: OrderRow | null = null;
+
+    if (action.kind === "status") {
+      const { data, error } = await supabase
+        .from("orders")
+        .update({ status: action.status })
+        .eq("id", action.orderId)
+        .select(selectCols)
+        .maybeSingle();
+
+      if (error) {
+        request.log.error({ err: error }, "Failed to update order status");
+        await answerSafe(parsed.callbackQueryId, "??????");
+        return reply.code(200).send({ ok: true });
+      }
+
+      order = (data ?? null) as unknown as OrderRow | null;
+    } else {
+      const { data, error } = await supabase
+        .from("orders")
+        .select(selectCols)
+        .eq("id", action.orderId)
+        .maybeSingle();
+
+      if (error) {
+        request.log.error({ err: error }, "Failed to load order");
+        await answerSafe(parsed.callbackQueryId, "??????");
+        return reply.code(200).send({ ok: true });
+      }
+
+      order = (data ?? null) as unknown as OrderRow | null;
     }
 
     if (!order) {
-      await answerSafe(parsed.callbackQueryId, "Заказ не найден");
+      await answerSafe(parsed.callbackQueryId, "????? ?? ??????");
       return reply.code(200).send({ ok: true });
     }
 
     const cityId = order.city_id;
     if (cityId === null) {
       request.log.warn({ orderId: order.id }, "Order has null city_id; skip message edit");
-      await answerSafe(parsed.callbackQueryId, "Статус обновлён");
+      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
       return reply.code(200).send({ ok: true });
     }
 
@@ -167,14 +221,14 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     if (cityError || !city) {
       request.log.error({ err: cityError, cityId }, "Failed to load city for order");
-      await answerSafe(parsed.callbackQueryId, "Статус обновлён");
+      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
       return reply.code(200).send({ ok: true });
     }
 
     const citySlug = parseCitySlug(city.slug);
     if (!citySlug) {
       request.log.warn({ slug: city.slug }, "Unknown city slug; skip message edit");
-      await answerSafe(parsed.callbackQueryId, "Статус обновлён");
+      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
       return reply.code(200).send({ ok: true });
     }
 
@@ -185,7 +239,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     if (itemsError || !orderItems) {
       request.log.error({ err: itemsError }, "Failed to load order items");
-      await answerSafe(parsed.callbackQueryId, "Статус обновлён");
+      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
       return reply.code(200).send({ ok: true });
     }
 
@@ -200,7 +254,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     if (prodError || !products) {
       request.log.error({ err: prodError }, "Failed to load products for order");
-      await answerSafe(parsed.callbackQueryId, "Статус обновлён");
+      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
       return reply.code(200).send({ ok: true });
     }
 
@@ -216,9 +270,14 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     }));
 
     const totalPrice = numberFromUnknown(order.total_price);
+    const orderStatus = parseOrderStatus(order.status);
 
     const telegramMessage = buildOrderTelegramMessage({
-      status: cb.status,
+      status: orderStatus,
+      actionsView:
+        action.kind === "ui" && action.view === "done_confirm" && orderStatus !== "done"
+          ? "done_confirm"
+          : "main",
       cityName: city.name,
       citySlug,
       tgUser: { id: order.tg_user_id, username: order.tg_username },
@@ -250,7 +309,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       }
     }
 
-    await answerSafe(parsed.callbackQueryId, "Статус обновлён");
+    await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
     return reply.code(200).send({ ok: true });
   });
 }
