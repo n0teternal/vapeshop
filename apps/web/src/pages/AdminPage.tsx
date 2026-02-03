@@ -226,7 +226,11 @@ export function AdminPage() {
       .catch((e: unknown) => {
         if (cancelled) return;
         setMe(null);
-        setError(e instanceof ApiError ? e : new ApiError({ code: "UNKNOWN", message: "Ошибка", status: 0 }));
+        setError(
+          e instanceof ApiError
+            ? e
+            : new ApiError({ code: "UNKNOWN", message: "??????", status: 0 }),
+        );
       })
       .finally(() => {
         if (cancelled) return;
@@ -252,23 +256,31 @@ export function AdminPage() {
       <div>
         <div className="text-lg font-semibold">Admin</div>
         <div className="mt-1 text-sm text-slate-600">
-          {accessState === "ok" ? <AdminOrdersView /> : null}
+          {accessState === "ok"
+            ? `?? ????? ??? ${me?.username ? `@${me.username}` : me?.tgUserId} ? ${me?.role}`
+            : "?????? ? ??????? ?????? ??? allowlist ?????????????."}
+        </div>
+      </div>
+
+      {accessState === "loading" ? (
+        <div className="h-24 animate-pulse rounded-2xl bg-slate-200" />
+      ) : null}
 
       {accessState !== "ok" && accessState !== "loading" ? (
         <Card>
-          <div className="text-sm font-semibold">Нет доступа</div>
+          <div className="text-sm font-semibold">??? ???????</div>
           <div className="mt-2 text-sm text-slate-600">
             {accessState === "forbidden"
-              ? "Ваш tg_user_id отсутствует в таблице admins."
+              ? "??? tg_user_id ??????????? ? ??????? admins."
               : accessState === "unauthorized"
-                ? "Нужна Telegram initData (откройте мини-апп внутри Telegram)."
-                : "Не удалось проверить доступ."}
+                ? "????? Telegram initData (???????? ????-??? ?????? Telegram)."
+                : "?? ??????? ????????? ??????."}
           </div>
 
           {!isTelegram && import.meta.env.DEV ? (
             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              DEV: можно включить bypass (сервер): `DEV_ADMIN_TG_USER_ID` + заголовок
-              `x-dev-admin=1` (фронт в dev отправляет автоматически).
+              DEV: ????? ???????? bypass (??????): `DEV_ADMIN_TG_USER_ID` + ?????????
+              `x-dev-admin=1` (????? ? dev ?????????? ?????????????).
             </div>
           ) : null}
         </Card>
