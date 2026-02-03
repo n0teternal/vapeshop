@@ -23,6 +23,24 @@ type ImportProductsCsvResult = {
   }>;
 };
 
+type AdminProductInventory = {
+  city_id: number;
+  city_slug: string;
+  in_stock: boolean;
+  stock_qty: number | null;
+  price_override: number | null;
+};
+
+type AdminProduct = {
+  id: string;
+  title: string;
+  description: string | null;
+  base_price: number;
+  image_url: string | null;
+  is_active: boolean;
+  inventory: AdminProductInventory[];
+};
+
 type OrderStatus = "new" | "processing" | "done";
 
 type OrderItem = {
@@ -199,6 +217,202 @@ function AdminImportProductsCsv() {
             </details>
           ) : null}
         </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function AdminProductsManager() {
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"active" | "archive">("active");
+  const [products, setProducts] = useState<AdminProduct[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiGet<AdminProduct[]>("/api/admin/products");
+      setProducts(data);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка загрузки";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    void load();
+  }, [open, load]);
+
+  const activeCount = useMemo(() => products.filter((p) => p.is_active).length, [products]);
+  const archiveCount = useMemo(
+    () => products.filter((p) => !p.is_active).length,
+    [products],
+  );
+
+  const visibleProducts = useMemo(() => {
+    return products.filter((p) => (tab === "active" ? p.is_active : !p.is_active));
+  }, [products, tab]);
+
+  async function setProductActive(product: AdminProduct, isActive: boolean): Promise<void> {
+    setSavingId(product.id);
+    setError(null);
+    try {
+      await apiPut(`/api/admin/products/${product.id}`, {
+        title: product.title,
+        description: product.description,
+        basePrice: product.base_price,
+        isActive,
+      });
+
+      setProducts((prev) =>
+        prev.map((p) => (p.id === product.id ? { ...p, is_active: isActive } : p)),
+      );
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка сохранения";
+      setError(message);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Редактировать товары</div>
+          <div className="mt-1 text-xs text-slate-500">
+            Активные: {activeCount} • Архив: {archiveCount}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? "Закрыть" : "Редактировать"}
+          </button>
+
+          <button
+            type="button"
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!open || loading || savingId !== null}
+            onClick={() => void load()}
+          >
+            Обновить
+          </button>
+        </div>
+      </div>
+
+      {open ? (
+        <>
+          {error ? (
+            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              className={[
+                "rounded-xl px-3 py-2 text-xs font-semibold border",
+                tab === "active"
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-900 hover:bg-slate-50",
+              ].join(" ")}
+              disabled={loading}
+              onClick={() => setTab("active")}
+            >
+              Активные
+            </button>
+            <button
+              type="button"
+              className={[
+                "rounded-xl px-3 py-2 text-xs font-semibold border",
+                tab === "archive"
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-900 hover:bg-slate-50",
+              ].join(" ")}
+              disabled={loading}
+              onClick={() => setTab("archive")}
+            >
+              Архив
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="mt-3 grid gap-3">
+              <div className="h-20 animate-pulse rounded-2xl bg-slate-200" />
+              <div className="h-20 animate-pulse rounded-2xl bg-slate-200" />
+            </div>
+          ) : visibleProducts.length === 0 ? (
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+              Пусто
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-3">
+              {visibleProducts.map((p) => {
+                const isSaving = savingId === p.id;
+                const nextActive = tab === "archive";
+
+                return (
+                  <div
+                    key={p.id}
+                    className="rounded-2xl border border-slate-200 bg-white p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{p.title}</div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {formatRub(p.base_price)}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className={[
+                          "shrink-0 rounded-xl px-3 py-2 text-xs font-semibold",
+                          tab === "active"
+                            ? "bg-rose-600 text-white hover:bg-rose-700"
+                            : "bg-emerald-600 text-white hover:bg-emerald-700",
+                          "disabled:cursor-not-allowed disabled:bg-slate-300",
+                        ].join(" ")}
+                        disabled={loading || isSaving}
+                        onClick={() => void setProductActive(p, nextActive)}
+                      >
+                        {isSaving ? "..." : tab === "active" ? "В архив" : "В активные"}
+                      </button>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {p.inventory.map((inv) => (
+                        <span
+                          key={`${p.id}:${inv.city_slug}`}
+                          className={[
+                            "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                            inv.in_stock
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-slate-100 text-slate-700",
+                          ].join(" ")}
+                        >
+                          {inv.city_slug.toUpperCase()}: {inv.in_stock ? "в наличии" : "нет"}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
       ) : null}
     </Card>
   );
@@ -441,6 +655,7 @@ export function AdminPage() {
       {accessState === "ok" ? (
         <>
           <AdminImportProductsCsv />
+          <AdminProductsManager />
           <AdminOrdersView />
         </>
       ) : null}

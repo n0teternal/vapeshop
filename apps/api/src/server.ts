@@ -109,7 +109,7 @@ await app.register(cors, {
     if (config.corsOrigins === null) return cb(null, true);
     return cb(null, config.corsOrigins.includes(origin));
   },
-  methods: ["GET", "POST", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "OPTIONS"],
   allowedHeaders: ["Content-Type", "x-telegram-init-data", "x-dev-admin"],
   preflight: true,
   optionsSuccessStatus: 204,
