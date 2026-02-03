@@ -37,17 +37,17 @@ function FullscreenGate({
 
 function CatalogSkeleton({ count }: { count: number }) {
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 auto-rows-fr gap-3">
       {Array.from({ length: count }).map((_, idx) => (
         <div
           key={`sk-${idx}`}
-          className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+          className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
         >
           <div className="aspect-[4/3] animate-pulse bg-slate-200" />
-          <div className="space-y-2 p-3">
+          <div className="flex flex-1 flex-col space-y-2 p-3">
             <div className="h-4 w-3/4 animate-pulse rounded bg-slate-200" />
             <div className="h-4 w-1/2 animate-pulse rounded bg-slate-200" />
-            <div className="h-8 w-full animate-pulse rounded-xl bg-slate-200" />
+            <div className="mt-auto h-8 w-full animate-pulse rounded-xl bg-slate-200" />
           </div>
         </div>
       ))}
@@ -63,7 +63,7 @@ function ProductCard({
   onAdd: () => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="relative aspect-[4/3] bg-gradient-to-br from-slate-100 to-slate-200">
         {item.imageUrl ? (
           <img
@@ -91,17 +91,19 @@ function ProductCard({
         </div>
       </div>
 
-      <div className="space-y-2 p-3">
+      <div className="flex flex-1 flex-col gap-2 p-3">
         <div className="text-sm font-semibold">{item.title}</div>
-        <div className="text-sm text-slate-700">{formatPriceRub(item.price)}</div>
-        <button
-          type="button"
-          className="w-full rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-          disabled={!item.inStock}
-          onClick={onAdd}
-        >
-          В корзину
-        </button>
+        <div className="mt-auto">
+          <div className="text-sm text-slate-700">{formatPriceRub(item.price)}</div>
+          <button
+            type="button"
+            className="mt-2 w-full rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={!item.inStock}
+            onClick={onAdd}
+            >
+            В корзину
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -356,7 +358,7 @@ export function CatalogPage() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 auto-rows-fr gap-3">
           {visibleItems.map((item) => (
             <ProductCard
               key={item.id}
