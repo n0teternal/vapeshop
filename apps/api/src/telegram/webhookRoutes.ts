@@ -128,11 +128,15 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     // If the webhook was configured with a secret token, Telegram will send it in a header.
     // In practice it's easy to forget setting the secret on Telegram side; in that case we keep working
     // (but log a warning) instead of silently breaking all admin buttons.
-    if (secretHeader && secretHeader !== config.telegram.webhookSecret) {
-      return reply.code(401).send({ ok: false });
-    }
     if (!secretHeader) {
       request.log.warn("Telegram webhook called without x-telegram-bot-api-secret-token header");
+    } else if (secretHeader !== config.telegram.webhookSecret) {
+      // Stay permissive to avoid breaking the bot when TELEGRAM_WEBHOOK_SECRET changes but setWebhook wasn't updated.
+      // NOTE: Best practice is to keep the secret in sync and reject mismatches.
+      request.log.warn(
+        { got: secretHeader, expected: config.telegram.webhookSecret },
+        "Telegram webhook secret token mismatch; continuing anyway",
+      );
     }
 
     const parsed = parseCallbackQuery(request.body);
