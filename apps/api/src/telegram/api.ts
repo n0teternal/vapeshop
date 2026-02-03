@@ -99,6 +99,21 @@ export async function editMessageText(params: {
   });
 }
 
+export async function deleteMessage(params: {
+  botToken: string;
+  chatId: number;
+  messageId: number;
+}): Promise<void> {
+  await callTelegram<true>({
+    botToken: params.botToken,
+    method: "deleteMessage",
+    body: {
+      chat_id: params.chatId,
+      message_id: params.messageId,
+    },
+  });
+}
+
 export async function answerCallbackQuery(params: {
   botToken: string;
   callbackQueryId: string;
@@ -115,4 +130,3 @@ export async function answerCallbackQuery(params: {
     },
   });
 }
-

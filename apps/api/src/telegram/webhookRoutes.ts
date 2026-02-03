@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { buildOrderTelegramMessage, type CitySlug, type OrderStatus } from "../order/telegramMessage.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
-import { answerCallbackQuery, editMessageText } from "./api.js";
+import { answerCallbackQuery, deleteMessage, editMessageText } from "./api.js";
 
 type CallbackStatus = Exclude<OrderStatus, "new">;
 
@@ -312,6 +312,30 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         : parsed.message;
 
     if (editTarget) {
+      // When order is confirmed as done, remove the message completely from the admin chat.
+      // If deletion fails (e.g. missing rights), fall back to editing the message as before.
+      if (action.kind === "status" && action.status === "done") {
+        try {
+          await deleteMessage({
+            botToken: config.telegram.botToken,
+            chatId: editTarget.chatId,
+            messageId: editTarget.messageId,
+          });
+        } catch (e) {
+          request.log.error({ err: e }, "Failed to delete Telegram message; fallback to edit");
+          try {
+            await editMessageText({
+              botToken: config.telegram.botToken,
+              chatId: editTarget.chatId,
+              messageId: editTarget.messageId,
+              text: telegramMessage.text,
+              replyMarkup: telegramMessage.reply_markup,
+            });
+          } catch (e2) {
+            request.log.error({ err: e2 }, "Failed to edit Telegram message after delete failure");
+          }
+        }
+      } else {
       try {
         await editMessageText({
           botToken: config.telegram.botToken,
@@ -322,6 +346,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         });
       } catch (e) {
         request.log.error({ err: e }, "Failed to edit Telegram message");
+      }
       }
     }
 

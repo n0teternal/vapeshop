@@ -1,9 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import path from "node:path";
 import { z } from "zod";
+import { config } from "../config.js";
 import { HttpError, isHttpError } from "../httpError.js";
 import { importProductsCsv } from "../import/productsCsv.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import { deleteMessage } from "../telegram/api.js";
 import { requireAdmin } from "./requireAdmin.js";
 
 type ApiSuccess<T> = { ok: true; data: T };
@@ -621,7 +623,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           .from("orders")
           .update({ status: parsed.data.status })
           .eq("id", orderId)
-          .select("id,status")
+          .select("id,status,notify_chat_id,notify_message_id")
           .single();
 
         if (error) {
@@ -629,6 +631,23 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
         if (!data) {
           throw new HttpError(404, "NOT_FOUND", "Order not found");
+        }
+
+        if (
+          parsed.data.status === "done" &&
+          typeof (data as any).notify_chat_id === "number" &&
+          typeof (data as any).notify_message_id === "number"
+        ) {
+          try {
+            await deleteMessage({
+              botToken: config.telegram.botToken,
+              chatId: (data as any).notify_chat_id,
+              messageId: (data as any).notify_message_id,
+            });
+          } catch (e) {
+            // Best-effort: status is already updated in DB, so we don't fail the admin action.
+            request.log.error({ err: e }, "Failed to delete Telegram message for done order");
+          }
         }
 
         return reply.code(200).send(ok({ id: data.id, status: data.status }));
