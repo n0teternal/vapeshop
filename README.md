@@ -183,3 +183,6 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 - `/cart`: +/- qty, итог, “Оформить” → POST в API (`/api/order`)
 - `/admin`: в Telegram — реальные данные, вне Telegram — DEV MODE + мок
 - Telegram чат: после заказа сообщение с кнопками, нажатия меняют статус и редактируют сообщение
+
+
+LOL
