@@ -92,7 +92,7 @@ function ProductCard({
       </div>
 
       <div className="flex flex-1 flex-col gap-2 p-3">
-        <div className="text-sm font-semibold">{item.title}</div>
+        <div className="pr-2 text-sm font-semibold truncate">{item.title}</div>
         <div className="mt-auto">
           <div className="text-sm text-slate-700">{formatPriceRub(item.price)}</div>
           <button

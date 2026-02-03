@@ -229,7 +229,7 @@ export function AdminPage() {
         setError(
           e instanceof ApiError
             ? e
-            : new ApiError({ code: "UNKNOWN", message: "??????", status: 0 }),
+            : new ApiError({ code: "UNKNOWN", message: "Error", status: 0 }),
         );
       })
       .finally(() => {
@@ -257,8 +257,8 @@ export function AdminPage() {
         <div className="text-lg font-semibold">Admin</div>
         <div className="mt-1 text-sm text-slate-600">
           {accessState === "ok"
-            ? `?? ????? ??? ${me?.username ? `@${me.username}` : me?.tgUserId} ? ${me?.role}`
-            : "?????? ? ??????? ?????? ??? allowlist ?????????????."}
+            ? `Logged in as ${me?.username ? `@${me.username}` : me?.tgUserId} (role: ${me?.role})`
+            : "Admin access is restricted to allowlist users."}
         </div>
       </div>
 
@@ -268,19 +268,19 @@ export function AdminPage() {
 
       {accessState !== "ok" && accessState !== "loading" ? (
         <Card>
-          <div className="text-sm font-semibold">??? ???????</div>
+          <div className="text-sm font-semibold">No access</div>
           <div className="mt-2 text-sm text-slate-600">
             {accessState === "forbidden"
-              ? "??? tg_user_id ??????????? ? ??????? admins."
+              ? "Your tg_user_id is not in the admins table."
               : accessState === "unauthorized"
-                ? "????? Telegram initData (???????? ????-??? ?????? Telegram)."
-                : "?? ??????? ????????? ??????."}
+                ? "Telegram initData required (open the mini app inside Telegram)."
+                : "Failed to check access."}
           </div>
 
           {!isTelegram && import.meta.env.DEV ? (
             <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              DEV: ????? ???????? bypass (??????): `DEV_ADMIN_TG_USER_ID` + ?????????
-              `x-dev-admin=1` (????? ? dev ?????????? ?????????????).
+              DEV: enable bypass (server): `DEV_ADMIN_TG_USER_ID` + header `x-dev-admin=1` (frontend sends automatically
+              in dev).
             </div>
           ) : null}
         </Card>
