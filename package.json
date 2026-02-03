@@ -9,6 +9,7 @@
     "dev:web": "pnpm -C apps/web dev",
     "dev:api": "pnpm -C apps/api dev",
     "dev": "concurrently -n web,api -c auto \"pnpm dev:web\" \"pnpm dev:api\"",
+    "import:products": "pnpm -C apps/api tsx scripts/import-products-csv.ts",
     "build:web": "pnpm -C apps/web build",
     "build:api": "pnpm -C apps/api build",
     "build": "pnpm build:web && pnpm build:api",
