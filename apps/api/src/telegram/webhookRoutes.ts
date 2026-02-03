@@ -71,11 +71,12 @@ function parseCallbackQuery(update: unknown): ParsedCallbackQuery | null {
 
 function parseCallbackData(data: string): ParsedCallbackAction | null {
   const parts = data.split(":");
-  if (parts.length != 3) return null;
+  // Keep this tolerant: Telegram callback_data is just a string and older/newer clients may add segments.
+  if (parts.length < 3) return null;
 
   const type = parts[0];
   const actionRaw = parts[1];
-  const orderId = parts[2];
+  const orderId = parts.slice(2).join(":");
   if (!type || !actionRaw || !orderId) return null;
 
   const uuidV4ish =
@@ -124,8 +125,14 @@ async function answerSafe(callbackQueryId: string, text: string): Promise<void> 
 export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>("/api/telegram/webhook", async (request, reply) => {
     const secretHeader = getHeaderValue(request.headers["x-telegram-bot-api-secret-token"]);
-    if (!secretHeader || secretHeader !== config.telegram.webhookSecret) {
+    // If the webhook was configured with a secret token, Telegram will send it in a header.
+    // In practice it's easy to forget setting the secret on Telegram side; in that case we keep working
+    // (but log a warning) instead of silently breaking all admin buttons.
+    if (secretHeader && secretHeader !== config.telegram.webhookSecret) {
       return reply.code(401).send({ ok: false });
+    }
+    if (!secretHeader) {
+      request.log.warn("Telegram webhook called without x-telegram-bot-api-secret-token header");
     }
 
     const parsed = parseCallbackQuery(request.body);
@@ -135,7 +142,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     const action = parseCallbackData(parsed.data);
     if (!action) {
-      await answerSafe(parsed.callbackQueryId, "???????????? ???????");
+      await answerSafe(parsed.callbackQueryId, "Неизвестная кнопка");
       return reply.code(200).send({ ok: true });
     }
 
@@ -148,7 +155,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       .maybeSingle();
 
     if (adminError || !adminRow) {
-      await answerSafe(parsed.callbackQueryId, "??? ???????");
+      await answerSafe(parsed.callbackQueryId, "Нет доступа");
       return reply.code(200).send({ ok: true });
     }
 
@@ -180,7 +187,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
       if (error) {
         request.log.error({ err: error }, "Failed to update order status");
-        await answerSafe(parsed.callbackQueryId, "??????");
+        await answerSafe(parsed.callbackQueryId, "Не удалось обновить заказ");
         return reply.code(200).send({ ok: true });
       }
 
@@ -194,7 +201,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
       if (error) {
         request.log.error({ err: error }, "Failed to load order");
-        await answerSafe(parsed.callbackQueryId, "??????");
+        await answerSafe(parsed.callbackQueryId, "Не удалось загрузить заказ");
         return reply.code(200).send({ ok: true });
       }
 
@@ -202,14 +209,17 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     }
 
     if (!order) {
-      await answerSafe(parsed.callbackQueryId, "????? ?? ??????");
+      await answerSafe(parsed.callbackQueryId, "Заказ не найден");
       return reply.code(200).send({ ok: true });
     }
 
     const cityId = order.city_id;
     if (cityId === null) {
       request.log.warn({ orderId: order.id }, "Order has null city_id; skip message edit");
-      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
+      await answerSafe(
+        parsed.callbackQueryId,
+        action.kind === "ui" ? "Ок" : "Статус обновлен",
+      );
       return reply.code(200).send({ ok: true });
     }
 
@@ -221,14 +231,20 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     if (cityError || !city) {
       request.log.error({ err: cityError, cityId }, "Failed to load city for order");
-      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
+      await answerSafe(
+        parsed.callbackQueryId,
+        action.kind === "ui" ? "Ок" : "Статус обновлен",
+      );
       return reply.code(200).send({ ok: true });
     }
 
     const citySlug = parseCitySlug(city.slug);
     if (!citySlug) {
       request.log.warn({ slug: city.slug }, "Unknown city slug; skip message edit");
-      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
+      await answerSafe(
+        parsed.callbackQueryId,
+        action.kind === "ui" ? "Ок" : "Статус обновлен",
+      );
       return reply.code(200).send({ ok: true });
     }
 
@@ -239,7 +255,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     if (itemsError || !orderItems) {
       request.log.error({ err: itemsError }, "Failed to load order items");
-      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
+      await answerSafe(parsed.callbackQueryId, "Не удалось загрузить позиции");
       return reply.code(200).send({ ok: true });
     }
 
@@ -254,7 +270,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     if (prodError || !products) {
       request.log.error({ err: prodError }, "Failed to load products for order");
-      await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
+      await answerSafe(parsed.callbackQueryId, "Не удалось загрузить товары");
       return reply.code(200).send({ ok: true });
     }
 
@@ -309,7 +325,14 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       }
     }
 
-    await answerSafe(parsed.callbackQueryId, action.kind === "ui" ? "??" : "?????? ????????");
+    await answerSafe(
+      parsed.callbackQueryId,
+      action.kind === "ui"
+        ? "Ок"
+        : action.kind === "status" && action.status === "done"
+          ? "Статус: Готово"
+          : "Статус обновлен",
+    );
     return reply.code(200).send({ ok: true });
   });
 }

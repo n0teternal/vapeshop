@@ -63,8 +63,9 @@ export function CartPage() {
   const { isTelegram, webApp } = useTelegram();
 
   const [deliveryMethod, setDeliveryMethod] = useState<"pickup" | "delivery">(
-    "pickup",
+    "delivery",
   );
+  const [address, setAddress] = useState("");
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -73,7 +74,11 @@ export function CartPage() {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   }, [state.cart]);
 
-  const canSubmit = state.cart.length > 0 && state.city !== null && !submitting;
+  const canSubmit =
+    state.cart.length > 0 &&
+    state.city !== null &&
+    !submitting &&
+    (deliveryMethod !== "delivery" || address.trim().length > 0);
 
   async function notify(message: string): Promise<void> {
     if (isTelegram) {
@@ -97,6 +102,20 @@ export function CartPage() {
         return;
       }
 
+      const trimmedAddress = address.trim();
+      if (deliveryMethod === "delivery" && !trimmedAddress) {
+        setSubmitError("Укажите адрес для доставки.");
+        return;
+      }
+
+      const trimmedComment = comment.trim();
+      const fullComment =
+        deliveryMethod === "delivery"
+          ? `Адрес: ${trimmedAddress}${trimmedComment ? `\n${trimmedComment}` : ""}`
+          : trimmedComment
+            ? trimmedComment
+            : null;
+
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
 
       const res = await fetch(`${API_BASE_URL}/api/order`, {
@@ -108,7 +127,7 @@ export function CartPage() {
         body: JSON.stringify({
           citySlug: state.city,
           deliveryMethod,
-          comment: comment.trim() ? comment.trim() : null,
+          comment: fullComment,
           items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
         }),
       });
@@ -129,6 +148,7 @@ export function CartPage() {
       }
 
       dispatch({ type: "cart/clear" });
+      setAddress("");
       setComment("");
 
       await notify(
@@ -238,6 +258,21 @@ export function CartPage() {
               <option value="delivery">Доставка</option>
             </select>
           </label>
+
+          {deliveryMethod === "delivery" ? (
+            <label className="grid gap-1 text-sm">
+              <span className="text-xs font-semibold text-slate-600">
+                Ваш адрес <span className="text-rose-600">*</span>
+              </span>
+              <input
+                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"
+                value={address}
+                disabled={submitting}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Улица, дом, квартира"
+              />
+            </label>
+          ) : null}
 
           <label className="grid gap-1 text-sm">
             <span className="text-xs font-semibold text-slate-600">Комментарий</span>
