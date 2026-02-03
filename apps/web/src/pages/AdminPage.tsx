@@ -1,10 +1,26 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ApiError, apiGet, apiPut } from "../api/client";
+import { ApiError, apiGet, apiPut, apiUpload } from "../api/client";
 
 type AdminMe = {
   tgUserId: number;
   username: string | null;
   role: string;
+};
+
+type ImportProductsCsvResult = {
+  delimiter: ";" | "," | "\t";
+  cities: Array<{ id: number; slug: string; name: string }>;
+  rows: { total: number; valid: number; invalid: number };
+  products: { inserted: number; updated: number };
+  inventoryRows: number;
+  generatedIds: boolean;
+  outputCsv: string | null;
+  errors: Array<{
+    rowNum: number;
+    id: string | null;
+    title: string | null;
+    messages: string[];
+  }>;
 };
 
 type OrderStatus = "new" | "processing" | "done";
@@ -49,6 +65,142 @@ function Card({ children }: { children: ReactNode }) {
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       {children}
     </div>
+  );
+}
+
+function AdminImportProductsCsv() {
+  const [file, setFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ImportProductsCsvResult | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadName, setDownloadName] = useState<string>("products.with_ids.csv");
+
+  useEffect(() => {
+    return () => {
+      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    };
+  }, [downloadUrl]);
+
+  async function runImport(): Promise<void> {
+    if (!file) return;
+
+    setSubmitting(true);
+    setError(null);
+    setResult(null);
+
+    if (downloadUrl) {
+      URL.revokeObjectURL(downloadUrl);
+      setDownloadUrl(null);
+    }
+
+    try {
+      const form = new FormData();
+      form.append("file", file);
+
+      const res = await apiUpload<ImportProductsCsvResult>("/api/admin/import/products", form);
+      setResult(res);
+
+      if (res.outputCsv) {
+        const blob = new Blob([res.outputCsv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        setDownloadUrl(url);
+
+        const base = file.name.replace(/\.csv$/i, "");
+        setDownloadName(`${base || "products"}.with_ids.csv`);
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Import failed";
+      setError(message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Import products (CSV)</div>
+          <div className="mt-1 text-xs text-slate-500">
+            Upload a CSV based on `CUSTOMER_PRODUCTS_TEMPLATE.csv`.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+          disabled={!file || submitting}
+          onClick={() => void runImport()}
+        >
+          {submitting ? "Importing..." : "Import"}
+        </button>
+      </div>
+
+      <div className="mt-3">
+        <input
+          type="file"
+          accept=".csv,text/csv"
+          disabled={submitting}
+          onChange={(e) => {
+            const next = e.target.files?.[0] ?? null;
+            setFile(next);
+            setResult(null);
+            setError(null);
+          }}
+        />
+      </div>
+
+      {error ? (
+        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          {error}
+        </div>
+      ) : null}
+
+      {result ? (
+        <div className="mt-3 space-y-2 text-sm text-slate-700">
+          <div>
+            Rows: total={result.rows.total} valid={result.rows.valid} invalid={result.rows.invalid}
+          </div>
+          <div>
+            Products: inserted={result.products.inserted} updated={result.products.updated}
+          </div>
+          <div>Inventory rows: {result.inventoryRows}</div>
+          {downloadUrl ? (
+            <div>
+              <a
+                href={downloadUrl}
+                download={downloadName}
+                className="text-sm font-semibold text-indigo-700 hover:text-indigo-800"
+              >
+                Download CSV with generated IDs
+              </a>
+            </div>
+          ) : null}
+
+          {result.errors.length > 0 ? (
+            <details className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-900">
+                Errors ({result.errors.length})
+              </summary>
+              <div className="mt-2 space-y-2 text-xs text-slate-800">
+                {result.errors.slice(0, 20).map((er) => (
+                  <div key={`row-${er.rowNum}`}>
+                    <div className="font-semibold">
+                      row {er.rowNum}
+                      {er.title ? ` (${er.title})` : ""}
+                    </div>
+                    <div className="text-slate-700">{er.messages.join("; ")}</div>
+                  </div>
+                ))}
+                {result.errors.length > 20 ? (
+                  <div className="text-slate-600">...and {result.errors.length - 20} more</div>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+    </Card>
   );
 }
 
@@ -286,7 +438,12 @@ export function AdminPage() {
         </Card>
       ) : null}
 
-      {accessState === "ok" ? <AdminOrdersView /> : null}
+      {accessState === "ok" ? (
+        <>
+          <AdminImportProductsCsv />
+          <AdminOrdersView />
+        </>
+      ) : null}
     </div>
   );
 }

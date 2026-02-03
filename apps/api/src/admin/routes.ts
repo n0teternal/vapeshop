@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import path from "node:path";
 import { z } from "zod";
 import { HttpError, isHttpError } from "../httpError.js";
+import { importProductsCsv } from "../import/productsCsv.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { requireAdmin } from "./requireAdmin.js";
 
@@ -434,6 +435,35 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(200).send(
           ok({ productId: parsed.data.productId, citySlug: parsed.data.citySlug }),
         );
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/import/products",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        const file = await request.file();
+        if (!file) {
+          throw new HttpError(400, "BAD_REQUEST", "file is required");
+        }
+
+        const buffer = await file.toBuffer();
+        const maxSize = 5 * 1024 * 1024;
+        if (buffer.byteLength > maxSize) {
+          throw new HttpError(400, "BAD_REQUEST", "File too large (max 5MB)");
+        }
+
+        const csvText = buffer.toString("utf8");
+        const supabase = createServiceSupabaseClient();
+        const result = await importProductsCsv({ supabase, csvText });
+
+        return reply.code(200).send(ok(result));
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
