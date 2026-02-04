@@ -1,6 +1,9 @@
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import fs from "node:fs";
+import path from "node:path";
 import { verifyTelegramInitData } from "./telegram/verifyInitData.js";
 import { createOrder, type CreateOrderPayload } from "./order/createOrder.js";
 import { HttpError, isHttpError } from "./httpError.js";
@@ -123,6 +126,17 @@ await app.register(multipart, {
   limits: {
     fileSize: 5 * 1024 * 1024,
   },
+});
+
+const staticRoot = path.resolve(process.cwd(), "static");
+const staticItemsDir = path.join(staticRoot, "items");
+if (!fs.existsSync(staticItemsDir)) {
+  fs.mkdirSync(staticItemsDir, { recursive: true });
+}
+
+await app.register(fastifyStatic, {
+  root: staticRoot,
+  prefix: "/static/",
 });
 
 await registerAdminRoutes(app);

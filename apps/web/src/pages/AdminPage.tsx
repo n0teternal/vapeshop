@@ -23,6 +23,12 @@ type ImportProductsCsvResult = {
   }>;
 };
 
+type UploadImagesResult = {
+  saved: Array<{ originalName: string; fileName: string; size: number }>;
+  errors: Array<{ originalName: string; message: string }>;
+  baseUrl: string | null;
+};
+
 type AdminProductInventory = {
   city_id: number;
   city_slug: string;
@@ -238,6 +244,82 @@ function AdminImportProductsCsv() {
                 ) : null}
               </div>
             </details>
+          ) : null}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+function AdminUploadImages() {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<UploadImagesResult | null>(null);
+
+  async function handleUpload(files: FileList | null): Promise<void> {
+    const list = files ? Array.from(files) : [];
+    if (list.length === 0) {
+      setError("Не выбран ни один файл");
+      return;
+    }
+
+    setUploading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const form = new FormData();
+      for (const f of list) {
+        form.append("files", f, f.name);
+      }
+
+      const res = await apiUpload<UploadImagesResult>("/api/admin/upload/items", form);
+      setResult(res);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Upload failed";
+      setError(message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Upload product images</div>
+          <div className="mt-1 text-xs text-slate-500">
+            Назови файлы как id/slug товара (например: pods-grape.jpg).
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <input
+          type="file"
+          multiple
+          disabled={uploading}
+          onChange={(e) => {
+            void handleUpload(e.target.files);
+            e.currentTarget.value = "";
+          }}
+        />
+      </div>
+
+      {error ? (
+        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          {error}
+        </div>
+      ) : null}
+
+      {result ? (
+        <div className="mt-3 space-y-2 text-sm text-slate-700">
+          <div>Загружено: {result.saved.length}</div>
+          {result.errors.length > 0 ? (
+            <div className="text-rose-700">Ошибки: {result.errors.length}</div>
+          ) : null}
+          {result.baseUrl ? (
+            <div className="text-xs text-slate-500">Base URL: {result.baseUrl}</div>
           ) : null}
         </div>
       ) : null}
@@ -669,6 +751,7 @@ export function AdminPage() {
       {accessState === "ok" ? (
         <>
           <AdminImportProductsCsv />
+          <AdminUploadImages />
           <AdminProductsManager />
           <AdminOrdersView />
         </>

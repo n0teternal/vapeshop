@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { config } from "../config.js";
@@ -487,6 +488,54 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         });
 
         return reply.code(200).send(ok(result));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/upload/items",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        const files = await request.files();
+        const baseDir = path.resolve(process.cwd(), "static", "items");
+        await fs.mkdir(baseDir, { recursive: true });
+
+        const saved: Array<{ originalName: string; fileName: string; size: number }> = [];
+        const errors: Array<{ originalName: string; message: string }> = [];
+        let received = 0;
+
+        for await (const file of files) {
+          received += 1;
+          const originalName = file.filename || `file_${Date.now()}`;
+          const safeName = sanitizeFileName(originalName) || `file_${Date.now()}`;
+          const target = path.join(baseDir, safeName);
+
+          try {
+            const buffer = await file.toBuffer();
+            await fs.writeFile(target, buffer);
+            saved.push({ originalName, fileName: safeName, size: buffer.byteLength });
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : "Failed to save file";
+            errors.push({ originalName, message });
+          }
+        }
+
+        if (received === 0) {
+          throw new HttpError(400, "BAD_REQUEST", "file is required");
+        }
+
+        return reply.code(200).send(
+          ok({
+            saved,
+            errors,
+            baseUrl: config.productImagesBaseUrl ?? null,
+          }),
+        );
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
