@@ -14,7 +14,7 @@ type ImportProductsCsvResult = {
   products: { inserted: number; updated: number };
   inventoryRows: number;
   generatedIds: boolean;
-  outputCsv: string | null;
+  outputXlsxBase64: string | null;
   errors: Array<{
     rowNum: number;
     id: string | null;
@@ -92,7 +92,7 @@ function AdminImportProductsCsv() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportProductsCsvResult | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [downloadName, setDownloadName] = useState<string>("products.with_ids.csv");
+  const [downloadName, setDownloadName] = useState<string>("products.with_ids.xlsx");
 
   useEffect(() => {
     return () => {
@@ -119,13 +119,20 @@ function AdminImportProductsCsv() {
       const res = await apiUpload<ImportProductsCsvResult>("/api/admin/import/products", form);
       setResult(res);
 
-      if (res.outputCsv) {
-        const blob = new Blob([res.outputCsv], { type: "text/csv;charset=utf-8" });
+      if (res.outputXlsxBase64) {
+        const binary = atob(res.outputXlsxBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
         const url = URL.createObjectURL(blob);
         setDownloadUrl(url);
 
         const base = file.name.replace(/\.csv$/i, "");
-        setDownloadName(`${base || "products"}.with_ids.csv`);
+        setDownloadName(`${base || "products"}.with_ids.xlsx`);
       }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Import failed";
@@ -190,7 +197,7 @@ function AdminImportProductsCsv() {
                 download={downloadName}
                 className="text-sm font-semibold text-indigo-700 hover:text-indigo-800"
               >
-                Download CSV with generated IDs
+                Download XLSX with generated IDs
               </a>
             </div>
           ) : null}

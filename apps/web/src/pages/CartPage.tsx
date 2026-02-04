@@ -269,7 +269,7 @@ export function CartPage() {
                 value={address}
                 disabled={submitting}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder="Улица, дом, квартира"
+                placeholder="Улица, дом"
               />
             </label>
           ) : null}

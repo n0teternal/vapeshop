@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import * as XLSX from "xlsx";
 import type { Database } from "../supabase/serviceClient.js";
 
 export type CsvRowError = {
@@ -23,7 +24,7 @@ export type ImportProductsCsvResult = {
   };
   inventoryRows: number;
   generatedIds: boolean;
-  outputCsv: string | null;
+  outputXlsxBase64: string | null;
   errors: CsvRowError[];
 };
 
@@ -388,14 +389,17 @@ export async function importProductsCsv(params: {
     }
   }
 
-  let outputCsv: string | null = null;
+  let outputXlsxBase64: string | null = null;
   if (generatedIds) {
-    const lines: string[] = [stringifyDelimitedRow(headers, delimiter)];
+    const aoa: string[][] = [headers];
     for (const { record } of inputRecords) {
-      const row = headers.map((h) => record[h] ?? "");
-      lines.push(stringifyDelimitedRow(row, delimiter));
+      aoa.push(headers.map((h) => record[h] ?? ""));
     }
-    outputCsv = lines.join("\n");
+    const sheet = XLSX.utils.aoa_to_sheet(aoa);
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, "products");
+    const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    outputXlsxBase64 = buffer.toString("base64");
   }
 
   return {
@@ -405,8 +409,7 @@ export async function importProductsCsv(params: {
     products: { inserted, updated },
     inventoryRows: parsedInventory.length,
     generatedIds,
-    outputCsv,
+    outputXlsxBase64,
     errors,
   };
 }
-

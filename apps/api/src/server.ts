@@ -9,6 +9,7 @@ import { config } from "./config.js";
 import { createServiceSupabaseClient } from "./supabase/serviceClient.js";
 import { sendMessage } from "./telegram/api.js";
 import { registerTelegramWebhookRoutes } from "./telegram/webhookRoutes.js";
+import { ensureTelegramWebhook } from "./telegram/webhookSetup.js";
 
 type ErrorResponse = {
   ok: false;
@@ -220,3 +221,10 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
 );
 
 await app.listen({ port: config.port, host: config.host });
+
+// Best-effort: keep Telegram webhook configured in production so inline buttons work.
+try {
+  await ensureTelegramWebhook();
+} catch (e) {
+  app.log.error({ err: e }, "Failed to ensure Telegram webhook");
+}
