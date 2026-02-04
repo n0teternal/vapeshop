@@ -266,6 +266,7 @@ function AdminUploadImages() {
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
+  const [filesOpen, setFilesOpen] = useState(false);
 
   const loadFiles = useCallback(async (): Promise<void> => {
     setLoadingFiles(true);
@@ -285,8 +286,9 @@ function AdminUploadImages() {
   }, []);
 
   useEffect(() => {
+    if (!filesOpen) return;
     void loadFiles();
-  }, [loadFiles]);
+  }, [filesOpen, loadFiles]);
 
   async function handleUpload(files: FileList | null): Promise<void> {
     const list = files ? Array.from(files) : [];
@@ -390,74 +392,110 @@ function AdminUploadImages() {
         </div>
       ) : null}
 
-      <div className="mt-4 flex items-center justify-between">
-        <div className="text-sm font-semibold">Файлы</div>
+      <div className="mt-4">
         <button
           type="button"
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 hover:bg-slate-50"
-          disabled={loadingFiles}
-          onClick={() => void loadFiles()}
+          onClick={() => setFilesOpen(true)}
         >
-          Обновить
+          Файлы
         </button>
       </div>
 
-      {listError ? (
-        <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
-          {listError}
-        </div>
-      ) : null}
-
-      {loadingFiles ? (
-        <div className="mt-2 text-xs text-slate-500">Загрузка...</div>
-      ) : files.length === 0 ? (
-        <div className="mt-2 text-xs text-slate-500">Файлов нет</div>
-      ) : (
-        <div className="mt-2 space-y-2">
-          {files.map((f) => (
-            <div
-              key={f.name}
-              className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
-            >
-              {baseUrl ? (
-                <img
-                  src={`${baseUrl}/${encodeURIComponent(f.name)}`}
-                  alt={f.name}
-                  className="h-12 w-12 rounded-lg border border-slate-200 object-cover bg-white"
-                  loading="lazy"
-                />
-              ) : null}
-              <div className="min-w-0 flex-1 truncate">
-                {f.name} • {Math.round(f.size / 1024)} KB
+      {filesOpen ? (
+        <div className="fixed inset-0 z-50 flex items-start justify-center px-4 py-10">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/40"
+            onClick={() => setFilesOpen(false)}
+            aria-label="Закрыть"
+          />
+          <div className="relative w-full max-w-3xl rounded-2xl bg-white p-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-lg font-semibold">Файлы</div>
+                {baseUrl ? (
+                  <div className="mt-1 text-xs text-slate-500">Base URL: {baseUrl}</div>
+                ) : null}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  className="h-8 w-44 rounded-lg border border-slate-200 bg-white px-2 text-xs"
-                  placeholder="Новое имя"
-                  value={renameDrafts[f.name] ?? ""}
-                  onChange={(e) =>
-                    setRenameDrafts((prev) => ({ ...prev, [f.name]: e.target.value }))
-                  }
-                />
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-100"
-                  onClick={() => void handleRename(f.name)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+                  disabled={loadingFiles}
+                  onClick={() => void loadFiles()}
                 >
-                  Переименовать
+                  Обновить
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-700"
-                  onClick={() => void handleDelete(f.name)}
+                  className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                  onClick={() => setFilesOpen(false)}
                 >
-                  Удалить
+                  Закрыть
                 </button>
               </div>
             </div>
-          ))}
+
+            {listError ? (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                {listError}
+              </div>
+            ) : null}
+
+            {loadingFiles ? (
+              <div className="mt-3 text-xs text-slate-500">Загрузка...</div>
+            ) : files.length === 0 ? (
+              <div className="mt-3 text-xs text-slate-500">Файлов нет</div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {files.map((f) => (
+                  <div
+                    key={f.name}
+                    className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+                  >
+                    {baseUrl ? (
+                      <img
+                        src={`${baseUrl}/${encodeURIComponent(f.name)}`}
+                        alt={f.name}
+                        className="h-12 w-12 rounded-lg border border-slate-200 object-cover bg-white"
+                        loading="lazy"
+                      />
+                    ) : null}
+                    <div className="min-w-0 flex-1 truncate">
+                      {f.name} • {Math.round(f.size / 1024)} KB
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        className="h-8 w-44 rounded-lg border border-slate-200 bg-white px-2 text-xs"
+                        placeholder="Новое имя"
+                        value={renameDrafts[f.name] ?? ""}
+                        onChange={(e) =>
+                          setRenameDrafts((prev) => ({ ...prev, [f.name]: e.target.value }))
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-100"
+                        onClick={() => void handleRename(f.name)}
+                      >
+                        Переименовать
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-700"
+                        onClick={() => void handleDelete(f.name)}
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      ) : null}
     </Card>
   );
 }
