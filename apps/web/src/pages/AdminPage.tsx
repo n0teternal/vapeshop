@@ -261,6 +261,7 @@ function AdminUploadImages() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<UploadImagesResult | null>(null);
+  const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [files, setFiles] = useState<UploadedImageFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -270,8 +271,11 @@ function AdminUploadImages() {
     setLoadingFiles(true);
     setListError(null);
     try {
-      const res = await apiGet<{ files: UploadedImageFile[] }>("/api/admin/upload/items");
+      const res = await apiGet<{ files: UploadedImageFile[]; baseUrl: string | null }>(
+        "/api/admin/upload/items",
+      );
       setFiles(res.files);
+      if (res.baseUrl) setBaseUrl(res.baseUrl);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to load files";
       setListError(message);
@@ -303,6 +307,7 @@ function AdminUploadImages() {
 
       const res = await apiUpload<UploadImagesResult>("/api/admin/upload/items", form);
       setResult(res);
+      if (res.baseUrl) setBaseUrl(res.baseUrl);
       await loadFiles();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Upload failed";
@@ -412,8 +417,16 @@ function AdminUploadImages() {
           {files.map((f) => (
             <div
               key={f.name}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+              className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
             >
+              {baseUrl ? (
+                <img
+                  src={`${baseUrl}/${encodeURIComponent(f.name)}`}
+                  alt={f.name}
+                  className="h-12 w-12 rounded-lg border border-slate-200 object-cover bg-white"
+                  loading="lazy"
+                />
+              ) : null}
               <div className="min-w-0 flex-1 truncate">
                 {f.name} • {Math.round(f.size / 1024)} KB
               </div>
