@@ -70,6 +70,8 @@ function errorToResponse(e: unknown): { statusCode: number; body: ApiFailure } {
 }
 
 export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
+  const itemsDir = path.resolve(process.cwd(), "static", "items");
+
   app.get<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
     "/api/admin/me",
     async (request, reply) => {
@@ -485,6 +487,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           supabase,
           csvText,
           imageBaseUrl: useImagePrefix ? config.productImagesBaseUrl : null,
+          imageItemsDir: useImagePrefix ? itemsDir : null,
         });
 
         return reply.code(200).send(ok(result));
@@ -502,8 +505,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         await requireAdmin(request);
 
         const files = await request.files();
-        const baseDir = path.resolve(process.cwd(), "static", "items");
-        await fs.mkdir(baseDir, { recursive: true });
+        await fs.mkdir(itemsDir, { recursive: true });
 
         const saved: Array<{ originalName: string; fileName: string; size: number }> = [];
         const errors: Array<{ originalName: string; message: string }> = [];
@@ -513,7 +515,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           received += 1;
           const originalName = file.filename || `file_${Date.now()}`;
           const safeName = sanitizeFileName(originalName) || `file_${Date.now()}`;
-          const target = path.join(baseDir, safeName);
+          const target = path.join(itemsDir, safeName);
 
           try {
             const buffer = await file.toBuffer();
@@ -537,6 +539,104 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           }),
         );
       } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.get<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/upload/items",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        await fs.mkdir(itemsDir, { recursive: true });
+        const entries = await fs.readdir(itemsDir, { withFileTypes: true });
+        const files: Array<{ name: string; size: number; updatedAt: string }> = [];
+
+        for (const entry of entries) {
+          if (!entry.isFile()) continue;
+          const name = entry.name;
+          if (name === ".gitkeep") continue;
+          const fullPath = path.join(itemsDir, name);
+          const stat = await fs.stat(fullPath);
+          files.push({ name, size: stat.size, updatedAt: stat.mtime.toISOString() });
+        }
+
+        files.sort((a, b) => a.name.localeCompare(b.name));
+        return reply.code(200).send(ok({ files, baseUrl: config.productImagesBaseUrl ?? null }));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.delete<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/upload/items/:name",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const params = request.params as unknown;
+        const parsed = z.object({ name: z.string().min(1) }).safeParse(params);
+        if (!parsed.success) {
+          throw new HttpError(400, "BAD_REQUEST", "Invalid filename");
+        }
+
+        const rawName = parsed.data.name;
+        const safeName = sanitizeFileName(rawName);
+        if (!safeName || safeName !== rawName) {
+          throw new HttpError(400, "BAD_REQUEST", "Invalid filename");
+        }
+
+        const target = path.join(itemsDir, safeName);
+        await fs.rm(target);
+        return reply.code(200).send(ok({ deleted: safeName }));
+      } catch (e) {
+        if (e && typeof e === "object" && "code" in e && (e as { code?: unknown }).code === "ENOENT") {
+          const body = fail("NOT_FOUND", "File not found");
+          return reply.code(404).send(body);
+        }
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/upload/items/rename",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const schema = z.object({
+          from: z.string().min(1),
+          to: z.string().min(1),
+        });
+        const parsed = schema.safeParse(request.body);
+        if (!parsed.success) {
+          throw new HttpError(400, "BAD_REQUEST", "Invalid body");
+        }
+
+        const fromSafe = sanitizeFileName(parsed.data.from);
+        const toSafe = sanitizeFileName(parsed.data.to);
+        if (!fromSafe || !toSafe || fromSafe !== parsed.data.from || toSafe !== parsed.data.to) {
+          throw new HttpError(400, "BAD_REQUEST", "Invalid filename");
+        }
+        if (fromSafe === ".gitkeep" || toSafe === ".gitkeep") {
+          throw new HttpError(400, "BAD_REQUEST", "Invalid filename");
+        }
+
+        const fromPath = path.join(itemsDir, fromSafe);
+        const toPath = path.join(itemsDir, toSafe);
+        await fs.rename(fromPath, toPath);
+
+        return reply.code(200).send(ok({ from: fromSafe, to: toSafe }));
+      } catch (e) {
+        if (e && typeof e === "object" && "code" in e && (e as { code?: unknown }).code === "ENOENT") {
+          const body = fail("NOT_FOUND", "File not found");
+          return reply.code(404).send(body);
+        }
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
       }

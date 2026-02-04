@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import type { Database } from "../supabase/serviceClient.js";
@@ -126,6 +128,10 @@ function parseUuid(value: string): boolean {
   );
 }
 
+function hasFileExtension(value: string): boolean {
+  return /\.[a-z0-9]{2,10}$/i.test(value);
+}
+
 function parseBool(value: string, fallback: boolean): boolean {
   const v = value.trim().toLowerCase();
   if (v.length === 0) return fallback;
@@ -188,6 +194,7 @@ export async function importProductsCsv(params: {
   csvText: string;
   dryRun?: boolean;
   imageBaseUrl?: string | null;
+  imageItemsDir?: string | null;
 }): Promise<ImportProductsCsvResult> {
   const dryRun = params.dryRun === true;
   const imageBaseUrlRaw = params.imageBaseUrl?.trim() ?? "";
@@ -301,8 +308,21 @@ export async function importProductsCsv(params: {
 
       if (!isValidUrl) {
         if (normalizedImageBaseUrl) {
-          const fileName = image_url.replace(/^\/+/, "");
-          image_url = `${normalizedImageBaseUrl}${fileName}`;
+          let fileName = image_url.replace(/^\/+/, "");
+          if (!hasFileExtension(fileName) && params.imageItemsDir) {
+            const base = fileName;
+            const variants = [".jpg", ".jpeg", ".png", ".webp"];
+            for (const ext of variants) {
+              const candidate = base + ext;
+              const fullPath = path.join(params.imageItemsDir, candidate);
+              if (fs.existsSync(fullPath)) {
+                fileName = candidate;
+                break;
+              }
+            }
+          }
+          const encodedName = encodeURIComponent(fileName);
+          image_url = `${normalizedImageBaseUrl}${encodedName}`;
         } else {
           rowMessages.push(`image_url is not a valid URL (got: ${image_url})`);
         }

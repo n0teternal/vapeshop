@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ApiError, apiGet, apiPut, apiUpload } from "../api/client";
+import { ApiError, apiDelete, apiGet, apiPost, apiPut, apiUpload } from "../api/client";
 
 type AdminMe = {
   tgUserId: number;
@@ -27,6 +27,12 @@ type UploadImagesResult = {
   saved: Array<{ originalName: string; fileName: string; size: number }>;
   errors: Array<{ originalName: string; message: string }>;
   baseUrl: string | null;
+};
+
+type UploadedImageFile = {
+  name: string;
+  size: number;
+  updatedAt: string;
 };
 
 type AdminProductInventory = {
@@ -255,6 +261,28 @@ function AdminUploadImages() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<UploadImagesResult | null>(null);
+  const [files, setFiles] = useState<UploadedImageFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
+
+  const loadFiles = useCallback(async (): Promise<void> => {
+    setLoadingFiles(true);
+    setListError(null);
+    try {
+      const res = await apiGet<{ files: UploadedImageFile[] }>("/api/admin/upload/items");
+      setFiles(res.files);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to load files";
+      setListError(message);
+    } finally {
+      setLoadingFiles(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFiles();
+  }, [loadFiles]);
 
   async function handleUpload(files: FileList | null): Promise<void> {
     const list = files ? Array.from(files) : [];
@@ -275,11 +303,44 @@ function AdminUploadImages() {
 
       const res = await apiUpload<UploadImagesResult>("/api/admin/upload/items", form);
       setResult(res);
+      await loadFiles();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Upload failed";
       setError(message);
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleDelete(name: string): Promise<void> {
+    setError(null);
+    try {
+      await apiDelete(`/api/admin/upload/items/${encodeURIComponent(name)}`);
+      await loadFiles();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Delete failed";
+      setError(message);
+    }
+  }
+
+  async function handleRename(from: string): Promise<void> {
+    const next = (renameDrafts[from] ?? "").trim();
+    if (!next) {
+      setError("Введите новое имя файла");
+      return;
+    }
+    setError(null);
+    try {
+      await apiPost("/api/admin/upload/items/rename", { from, to: next });
+      setRenameDrafts((prev) => {
+        const copy = { ...prev };
+        delete copy[from];
+        return copy;
+      });
+      await loadFiles();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Rename failed";
+      setError(message);
     }
   }
 
@@ -323,6 +384,67 @@ function AdminUploadImages() {
           ) : null}
         </div>
       ) : null}
+
+      <div className="mt-4 flex items-center justify-between">
+        <div className="text-sm font-semibold">Файлы</div>
+        <button
+          type="button"
+          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+          disabled={loadingFiles}
+          onClick={() => void loadFiles()}
+        >
+          Обновить
+        </button>
+      </div>
+
+      {listError ? (
+        <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          {listError}
+        </div>
+      ) : null}
+
+      {loadingFiles ? (
+        <div className="mt-2 text-xs text-slate-500">Загрузка...</div>
+      ) : files.length === 0 ? (
+        <div className="mt-2 text-xs text-slate-500">Файлов нет</div>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {files.map((f) => (
+            <div
+              key={f.name}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+            >
+              <div className="min-w-0 flex-1 truncate">
+                {f.name} • {Math.round(f.size / 1024)} KB
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  className="h-8 w-44 rounded-lg border border-slate-200 bg-white px-2 text-xs"
+                  placeholder="Новое имя"
+                  value={renameDrafts[f.name] ?? ""}
+                  onChange={(e) =>
+                    setRenameDrafts((prev) => ({ ...prev, [f.name]: e.target.value }))
+                  }
+                />
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-100"
+                  onClick={() => void handleRename(f.name)}
+                >
+                  Переименовать
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-700"
+                  onClick={() => void handleDelete(f.name)}
+                >
+                  Удалить
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

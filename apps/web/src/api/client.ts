@@ -113,6 +113,10 @@ export function apiPut<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+export function apiDelete<T>(path: string): Promise<T> {
+  return requestJson<T>(path, { method: "DELETE" });
+}
+
 export function apiUpload<T>(path: string, form: FormData): Promise<T> {
   return requestJson<T>(path, {
     method: "POST",
