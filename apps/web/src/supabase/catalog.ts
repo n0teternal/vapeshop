@@ -39,7 +39,7 @@ type InventoryRow = Pick<
 >;
 type ProductRow = Pick<
   Database["public"]["Tables"]["products"]["Row"],
-  "id" | "title" | "description" | "base_price" | "image_url"
+  "id" | "title" | "description" | "base_price" | "image_url" | "is_active"
 >;
 
 function numberFromUnknown(value: unknown): number {
@@ -113,8 +113,9 @@ export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogItem[]> {
 
   const { data: products, error: productsError, status: productsStatus } = await supabase
     .from("products")
-    .select("id,title,description,base_price,image_url")
-    .in("id", productIds);
+    .select("id,title,description,base_price,image_url,is_active")
+    .in("id", productIds)
+    .eq("is_active", true);
 
   if (productsError) {
     throw new SupabaseQueryError({
@@ -125,7 +126,7 @@ export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogItem[]> {
     });
   }
 
-  const prodRows: ProductRow[] = products ?? [];
+  const prodRows: ProductRow[] = (products ?? []).filter((p) => p.is_active === true);
   const byId = new Map<string, ProductRow>(prodRows.map((p) => [p.id, p]));
 
   const items: CatalogItem[] = [];

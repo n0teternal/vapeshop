@@ -536,6 +536,11 @@ function AdminProductsManager() {
   }, []);
 
   useEffect(() => {
+    // Preload so the counts are correct even before opening the editor.
+    void load();
+  }, [load]);
+
+  useEffect(() => {
     if (!open) return;
     void load();
   }, [open, load]);
@@ -545,6 +550,9 @@ function AdminProductsManager() {
     () => products.filter((p) => !p.is_active).length,
     [products],
   );
+  const isInitialLoading = loading && products.length === 0;
+  const activeCountLabel = isInitialLoading ? "..." : String(activeCount);
+  const archiveCountLabel = isInitialLoading ? "..." : String(archiveCount);
 
   const visibleProducts = useMemo(() => {
     return products.filter((p) => (tab === "active" ? p.is_active : !p.is_active));
@@ -578,7 +586,7 @@ function AdminProductsManager() {
         <div>
           <div className="text-sm font-semibold">Редактировать товары</div>
           <div className="mt-1 text-xs text-slate-500">
-            Активные: {activeCount} • Архив: {archiveCount}
+            Активные: {activeCountLabel} • Архив: {archiveCountLabel}
           </div>
         </div>
 
