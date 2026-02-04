@@ -88,6 +88,7 @@ function Card({ children }: { children: ReactNode }) {
 
 function AdminImportProductsCsv() {
   const [file, setFile] = useState<File | null>(null);
+  const [useImagePrefix, setUseImagePrefix] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportProductsCsvResult | null>(null);
@@ -116,7 +117,11 @@ function AdminImportProductsCsv() {
       const form = new FormData();
       form.append("file", file);
 
-      const res = await apiUpload<ImportProductsCsvResult>("/api/admin/import/products", form);
+      const query = useImagePrefix ? "?imageMode=filename" : "";
+      const res = await apiUpload<ImportProductsCsvResult>(
+        `/api/admin/import/products${query}`,
+        form,
+      );
       setResult(res);
 
       if (res.outputXlsxBase64) {
@@ -174,6 +179,17 @@ function AdminImportProductsCsv() {
           }}
         />
       </div>
+
+      <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-600">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-slate-300"
+          checked={useImagePrefix}
+          disabled={submitting}
+          onChange={(e) => setUseImagePrefix(e.target.checked)}
+        />
+        image_url = имя файла (добавить префикс)
+      </label>
 
       {error ? (
         <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">

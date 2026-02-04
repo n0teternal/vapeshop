@@ -450,6 +450,14 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       try {
         await requireAdmin(request);
 
+        const querySchema = z.object({
+          imageMode: z.enum(["filename"]).optional(),
+        });
+        const parsedQuery = querySchema.safeParse(request.query);
+        if (!parsedQuery.success) {
+          throw new HttpError(400, "BAD_REQUEST", "Invalid query");
+        }
+
         const file = await request.file();
         if (!file) {
           throw new HttpError(400, "BAD_REQUEST", "file is required");
@@ -463,7 +471,20 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
 
         const csvText = buffer.toString("utf8");
         const supabase = createServiceSupabaseClient();
-        const result = await importProductsCsv({ supabase, csvText });
+        const useImagePrefix = parsedQuery.data.imageMode === "filename";
+        if (useImagePrefix && !config.productImagesBaseUrl) {
+          throw new HttpError(
+            400,
+            "BAD_REQUEST",
+            "PRODUCT_IMAGES_BASE_URL is not configured on server",
+          );
+        }
+
+        const result = await importProductsCsv({
+          supabase,
+          csvText,
+          imageBaseUrl: useImagePrefix ? config.productImagesBaseUrl : null,
+        });
 
         return reply.code(200).send(ok(result));
       } catch (e) {

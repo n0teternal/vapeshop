@@ -187,8 +187,22 @@ export async function importProductsCsv(params: {
   supabase: SupabaseClient<Database>;
   csvText: string;
   dryRun?: boolean;
+  imageBaseUrl?: string | null;
 }): Promise<ImportProductsCsvResult> {
   const dryRun = params.dryRun === true;
+  const imageBaseUrlRaw = params.imageBaseUrl?.trim() ?? "";
+  let normalizedImageBaseUrl: string | null = null;
+  if (imageBaseUrlRaw) {
+    try {
+      const url = new URL(imageBaseUrlRaw);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("Invalid protocol");
+      }
+      normalizedImageBaseUrl = imageBaseUrlRaw.replace(/\/+$/, "") + "/";
+    } catch {
+      throw new Error(`imageBaseUrl is not a valid URL: ${imageBaseUrlRaw}`);
+    }
+  }
 
   const delimiter = detectDelimiter(params.csvText);
   const table = parseDelimited(params.csvText, delimiter);
@@ -275,13 +289,23 @@ export async function importProductsCsv(params: {
     const description = descriptionRaw.length > 0 ? descriptionRaw : null;
 
     const imageUrlRaw = (record["image_url"] ?? "").trim();
-    const image_url = imageUrlRaw.length > 0 ? imageUrlRaw : null;
+    let image_url: string | null = imageUrlRaw.length > 0 ? imageUrlRaw : null;
     if (image_url) {
+      let isValidUrl = false;
       try {
-        // eslint-disable-next-line no-new
-        new URL(image_url);
+        const u = new URL(image_url);
+        isValidUrl = u.protocol === "http:" || u.protocol === "https:";
       } catch {
-        rowMessages.push(`image_url is not a valid URL (got: ${image_url})`);
+        isValidUrl = false;
+      }
+
+      if (!isValidUrl) {
+        if (normalizedImageBaseUrl) {
+          const fileName = image_url.replace(/^\/+/, "");
+          image_url = `${normalizedImageBaseUrl}${fileName}`;
+        } else {
+          rowMessages.push(`image_url is not a valid URL (got: ${image_url})`);
+        }
       }
     }
 

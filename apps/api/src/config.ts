@@ -22,6 +22,7 @@ export type AppConfig = {
     chatIdVvo: string | null;
     chatIdBlg: string | null;
   };
+  productImagesBaseUrl: string | null;
   dev: {
     adminTgUserId: number | null;
   };
@@ -127,6 +128,7 @@ export const config: AppConfig = (() => {
       chatIdVvo: readEnv("TELEGRAM_CHAT_ID_VVO"),
       chatIdBlg: readEnv("TELEGRAM_CHAT_ID_BLG"),
     },
+    productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {
       adminTgUserId: isDev ? parseOptionalAdminUserId() : null,
     },
