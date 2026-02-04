@@ -452,43 +452,56 @@ function AdminUploadImages() {
                 {files.map((f) => (
                   <div
                     key={f.name}
-                    className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+                    className="grid grid-cols-[1fr_128px] gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-[1fr_200px]"
                   >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-900">
+                        {f.name}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        {Math.round(f.size / 1024)} KB
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <input
+                          className="h-8 w-44 rounded-lg border border-slate-200 bg-white px-2 text-xs"
+                          placeholder="Новое имя"
+                          value={renameDrafts[f.name] ?? ""}
+                          onChange={(e) =>
+                            setRenameDrafts((prev) => ({ ...prev, [f.name]: e.target.value }))
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-100"
+                          onClick={() => void handleRename(f.name)}
+                        >
+                          Переименовать
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-700"
+                          onClick={() => void handleDelete(f.name)}
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    </div>
+
                     {baseUrl ? (
-                      <img
-                        src={`${baseUrl}/${encodeURIComponent(f.name)}`}
-                        alt={f.name}
-                        className="h-12 w-12 rounded-lg border border-slate-200 object-cover bg-white"
-                        loading="lazy"
-                      />
-                    ) : null}
-                    <div className="min-w-0 flex-1 truncate">
-                      {f.name} • {Math.round(f.size / 1024)} KB
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        className="h-8 w-44 rounded-lg border border-slate-200 bg-white px-2 text-xs"
-                        placeholder="Новое имя"
-                        value={renameDrafts[f.name] ?? ""}
-                        onChange={(e) =>
-                          setRenameDrafts((prev) => ({ ...prev, [f.name]: e.target.value }))
-                        }
-                      />
-                      <button
-                        type="button"
-                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-100"
-                        onClick={() => void handleRename(f.name)}
-                      >
-                        Переименовать
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-700"
-                        onClick={() => void handleDelete(f.name)}
-                      >
-                        Удалить
-                      </button>
-                    </div>
+                      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                        <img
+                          src={`${baseUrl}/${encodeURIComponent(f.name)}`}
+                          alt={f.name}
+                          className="aspect-square w-full object-cover"
+                          loading="lazy"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex aspect-square items-center justify-center rounded-xl border border-slate-200 bg-white text-[10px] text-slate-500">
+                        no preview
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
