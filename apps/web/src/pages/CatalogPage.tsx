@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
-import { useTelegram } from "../telegram/TelegramProvider";
 import { isSupabaseConfigured } from "../supabase/client";
 import { fetchCatalog, type CatalogItem, SupabaseQueryError } from "../supabase/catalog";
 
@@ -23,11 +22,11 @@ function FullscreenGate({
   children: ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1f2328] px-4">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#252a31] p-6 shadow-sm">
         <div className="text-lg font-semibold">{title}</div>
         {description ? (
-          <div className="mt-2 text-sm text-slate-600">{description}</div>
+          <div className="mt-2 text-sm text-slate-400">{description}</div>
         ) : null}
         <div className="mt-6">{children}</div>
       </div>
@@ -41,13 +40,13 @@ function CatalogSkeleton({ count }: { count: number }) {
       {Array.from({ length: count }).map((_, idx) => (
         <div
           key={`sk-${idx}`}
-          className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+          className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#252a31] shadow-sm"
         >
-          <div className="aspect-[4/3] animate-pulse bg-slate-200" />
+          <div className="aspect-[4/3] animate-pulse bg-slate-700/60" />
           <div className="flex flex-1 flex-col space-y-2 p-3">
-            <div className="h-4 w-3/4 animate-pulse rounded bg-slate-200" />
-            <div className="h-4 w-1/2 animate-pulse rounded bg-slate-200" />
-            <div className="mt-auto h-8 w-full animate-pulse rounded-xl bg-slate-200" />
+            <div className="h-4 w-3/4 animate-pulse rounded bg-slate-700/60" />
+            <div className="h-4 w-1/2 animate-pulse rounded bg-slate-700/60" />
+            <div className="mt-auto h-8 w-full animate-pulse rounded-xl bg-slate-700/60" />
           </div>
         </div>
       ))}
@@ -63,8 +62,8 @@ function ProductCard({
   onAdd: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="relative aspect-[4/3] bg-gradient-to-br from-slate-100 to-slate-200">
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#252a31] shadow-sm">
+      <div className="relative aspect-[4/3] bg-gradient-to-br from-[#20252b] to-[#2f353d]">
         {item.imageUrl ? (
           <img
             src={item.imageUrl}
@@ -74,7 +73,7 @@ function ProductCard({
           />
         ) : (
           <div className="flex h-full items-end justify-between p-3">
-            <span className="text-xs font-semibold text-slate-600">Фото</span>
+            <span className="text-xs font-semibold text-slate-400">Фото</span>
           </div>
         )}
 
@@ -84,7 +83,7 @@ function ProductCard({
               в наличии
             </span>
           ) : (
-            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+            <span className="rounded-full bg-slate-700/60 px-2 py-0.5 text-[10px] font-semibold text-slate-300">
               нет
             </span>
           )}
@@ -94,10 +93,10 @@ function ProductCard({
       <div className="flex flex-1 flex-col gap-2 p-3">
         <div className="pr-2 text-sm font-semibold line-clamp-2">{item.title}</div>
         <div className="mt-auto">
-          <div className="text-sm text-slate-700">{formatPriceRub(item.price)}</div>
+          <div className="text-sm text-slate-300">{formatPriceRub(item.price)}</div>
           <button
             type="button"
-            className="mt-2 w-full rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="mt-2 w-full rounded-xl bg-[#2f80ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2370e3] disabled:cursor-not-allowed disabled:bg-slate-600"
             disabled={!item.inStock}
             onClick={onAdd}
             >
@@ -122,9 +121,6 @@ function mapMockCatalog(): CatalogItem[] {
 
 export function CatalogPage() {
   const { state, dispatch } = useAppState();
-  const { isTelegram, webApp } = useTelegram();
-
-  const [exitHint, setExitHint] = useState<string | null>(null);
   const [onlyInStock, setOnlyInStock] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -146,7 +142,6 @@ export function CatalogPage() {
 
   useEffect(() => {
     if (!supabaseEnabled) return;
-    if (!state.isAdultConfirmed) return;
     if (!state.city) return;
 
     let cancelled = false;
@@ -211,54 +206,11 @@ export function CatalogPage() {
     return () => {
       cancelled = true;
     };
-  }, [state.isAdultConfirmed, state.city, supabaseEnabled, reloadToken]);
+  }, [state.city, supabaseEnabled, reloadToken]);
 
   const visibleItems = useMemo(() => {
     return onlyInStock ? items.filter((x) => x.inStock) : items;
   }, [items, onlyInStock]);
-
-  if (!state.isAdultConfirmed) {
-    return (
-      <FullscreenGate
-        title="Контент 18+"
-        description="Подтвердите, что вам исполнилось 18 лет, чтобы продолжить."
-      >
-        <div className="grid gap-3">
-          <button
-            type="button"
-            className="w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700"
-            onClick={() => dispatch({ type: "adult/confirm" })}
-          >
-            Мне 18+
-          </button>
-          <button
-            type="button"
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-            onClick={() => {
-              if (isTelegram) {
-                webApp.close();
-                return;
-              }
-
-              if (window.opener) {
-                window.close();
-                return;
-              }
-
-              setExitHint("Нельзя закрыть окно автоматически. Закройте вкладку вручную.");
-            }}
-          >
-            Выйти
-          </button>
-          {exitHint ? (
-            <div className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              {exitHint}
-            </div>
-          ) : null}
-        </div>
-      </FullscreenGate>
-    );
-  }
 
   if (!state.city) {
     return (
@@ -294,7 +246,7 @@ export function CatalogPage() {
         </div>
         <button
           type="button"
-          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 hover:bg-slate-50"
+          className="rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#1f2328]"
           onClick={() => dispatch({ type: "city/clear" })}
         >
           Сменить город
@@ -310,11 +262,11 @@ export function CatalogPage() {
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
-        <label className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-[#252a31] px-4 py-3">
+        <label className="flex items-center gap-2 text-sm font-semibold text-slate-100">
           <input
             type="checkbox"
-            className="h-4 w-4 rounded border-slate-300 text-indigo-600"
+            className="h-4 w-4 rounded border-slate-600 text-[#2f80ff]"
             checked={onlyInStock}
             onChange={(e) => setOnlyInStock(e.target.checked)}
           />
@@ -330,7 +282,7 @@ export function CatalogPage() {
           </div>
           <div className="mt-1 text-xs text-rose-800">{error.message}</div>
           {import.meta.env.DEV && error.devDetails ? (
-            <div className="mt-2 rounded-xl border border-rose-200 bg-white/60 px-3 py-2 font-mono text-[11px] text-rose-900">
+            <div className="mt-2 rounded-xl border border-rose-200 bg-[#1f2328] px-3 py-2 font-mono text-[11px] text-rose-900">
               <div>{error.devDetails}</div>
               <div className="mt-1 text-rose-800">
                 DEV: выполните `supabase/schema.sql`, затем `supabase/seed.sql` в Supabase SQL Editor. Если
@@ -351,9 +303,9 @@ export function CatalogPage() {
       {supabaseEnabled && loading ? (
         <CatalogSkeleton count={6} />
       ) : visibleItems.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center">
+        <div className="rounded-2xl border border-white/10 bg-[#252a31] p-6 text-center">
           <div className="text-lg font-semibold">Нет товаров</div>
-          <div className="mt-2 text-sm text-slate-600">
+          <div className="mt-2 text-sm text-slate-400">
             Попробуйте отключить фильтр или выберите другой город.
           </div>
         </div>

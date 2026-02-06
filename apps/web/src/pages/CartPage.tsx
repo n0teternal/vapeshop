@@ -164,9 +164,9 @@ export function CartPage() {
 
   if (state.cart.length === 0) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center">
+      <div className="rounded-2xl border border-white/10 bg-[#252a31] p-6 text-center">
         <div className="text-lg font-semibold">Корзина пуста</div>
-        <div className="mt-2 text-sm text-slate-600">
+        <div className="mt-2 text-sm text-slate-400">
           Добавьте товары из каталога.
         </div>
       </div>
@@ -181,12 +181,12 @@ export function CartPage() {
         {state.cart.map((item) => (
           <div
             key={item.productId}
-            className="rounded-2xl border border-slate-200 bg-white p-4"
+            className="rounded-2xl border border-white/10 bg-[#252a31] p-4"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold">{item.title}</div>
-                <div className="mt-1 text-xs text-slate-600">
+                <div className="mt-1 text-xs text-slate-400">
                   {formatPriceRub(item.price)} / шт
                 </div>
               </div>
@@ -205,7 +205,7 @@ export function CartPage() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="h-9 w-9 rounded-xl border border-white/10 bg-[#252a31] text-sm font-semibold hover:bg-[#303743] disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={submitting}
                   onClick={() =>
                     dispatch({ type: "cart/dec", productId: item.productId })
@@ -218,7 +218,7 @@ export function CartPage() {
                 </div>
                 <button
                   type="button"
-                  className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="h-9 w-9 rounded-xl border border-white/10 bg-[#252a31] text-sm font-semibold hover:bg-[#303743] disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={submitting}
                   onClick={() =>
                     dispatch({ type: "cart/inc", productId: item.productId })
@@ -235,19 +235,19 @@ export function CartPage() {
         ))}
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4">
         <div className="flex items-center justify-between">
-          <div className="text-sm text-slate-600">Итого</div>
+          <div className="text-sm text-slate-400">Итого</div>
           <div className="text-lg font-semibold">{formatPriceRub(total)}</div>
         </div>
 
         <div className="mt-4 grid gap-3">
           <label className="grid gap-1 text-sm">
-            <span className="text-xs font-semibold text-slate-600">
+            <span className="text-xs font-semibold text-slate-400">
               Способ получения
             </span>
             <select
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"
+              className="h-10 rounded-xl border border-white/10 bg-[#252a31] px-3 text-sm"
               value={deliveryMethod}
               disabled={submitting}
               onChange={(e) =>
@@ -261,11 +261,11 @@ export function CartPage() {
 
           {deliveryMethod === "delivery" ? (
             <label className="grid gap-1 text-sm">
-              <span className="text-xs font-semibold text-slate-600">
+              <span className="text-xs font-semibold text-slate-400">
                 Ваш адрес <span className="text-rose-600">*</span>
               </span>
               <input
-                className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"
+                className="h-10 rounded-xl border border-white/10 bg-[#252a31] px-3 text-sm"
                 value={address}
                 disabled={submitting}
                 onChange={(e) => setAddress(e.target.value)}
@@ -275,9 +275,9 @@ export function CartPage() {
           ) : null}
 
           <label className="grid gap-1 text-sm">
-            <span className="text-xs font-semibold text-slate-600">Комментарий</span>
+            <span className="text-xs font-semibold text-slate-400">Комментарий</span>
             <textarea
-              className="min-h-20 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="min-h-20 rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-sm"
               value={comment}
               disabled={submitting}
               onChange={(e) => setComment(e.target.value)}
@@ -294,7 +294,7 @@ export function CartPage() {
 
         <button
           type="button"
-          className="mt-4 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="mt-4 w-full rounded-xl bg-[#2f80ff] px-4 py-3 text-sm font-semibold text-white hover:bg-[#2370e3] disabled:cursor-not-allowed disabled:bg-slate-600"
           disabled={!canSubmit}
           onClick={() => void submitOrder()}
         >
