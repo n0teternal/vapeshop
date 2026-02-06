@@ -62,49 +62,59 @@ function ProductCard({
   onAdd: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#252a31] shadow-sm">
-      <div className="relative aspect-[4/3] bg-gradient-to-br from-[#20252b] to-[#2f353d]">
+    <article className="flex h-full flex-col gap-4">
+      <div className="relative overflow-hidden rounded-[26px] border border-white/10">
         {item.imageUrl ? (
           <img
             src={item.imageUrl}
             alt={item.title}
             loading="lazy"
-            className="h-full w-full object-cover"
+            className="h-[260px] w-full rounded-[26px] object-cover"
           />
         ) : (
-          <div className="flex h-full items-end justify-between p-3">
-            <span className="text-xs font-semibold text-slate-400">Фото</span>
+          <div className="flex h-[260px] w-full items-center justify-center rounded-[26px] bg-[#2b3139]">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Photo</div>
           </div>
         )}
 
-        <div className="absolute bottom-3 right-3">
-          {item.inStock ? (
-            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
-              в наличии
-            </span>
-          ) : (
-            <span className="rounded-full bg-slate-700/60 px-2 py-0.5 text-[10px] font-semibold text-slate-300">
-              нет
-            </span>
-          )}
-        </div>
+        <button
+          type="button"
+          aria-label="Favorite"
+          className="absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/35 text-white backdrop-blur-sm"
+        >
+          <svg viewBox="0 0 24 24" className="block h-5 w-5" aria-hidden="true">
+            <path
+              d="M12 20.6c-.3 0-.6-.1-.8-.3l-1.3-1.1C6.1 16 4 14.1 4 11.5 4 9.3 5.7 7.6 7.9 7.6c1.3 0 2.5.6 3.3 1.5.8-.9 2-1.5 3.3-1.5 2.2 0 3.9 1.7 3.9 3.9 0 2.6-2.1 4.5-5.9 7.7l-1.3 1.1c-.2.2-.5.3-.8.3Z"
+              className="fill-white"
+            />
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          aria-label="Add to cart"
+          className="absolute bottom-3 right-3 z-10 grid h-12 w-12 place-items-center rounded-full bg-white text-[#10151d] shadow-[0_10px_24px_rgba(0,0,0,0.45)] disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
+          disabled={!item.inStock}
+          onClick={onAdd}
+        >
+          <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+            <path
+              d="M7 7.5A5 5 0 0 1 17 7.5v.5h1.2c.8 0 1.4.6 1.4 1.4L18.8 19A2 2 0 0 1 16.8 21H7.2a2 2 0 0 1-2-2L4.4 9.4c0-.8.6-1.4 1.4-1.4H7zm2 0V8h6v-.5a3 3 0 1 0-6 0"
+              className="fill-current"
+            />
+          </svg>
+        </button>
       </div>
 
-      <div className="flex flex-1 flex-col gap-2 p-3">
-        <div className="pr-2 text-sm font-semibold line-clamp-2">{item.title}</div>
-        <div className="mt-auto">
-          <div className="text-sm text-slate-300">{formatPriceRub(item.price)}</div>
-          <button
-            type="button"
-            className="mt-2 w-full rounded-xl bg-[#2f80ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2370e3] disabled:cursor-not-allowed disabled:bg-slate-600"
-            disabled={!item.inStock}
-            onClick={onAdd}
-            >
-            В корзину
-          </button>
+      <div className="px-1 pb-1">
+        <div className="text-[clamp(1.15rem,4.5vw,1.45rem)] font-black leading-none text-white">
+          {formatPriceRub(item.price)}
+        </div>
+        <div className="mt-2 line-clamp-2 min-h-[2.6em] text-[clamp(0.86rem,3.25vw,1rem)] font-normal leading-snug text-slate-200">
+          {item.title}
         </div>
       </div>
-    </div>
+    </article>
   );
 }
 
