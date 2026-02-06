@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, apiUpload } from "../api/client";
 
 type AdminMe = {
@@ -214,7 +214,7 @@ function AdminImportProductsCsv() {
           disabled={submitting}
           onChange={(e) => setUseImagePrefix(e.target.checked)}
         />
-        image_url = РёРјСЏ С„Р°Р№Р»Р° (РґРѕР±Р°РІРёС‚СЊ РїСЂРµС„РёРєСЃ)
+        image_url = имя файла (добавить префикс)
       </label>
 
       {error ? (
@@ -307,7 +307,7 @@ function AdminUploadImages() {
   async function handleUpload(files: FileList | null): Promise<void> {
     const list = files ? Array.from(files) : [];
     if (list.length === 0) {
-      setError("РќРµ РІС‹Р±СЂР°РЅ РЅРё РѕРґРёРЅ С„Р°Р№Р»");
+      setError("Не выбран ни один файл");
       return;
     }
 
@@ -347,7 +347,7 @@ function AdminUploadImages() {
   async function handleRename(from: string): Promise<void> {
     const next = (renameDrafts[from] ?? "").trim();
     if (!next) {
-      setError("Р’РІРµРґРёС‚Рµ РЅРѕРІРѕРµ РёРјСЏ С„Р°Р№Р»Р°");
+      setError("Введите новое имя файла");
       return;
     }
     setError(null);
@@ -371,7 +371,7 @@ function AdminUploadImages() {
         <div>
           <div className="text-sm font-semibold">Upload product images</div>
           <div className="mt-1 text-xs text-slate-500">
-            РќР°Р·РѕРІРё С„Р°Р№Р»С‹ РєР°Рє id/slug С‚РѕРІР°СЂР° (РЅР°РїСЂРёРјРµСЂ: pods-grape.jpg).
+            Назови файлы как id/slug товара (например: pods-grape.jpg).
           </div>
         </div>
       </div>
@@ -396,9 +396,9 @@ function AdminUploadImages() {
 
       {result ? (
         <div className="mt-3 space-y-2 text-sm text-slate-700">
-          <div>Р—Р°РіСЂСѓР¶РµРЅРѕ: {result.saved.length}</div>
+          <div>Загружено: {result.saved.length}</div>
           {result.errors.length > 0 ? (
-            <div className="text-rose-700">РћС€РёР±РєРё: {result.errors.length}</div>
+            <div className="text-rose-700">Ошибки: {result.errors.length}</div>
           ) : null}
           {result.baseUrl ? (
             <div className="text-xs text-slate-500">Base URL: {result.baseUrl}</div>
@@ -412,7 +412,7 @@ function AdminUploadImages() {
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 hover:bg-slate-50"
           onClick={() => setFilesOpen(true)}
         >
-          Р¤Р°Р№Р»С‹
+          Файлы
         </button>
       </div>
 
@@ -422,12 +422,12 @@ function AdminUploadImages() {
             type="button"
             className="absolute inset-0 bg-slate-900/40"
             onClick={() => setFilesOpen(false)}
-            aria-label="Р—Р°РєСЂС‹С‚СЊ"
+            aria-label="Закрыть"
           />
           <div className="relative w-full max-w-3xl rounded-2xl bg-white p-4 shadow-xl">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-lg font-semibold">Р¤Р°Р№Р»С‹</div>
+                <div className="text-lg font-semibold">Файлы</div>
                 {baseUrl ? (
                   <div className="mt-1 text-xs text-slate-500">Base URL: {baseUrl}</div>
                 ) : null}
@@ -439,14 +439,14 @@ function AdminUploadImages() {
                   disabled={loadingFiles}
                   onClick={() => void loadFiles()}
                 >
-                  РћР±РЅРѕРІРёС‚СЊ
+                  Обновить
                 </button>
                 <button
                   type="button"
                   className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
                   onClick={() => setFilesOpen(false)}
                 >
-                  Р—Р°РєСЂС‹С‚СЊ
+                  Закрыть
                 </button>
               </div>
             </div>
@@ -458,9 +458,9 @@ function AdminUploadImages() {
             ) : null}
 
             {loadingFiles ? (
-              <div className="mt-3 text-xs text-slate-500">Р—Р°РіСЂСѓР·РєР°...</div>
+              <div className="mt-3 text-xs text-slate-500">Загрузка...</div>
             ) : files.length === 0 ? (
-              <div className="mt-3 text-xs text-slate-500">Р¤Р°Р№Р»РѕРІ РЅРµС‚</div>
+              <div className="mt-3 text-xs text-slate-500">Файлов нет</div>
             ) : (
               <div className="mt-3 space-y-2">
                 {files.map((f) => (
@@ -479,7 +479,7 @@ function AdminUploadImages() {
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <input
                           className="h-8 w-44 rounded-lg border border-slate-200 bg-white px-2 text-xs"
-                          placeholder="РќРѕРІРѕРµ РёРјСЏ"
+                          placeholder="Новое имя"
                           value={renameDrafts[f.name] ?? ""}
                           onChange={(e) =>
                             setRenameDrafts((prev) => ({ ...prev, [f.name]: e.target.value }))
@@ -490,14 +490,14 @@ function AdminUploadImages() {
                           className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-900 hover:bg-slate-100"
                           onClick={() => void handleRename(f.name)}
                         >
-                          РџРµСЂРµРёРјРµРЅРѕРІР°С‚СЊ
+                          Переименовать
                         </button>
                         <button
                           type="button"
                           className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-700"
                           onClick={() => void handleDelete(f.name)}
                         >
-                          РЈРґР°Р»РёС‚СЊ
+                          Удалить
                         </button>
                       </div>
                     </div>
@@ -548,7 +548,7 @@ function AdminProductsManager() {
       setActiveCount(data.activeCount);
       setArchiveCount(data.archiveCount);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё";
+      const message = e instanceof Error ? e.message : "Ошибка загрузки";
       setError(message);
     } finally {
       setLoading(false);
@@ -561,9 +561,9 @@ function AdminProductsManager() {
   }, [open, tab, load]);
 
   const activeCountLabel =
-    activeCount === null ? (loading ? "..." : "вЂ”") : String(activeCount);
+    activeCount === null ? (loading ? "..." : "—") : String(activeCount);
   const archiveCountLabel =
-    archiveCount === null ? (loading ? "..." : "вЂ”") : String(archiveCount);
+    archiveCount === null ? (loading ? "..." : "—") : String(archiveCount);
 
   async function setProductActive(product: AdminProduct, isActive: boolean): Promise<void> {
     setSavingId(product.id);
@@ -586,7 +586,7 @@ function AdminProductsManager() {
         return isActive ? Math.max(0, prev - 1) : prev + 1;
       });
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "РћС€РёР±РєР° СЃРѕС…СЂР°РЅРµРЅРёСЏ";
+      const message = e instanceof Error ? e.message : "Ошибка сохранения";
       setError(message);
     } finally {
       setSavingId(null);
@@ -599,7 +599,7 @@ function AdminProductsManager() {
         <div>
           <div className="text-sm font-semibold">Manage products</div>
           <div className="mt-1 text-xs text-slate-500">
-            РђРєС‚РёРІРЅС‹Рµ: {activeCountLabel} вЂў РђСЂС…РёРІ: {archiveCountLabel}
+            Активные: {activeCountLabel} • Архив: {archiveCountLabel}
           </div>
         </div>
 
@@ -609,7 +609,7 @@ function AdminProductsManager() {
             className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
             onClick={() => setOpen((v) => !v)}
           >
-            {open ? "Р—Р°РєСЂС‹С‚СЊ" : "Р РµРґР°РєС‚РёСЂРѕРІР°С‚СЊ"}
+            {open ? "Закрыть" : "Редактировать"}
           </button>
 
           <button
@@ -618,7 +618,7 @@ function AdminProductsManager() {
             disabled={!open || loading || savingId !== null}
             onClick={() => void load()}
           >
-            РћР±РЅРѕРІРёС‚СЊ
+            Обновить
           </button>
         </div>
       </div>
@@ -643,7 +643,7 @@ function AdminProductsManager() {
               disabled={loading}
               onClick={() => setTab("active")}
             >
-              РђРєС‚РёРІРЅС‹Рµ
+              Активные
             </button>
             <button
               type="button"
@@ -656,7 +656,7 @@ function AdminProductsManager() {
               disabled={loading}
               onClick={() => setTab("archive")}
             >
-              РђСЂС…РёРІ
+              Архив
             </button>
           </div>
 
@@ -667,7 +667,7 @@ function AdminProductsManager() {
             </div>
           ) : products.length === 0 ? (
             <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
-              РџСѓСЃС‚Рѕ
+              Пусто
             </div>
           ) : (
             <div className="mt-3 grid gap-3">
@@ -700,7 +700,7 @@ function AdminProductsManager() {
                         disabled={loading || isSaving}
                         onClick={() => void setProductActive(p, nextActive)}
                       >
-                        {isSaving ? "..." : tab === "active" ? "Р’ Р°СЂС…РёРІ" : "Р’ Р°РєС‚РёРІРЅС‹Рµ"}
+                        {isSaving ? "..." : tab === "active" ? "В архив" : "В активные"}
                       </button>
                     </div>
 
@@ -715,7 +715,7 @@ function AdminProductsManager() {
                               : "bg-slate-100 text-slate-700",
                           ].join(" ")}
                         >
-                          {inv.city_slug.toUpperCase()}: {inv.in_stock ? "РІ РЅР°Р»РёС‡РёРё" : "РЅРµС‚"}
+                          {inv.city_slug.toUpperCase()}: {inv.in_stock ? "в наличии" : "нет"}
                         </span>
                       ))}
                     </div>
@@ -746,7 +746,7 @@ function AdminOrdersView() {
       );
       setOrders(data);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё";
+      const message = e instanceof Error ? e.message : "Ошибка загрузки";
       setError(message);
     } finally {
       setLoading(false);
@@ -764,7 +764,7 @@ function AdminOrdersView() {
       await apiPut(`/api/admin/orders/${orderId}/status`, { status: next });
       await load(status);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ СЃС‚Р°С‚СѓСЃР°";
+      const message = e instanceof Error ? e.message : "Ошибка обновления статуса";
       setError(message);
     }
   }
@@ -772,7 +772,7 @@ function AdminOrdersView() {
   return (
     <Card>
       <div className="flex items-center justify-between">
-        <div className="text-lg font-semibold">Р—Р°РєР°Р·С‹</div>
+        <div className="text-lg font-semibold">Заказы</div>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -782,7 +782,7 @@ function AdminOrdersView() {
               setError(null);
             }}
           >
-            {open ? "Р—Р°РєСЂС‹С‚СЊ" : "РћС‚РєСЂС‹С‚СЊ"}
+            {open ? "Закрыть" : "Открыть"}
           </button>
           <select
             className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold"
@@ -803,14 +803,14 @@ function AdminOrdersView() {
             onClick={() => void load(status)}
             disabled={!open || loading}
           >
-            РћР±РЅРѕРІРёС‚СЊ
+            Обновить
           </button>
         </div>
       </div>
 
       {!open ? (
         <div className="mt-3 text-sm text-slate-500">
-          Р—Р°РєР°Р·С‹ Р·Р°РіСЂСѓР¶Р°СЋС‚СЃСЏ С‚РѕР»СЊРєРѕ РїСЂРё РѕС‚РєСЂС‹С‚РѕРј Р±Р»РѕРєРµ.
+          Заказы загружаются только при открытом блоке.
         </div>
       ) : null}
 
@@ -826,7 +826,7 @@ function AdminOrdersView() {
           <div className="h-24 animate-pulse rounded-2xl bg-slate-200" />
         </div>
       ) : open && orders.length === 0 ? (
-        <div className="mt-3 text-sm text-slate-600">РџСѓСЃС‚Рѕ</div>
+        <div className="mt-3 text-sm text-slate-600">Пусто</div>
       ) : open ? (
         <div className="mt-3 grid gap-3">
           {orders.map((o) => (
@@ -834,16 +834,16 @@ function AdminOrdersView() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-semibold">
-                    {formatDateTime(o.created_at)} вЂў{" "}
-                    {o.city_slug ? o.city_slug.toUpperCase() : "вЂ”"} вЂў{" "}
+                    {formatDateTime(o.created_at)} •{" "}
+                    {o.city_slug ? o.city_slug.toUpperCase() : "—"} •{" "}
                     <span className="text-slate-600">{o.status}</span>
                   </div>
                   <div className="mt-1 text-xs text-slate-600">
-                    Р®Р·РµСЂ:{" "}
+                    Юзер:{" "}
                     {o.tg_username ? `@${o.tg_username} (${o.tg_user_id})` : o.tg_user_id}
-                    {" вЂў "}
+                    {" • "}
                     {formatRub(o.total_price)}
-                    {" вЂў "}
+                    {" • "}
                     {o.delivery_method}
                   </div>
                 </div>
@@ -855,19 +855,19 @@ function AdminOrdersView() {
                       className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
                       onClick={() => void setOrderStatus(o.id, "done")}
                     >
-                      Р“РѕС‚РѕРІРѕ
+                      Готово
                     </button>
                   ) : null}
                 </div>
               </div>
 
               <div className="mt-3 border-t border-slate-200 pt-3">
-                <div className="text-xs font-semibold text-slate-500">РџРѕР·РёС†РёРё</div>
+                <div className="text-xs font-semibold text-slate-500">Позиции</div>
                 <div className="mt-2 space-y-1 text-sm">
                   {o.items.map((it, idx) => (
                     <div key={`${o.id}:${idx}`} className="flex justify-between gap-3">
                       <div className="truncate">
-                        {it.title ?? it.product_id ?? "unknown"} Г—{it.qty}
+                        {it.title ?? it.product_id ?? "unknown"} ×{it.qty}
                       </div>
                       <div className="shrink-0 font-semibold text-slate-700">
                         {formatRub(it.unit_price)}
@@ -879,7 +879,7 @@ function AdminOrdersView() {
                 {o.comment ? (
                   <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
                     <span className="text-xs font-semibold text-slate-500">
-                      РљРѕРјРјРµРЅС‚Р°СЂРёР№:
+                      Комментарий:
                     </span>{" "}
                     {o.comment}
                   </div>
