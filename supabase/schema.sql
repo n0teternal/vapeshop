@@ -67,6 +67,12 @@ create index if not exists inventory_city_product_idx
 create index if not exists products_is_active_idx
   on public.products (is_active);
 
+create index if not exists orders_status_created_at_idx
+  on public.orders (status, created_at desc);
+
+create index if not exists order_items_order_id_idx
+  on public.order_items (order_id);
+
 -- ===== Grants (PostgREST roles) =====
 -- Supabase обычно настраивает default privileges, но явные GRANT делают поведение предсказуемым:
 -- anon/authenticated могут только читать публичный каталог (cities/products/inventory).

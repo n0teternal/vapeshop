@@ -34,6 +34,10 @@ function toNumber(value: unknown, fieldName: string): number {
   return n;
 }
 
+function toCount(value: number | null): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function sanitizeFileName(filename: string): string {
   const base = path.basename(filename);
   // Keep it simple: replace everything suspicious with underscore.
@@ -113,18 +117,42 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       try {
         await requireAdmin(request);
+        const querySchema = z.object({
+          tab: z.enum(["active", "archive"]).optional(),
+          limit: z.coerce.number().int().min(1).max(500).optional(),
+        });
+        const parsedQuery = querySchema.safeParse(request.query);
+        if (!parsedQuery.success) {
+          throw new HttpError(400, "BAD_REQUEST", "Invalid query");
+        }
+
+        const tab = parsedQuery.data.tab ?? "active";
+        const limit = parsedQuery.data.limit ?? 120;
+        const isActive = tab === "active";
         const supabase = createServiceSupabaseClient();
 
-        const [{ data: cities, error: citiesError }, { data: products, error: productsError }, { data: inventory, error: inventoryError }] =
+        const [
+          { data: cities, error: citiesError },
+          { data: products, error: productsError },
+          { count: activeCountRaw, error: activeCountError },
+          { count: archiveCountRaw, error: archiveCountError },
+        ] =
           await Promise.all([
             supabase.from("cities").select("id,slug").order("slug", { ascending: true }),
             supabase
               .from("products")
               .select("id,title,description,base_price,image_url,is_active,created_at")
-              .order("created_at", { ascending: false }),
+              .eq("is_active", isActive)
+              .order("created_at", { ascending: false })
+              .limit(limit),
             supabase
-              .from("inventory")
-              .select("product_id,city_id,in_stock,stock_qty,price_override"),
+              .from("products")
+              .select("id", { count: "exact", head: true })
+              .eq("is_active", true),
+            supabase
+              .from("products")
+              .select("id", { count: "exact", head: true })
+              .eq("is_active", false),
           ]);
 
         if (citiesError) {
@@ -137,6 +165,29 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             `Failed to load products: ${productsError.message}`,
           );
         }
+        if (activeCountError) {
+          throw new HttpError(500, "DB", `Failed to count active products: ${activeCountError.message}`);
+        }
+        if (archiveCountError) {
+          throw new HttpError(
+            500,
+            "DB",
+            `Failed to count archive products: ${archiveCountError.message}`,
+          );
+        }
+
+        const cityList = (cities ?? []).map((c) => ({ id: c.id, slug: c.slug }));
+        const productList = products ?? [];
+        const productIds = productList.map((p) => p.id);
+
+        const { data: inventory, error: inventoryError } =
+          productIds.length > 0
+            ? await supabase
+                .from("inventory")
+                .select("product_id,city_id,in_stock,stock_qty,price_override")
+                .in("product_id", productIds)
+            : { data: [], error: null };
+
         if (inventoryError) {
           throw new HttpError(
             500,
@@ -144,8 +195,6 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             `Failed to load inventory: ${inventoryError.message}`,
           );
         }
-
-        const cityList = (cities ?? []).map((c) => ({ id: c.id, slug: c.slug }));
 
         type InventoryRow = {
           product_id: string;
@@ -160,7 +209,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           invByKey.set(`${row.product_id}:${row.city_id}`, row);
         }
 
-        const result = (products ?? []).map((p) => {
+        const result = productList.map((p) => {
           const basePrice = toNumber(p.base_price, "products.base_price");
 
           return {
@@ -186,7 +235,19 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           };
         });
 
-        return reply.code(200).send(ok(result));
+        const activeCount = toCount(activeCountRaw);
+        const archiveCount = toCount(archiveCountRaw);
+
+        return reply.code(200).send(
+          ok({
+            tab,
+            limit,
+            total: tab === "active" ? activeCount : archiveCount,
+            activeCount,
+            archiveCount,
+            items: result,
+          }),
+        );
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
@@ -651,6 +712,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
 
         const querySchema = z.object({
           status: z.enum(["new", "processing", "done"]).optional(),
+          limit: z.coerce.number().int().min(1).max(200).optional(),
         });
 
         const parsedQuery = querySchema.safeParse(request.query);
@@ -659,6 +721,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const status = parsedQuery.data.status ?? "new";
+        const limit = parsedQuery.data.limit ?? 50;
         const supabase = createServiceSupabaseClient();
 
         const { data: orders, error: ordersError } = await supabase
@@ -667,7 +730,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             "id,created_at,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price",
           )
           .eq("status", status)
-          .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false })
+          .limit(limit);
 
         if (ordersError) {
           throw new HttpError(500, "DB", `Failed to load orders: ${ordersError.message}`);

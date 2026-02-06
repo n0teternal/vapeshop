@@ -150,8 +150,12 @@ export type Database = {
   };
 };
 
+let serviceClient: SupabaseClient<Database> | null = null;
+
 export function createServiceSupabaseClient(): SupabaseClient<Database> {
-  return createClient<Database>(config.supabase.url, config.supabase.serviceRoleKey, {
+  if (serviceClient) return serviceClient;
+  serviceClient = createClient<Database>(config.supabase.url, config.supabase.serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
+  return serviceClient;
 }

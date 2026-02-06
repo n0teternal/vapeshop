@@ -10,6 +10,9 @@ export type AdminContext = {
   role: string;
 };
 
+const ADMIN_ROLE_CACHE_TTL_MS = 60_000;
+const adminRoleCache = new Map<number, { role: string; expiresAt: number }>();
+
 function getHeaderString(
   request: FastifyRequest,
   headerName: string,
@@ -20,12 +23,21 @@ function getHeaderString(
   return null;
 }
 
-function parsePositiveInt(value: string, fieldName: string): number {
-  const n = Number(value);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
-    throw new HttpError(500, "CONFIG", `Invalid ${fieldName}`);
+function getCachedAdminRole(tgUserId: number): string | null {
+  const hit = adminRoleCache.get(tgUserId);
+  if (!hit) return null;
+  if (Date.now() > hit.expiresAt) {
+    adminRoleCache.delete(tgUserId);
+    return null;
   }
-  return n;
+  return hit.role;
+}
+
+function setCachedAdminRole(tgUserId: number, role: string): void {
+  adminRoleCache.set(tgUserId, {
+    role,
+    expiresAt: Date.now() + ADMIN_ROLE_CACHE_TTL_MS,
+  });
 }
 
 export async function requireAdmin(request: FastifyRequest): Promise<AdminContext> {
@@ -55,6 +67,11 @@ export async function requireAdmin(request: FastifyRequest): Promise<AdminContex
     username = verified.user.username;
   }
 
+  const cachedRole = getCachedAdminRole(tgUserId);
+  if (cachedRole) {
+    return { tgUserId, username, role: cachedRole };
+  }
+
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
     .from("admins")
@@ -67,8 +84,10 @@ export async function requireAdmin(request: FastifyRequest): Promise<AdminContex
   }
 
   if (!data) {
+    adminRoleCache.delete(tgUserId);
     throw new HttpError(403, "FORBIDDEN", "Нет доступа");
   }
 
+  setCachedAdminRole(tgUserId, data.role);
   return { tgUserId, username, role: data.role };
 }

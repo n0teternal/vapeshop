@@ -116,6 +116,7 @@ await app.register(cors, {
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "x-telegram-init-data", "x-dev-admin"],
   preflight: true,
+  maxAge: 600,
   // IMPORTANT: browsers send OPTIONS preflight for PUT/JSON requests.
   // If we continue to route handling, Fastify may return 404 for OPTIONS and the browser will fail with "Failed to fetch".
   preflightContinue: false,
