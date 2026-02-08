@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
 import { isSupabaseConfigured } from "../supabase/client";
@@ -161,6 +161,7 @@ type CategoryStat = {
 };
 
 type PriceSortMode = "none" | "asc" | "desc";
+type CatalogToast = { key: number; message: string };
 
 export function CatalogPage() {
   const { state, dispatch } = useAppState();
@@ -173,6 +174,8 @@ export function CatalogPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [toast, setToast] = useState<CatalogToast | null>(null);
+  const toastKeyRef = useRef(0);
 
   const mockItems = useMemo(() => mapMockCatalog(), []);
   const [supabaseItems, setSupabaseItems] = useState<CatalogItem[]>([]);
@@ -303,6 +306,16 @@ export function CatalogPage() {
     return searchQuery.trim().toLowerCase();
   }, [searchQuery]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timeoutId = window.setTimeout(() => {
+      setToast(null);
+    }, 1700);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [toast]);
+
   const visibleItems = useMemo(() => {
     const filteredItems = catalogWithCategory
       .filter((row) => {
@@ -354,6 +367,11 @@ export function CatalogPage() {
         ? prev.filter((id) => id !== categoryId)
         : [...prev, categoryId],
     );
+  }
+
+  function showToast(message: string): void {
+    toastKeyRef.current += 1;
+    setToast({ key: toastKeyRef.current, message });
   }
 
   if (!state.city) {
@@ -571,7 +589,7 @@ export function CatalogPage() {
               key={item.id}
               item={item}
               isFavorite={favoriteIds.has(item.id)}
-              onAdd={() =>
+              onAdd={() => {
                 dispatch({
                   type: "cart/add",
                   item: {
@@ -580,9 +598,11 @@ export function CatalogPage() {
                     price: item.price,
                     imageUrl: item.imageUrl,
                   },
-                })
-              }
-              onToggleFavorite={() =>
+                });
+                showToast("\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u043a\u043e\u0440\u0437\u0438\u043d\u0443");
+              }}
+              onToggleFavorite={() => {
+                const wasFavorite = favoriteIds.has(item.id);
                 dispatch({
                   type: "favorite/toggle",
                   item: {
@@ -592,8 +612,13 @@ export function CatalogPage() {
                     imageUrl: item.imageUrl,
                     inStock: item.inStock,
                   },
-                })
-              }
+                });
+                showToast(
+                  wasFavorite
+                    ? "\u0422\u043e\u0432\u0430\u0440 \u0443\u0434\u0430\u043b\u0435\u043d \u0438\u0437 \u0438\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0433\u043e"
+                    : "\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u0438\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0435",
+                );
+              }}
             />
           ))}
         </div>
@@ -733,6 +758,27 @@ export function CatalogPage() {
                   ? "Показаны все категории"
                   : `Выбрано категорий: ${selectedCategoryIds.length}`}
               </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {toast ? (
+        <div className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4 [bottom:calc(env(safe-area-inset-bottom,0px)+7.1rem)]">
+          <div
+            key={toast.key}
+            className="w-full max-w-md rounded-2xl border border-white/15 bg-[linear-gradient(135deg,#2b3442_0%,#232a33_100%)] px-4 py-3.5 text-sm font-semibold text-slate-100 shadow-[0_14px_40px_rgba(0,0,0,0.5)] backdrop-blur"
+          >
+            <div className="flex items-center gap-3">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#2f80ff]/25 text-[#8fbeff]">
+                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
+                  <path
+                    d="M9.6 16.2 5.8 12.4 4.4 13.8l5.2 5.2L20 8.6l-1.4-1.4z"
+                    className="fill-current"
+                  />
+                </svg>
+              </span>
+              <span className="leading-tight">{toast.message}</span>
             </div>
           </div>
         </div>
