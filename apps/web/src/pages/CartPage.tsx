@@ -151,9 +151,7 @@ export function CartPage() {
       setAddress("");
       setComment("");
 
-      await notify(
-        `Заказ создан.\nID: ${parsed.orderId}\nУведомление: ${parsed.notified ? "отправлено" : "не отправлено"}`,
-      );
+      await notify("Заказ создан.\nПередаём админу...");
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Network error";
       setSubmitError(message);
