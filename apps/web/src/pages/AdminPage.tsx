@@ -556,9 +556,8 @@ function AdminProductsManager() {
   }, [tab]);
 
   useEffect(() => {
-    if (!open) return;
     void load();
-  }, [open, tab, load]);
+  }, [tab, load]);
 
   const activeCountLabel =
     activeCount === null ? (loading ? "..." : "—") : String(activeCount);
@@ -731,7 +730,6 @@ function AdminProductsManager() {
 }
 
 function AdminOrdersView() {
-  const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<OrderStatus>("new");
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
@@ -754,9 +752,8 @@ function AdminOrdersView() {
   }, []);
 
   useEffect(() => {
-    if (!open) return;
     void load(status);
-  }, [open, status, load]);
+  }, [status, load]);
 
   async function setOrderStatus(orderId: string, next: OrderStatus): Promise<void> {
     setError(null);
@@ -774,20 +771,10 @@ function AdminOrdersView() {
       <div className="flex items-center justify-between">
         <div className="text-lg font-semibold">Заказы</div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="rounded-xl bg-[#2f80ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2370e3]"
-            onClick={() => {
-              setOpen((prev) => !prev);
-              setError(null);
-            }}
-          >
-            {open ? "Закрыть" : "Открыть"}
-          </button>
           <select
             className="h-10 rounded-xl border border-white/10 bg-[#252a31] px-3 text-sm font-semibold"
             value={status}
-            disabled={!open || loading}
+            disabled={loading}
             onChange={(e) => {
               const v = e.target.value;
               setStatus(v === "done" ? "done" : v === "processing" ? "processing" : "new");
@@ -801,33 +788,26 @@ function AdminOrdersView() {
             type="button"
             className="rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
             onClick={() => void load(status)}
-            disabled={!open || loading}
+            disabled={loading}
           >
             Обновить
           </button>
         </div>
       </div>
-
-      {!open ? (
-        <div className="mt-3 text-sm text-slate-500">
-          Заказы загружаются только при открытом блоке.
-        </div>
-      ) : null}
-
-      {open && error ? (
+      {error ? (
         <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
           {error}
         </div>
       ) : null}
 
-      {open && loading ? (
+      {loading ? (
         <div className="mt-3 grid gap-3">
           <div className="h-24 animate-pulse rounded-2xl bg-slate-700/60" />
           <div className="h-24 animate-pulse rounded-2xl bg-slate-700/60" />
         </div>
-      ) : open && orders.length === 0 ? (
+      ) : orders.length === 0 ? (
         <div className="mt-3 text-sm text-slate-400">Пусто</div>
-      ) : open ? (
+      ) : (
         <div className="mt-3 grid gap-3">
           {orders.map((o) => (
             <Card key={o.id}>
@@ -888,7 +868,7 @@ function AdminOrdersView() {
             </Card>
           ))}
         </div>
-      ) : null}
+      )}
     </Card>
   );
 }
