@@ -67,6 +67,126 @@ function formatCategoryLabel(categorySlug: string): string {
     .join(" ");
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replaceAll("ё", "е")
+    .replaceAll(/[^a-z0-9а-я\s]+/g, " ")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+}
+
+function isSubsequence(query: string, target: string): boolean {
+  if (query.length === 0) return true;
+  let queryIndex = 0;
+
+  for (let i = 0; i < target.length && queryIndex < query.length; i += 1) {
+    if (target[i] === query[queryIndex]) {
+      queryIndex += 1;
+    }
+  }
+
+  return queryIndex === query.length;
+}
+
+function levenshteinDistanceWithinLimit(
+  left: string,
+  right: string,
+  maxDistance: number,
+): number {
+  if (left === right) return 0;
+  if (left.length === 0) return right.length;
+  if (right.length === 0) return left.length;
+  if (Math.abs(left.length - right.length) > maxDistance) {
+    return maxDistance + 1;
+  }
+
+  let previous = Array.from({ length: right.length + 1 }, (_, idx) => idx);
+  let current = new Array<number>(right.length + 1).fill(0);
+
+  for (let i = 1; i <= left.length; i += 1) {
+    current[0] = i;
+    let rowMin = current[0];
+
+    for (let j = 1; j <= right.length; j += 1) {
+      const substitutionCost = left[i - 1] === right[j - 1] ? 0 : 1;
+      const nextValue = Math.min(
+        previous[j] + 1,
+        current[j - 1] + 1,
+        previous[j - 1] + substitutionCost,
+      );
+      current[j] = nextValue;
+      if (nextValue < rowMin) rowMin = nextValue;
+    }
+
+    if (rowMin > maxDistance) {
+      return maxDistance + 1;
+    }
+
+    [previous, current] = [current, previous];
+  }
+
+  return previous[right.length];
+}
+
+function getSearchMatchScore(title: string, normalizedQuery: string): number {
+  if (normalizedQuery.length === 0) return 1;
+
+  const normalizedTitle = normalizeSearchText(title);
+  if (normalizedTitle.length === 0) return 0;
+
+  const exactIndex = normalizedTitle.indexOf(normalizedQuery);
+  if (exactIndex >= 0) {
+    return 120 - Math.min(exactIndex, 40);
+  }
+
+  const titleWords = normalizedTitle.split(" ").filter((x) => x.length > 0);
+  const queryWords = normalizedQuery.split(" ").filter((x) => x.length > 0);
+  if (titleWords.length === 0 || queryWords.length === 0) return 0;
+
+  let totalScore = 0;
+
+  for (const queryWord of queryWords) {
+    let bestWordScore = 0;
+
+    for (const titleWord of titleWords) {
+      if (titleWord.includes(queryWord)) {
+        bestWordScore = Math.max(bestWordScore, 88 - Math.min(titleWord.length, 30));
+        continue;
+      }
+
+      if (queryWord.length >= 3) {
+        const maxDistance =
+          queryWord.length >= 9 ? 3 : queryWord.length >= 6 ? 2 : 1;
+        const distance = levenshteinDistanceWithinLimit(
+          queryWord,
+          titleWord,
+          maxDistance,
+        );
+        if (distance <= maxDistance) {
+          const distancePenalty = distance * 12;
+          const lengthPenalty = Math.min(Math.abs(titleWord.length - queryWord.length), 8);
+          bestWordScore = Math.max(bestWordScore, 64 - distancePenalty - lengthPenalty);
+        }
+      }
+    }
+
+    if (bestWordScore <= 0) {
+      return 0;
+    }
+
+    totalScore += bestWordScore;
+  }
+
+  const compactQuery = normalizedQuery.replaceAll(" ", "");
+  const compactTitle = normalizedTitle.replaceAll(" ", "");
+  if (compactQuery.length >= 3 && isSubsequence(compactQuery, compactTitle)) {
+    totalScore += 6;
+  }
+
+  return totalScore;
+}
+
 function ProductCard({
   item,
   isFavorite,
@@ -303,7 +423,7 @@ export function CatalogPage() {
   }, [selectedCategoryIds]);
 
   const normalizedSearchQuery = useMemo(() => {
-    return searchQuery.trim().toLowerCase();
+    return normalizeSearchText(searchQuery);
   }, [searchQuery]);
 
   useEffect(() => {
@@ -317,7 +437,7 @@ export function CatalogPage() {
   }, [toast]);
 
   const visibleItems = useMemo(() => {
-    const filteredItems = catalogWithCategory
+    const preFilteredRows = catalogWithCategory
       .filter((row) => {
         if (selectedCategoryIds.length > 0 && !selectedCategoriesSet.has(row.categoryId)) {
           return false;
@@ -325,29 +445,51 @@ export function CatalogPage() {
         if (onlyInStock && !row.item.inStock) {
           return false;
         }
-        if (
-          normalizedSearchQuery.length > 0 &&
-          !row.item.title.toLowerCase().includes(normalizedSearchQuery)
-        ) {
-          return false;
-        }
         return true;
-      })
-      .map((row) => row.item);
+      });
+
+    const scoredItems =
+      normalizedSearchQuery.length > 0
+        ? preFilteredRows
+            .map((row) => ({
+              item: row.item,
+              score: getSearchMatchScore(row.item.title, normalizedSearchQuery),
+            }))
+            .filter((entry) => entry.score > 0)
+        : preFilteredRows.map((row) => ({ item: row.item, score: 0 }));
 
     if (priceSortMode === "asc") {
-      return [...filteredItems].sort(
-        (a, b) => a.price - b.price || a.title.localeCompare(b.title, "ru"),
-      );
+      return [...scoredItems]
+        .sort(
+          (a, b) =>
+            a.item.price - b.item.price ||
+            b.score - a.score ||
+            a.item.title.localeCompare(b.item.title, "ru"),
+        )
+        .map((entry) => entry.item);
     }
 
     if (priceSortMode === "desc") {
-      return [...filteredItems].sort(
-        (a, b) => b.price - a.price || a.title.localeCompare(b.title, "ru"),
-      );
+      return [...scoredItems]
+        .sort(
+          (a, b) =>
+            b.item.price - a.item.price ||
+            b.score - a.score ||
+            a.item.title.localeCompare(b.item.title, "ru"),
+        )
+        .map((entry) => entry.item);
     }
 
-    return filteredItems;
+    if (normalizedSearchQuery.length > 0) {
+      return [...scoredItems]
+        .sort(
+          (a, b) =>
+            b.score - a.score || a.item.title.localeCompare(b.item.title, "ru"),
+        )
+        .map((entry) => entry.item);
+    }
+
+    return scoredItems.map((entry) => entry.item);
   }, [
     catalogWithCategory,
     normalizedSearchQuery,
