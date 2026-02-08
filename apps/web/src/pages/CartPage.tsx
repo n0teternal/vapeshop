@@ -192,52 +192,70 @@ export function CartPage() {
             key={item.productId}
             className="rounded-2xl border border-white/10 bg-[#252a31] p-4"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold">{item.title}</div>
-                <div className="mt-1 text-xs text-slate-400">
-                  {formatPriceRub(item.price)} / шт
+            <div className="flex items-start gap-3">
+              {item.imageUrl ? (
+                <img
+                  src={item.imageUrl}
+                  alt={item.title}
+                  loading="lazy"
+                  className="h-16 w-16 shrink-0 rounded-xl object-cover"
+                />
+              ) : (
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[#2b3139] text-[10px] font-semibold uppercase text-slate-500">
+                  Photo
                 </div>
-              </div>
-              <button
-                type="button"
-                className="text-xs font-semibold text-rose-600 hover:text-rose-700"
-                onClick={() =>
-                  dispatch({ type: "cart/remove", productId: item.productId })
-                }
-              >
-                Удалить
-              </button>
-            </div>
+              )}
 
-            <div className="mt-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="h-9 w-9 rounded-xl border border-white/10 bg-[#252a31] text-sm font-semibold hover:bg-[#303743] disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={submitting}
-                  onClick={() =>
-                    dispatch({ type: "cart/dec", productId: item.productId })
-                  }
-                >
-                  −
-                </button>
-                <div className="min-w-10 text-center text-sm font-semibold">
-                  {item.qty}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{item.title}</div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      {formatPriceRub(item.price)}
+                      {" / \u0448\u0442"}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-rose-600 hover:text-rose-700"
+                    onClick={() =>
+                      dispatch({ type: "cart/remove", productId: item.productId })
+                    }
+                  >
+                    {"\u0423\u0434\u0430\u043b\u0438\u0442\u044c"}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="h-9 w-9 rounded-xl border border-white/10 bg-[#252a31] text-sm font-semibold hover:bg-[#303743] disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={submitting}
-                  onClick={() =>
-                    dispatch({ type: "cart/inc", productId: item.productId })
-                  }
-                >
-                  +
-                </button>
-              </div>
-              <div className="text-sm font-semibold">
-                {formatPriceRub(item.price * item.qty)}
+
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="h-9 w-9 rounded-xl border border-white/10 bg-[#252a31] text-sm font-semibold hover:bg-[#303743] disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={submitting}
+                      onClick={() =>
+                        dispatch({ type: "cart/dec", productId: item.productId })
+                      }
+                    >
+                      -
+                    </button>
+                    <div className="min-w-10 text-center text-sm font-semibold">
+                      {item.qty}
+                    </div>
+                    <button
+                      type="button"
+                      className="h-9 w-9 rounded-xl border border-white/10 bg-[#252a31] text-sm font-semibold hover:bg-[#303743] disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={submitting}
+                      onClick={() =>
+                        dispatch({ type: "cart/inc", productId: item.productId })
+                      }
+                    >
+                      +
+                    </button>
+                  </div>
+                  <div className="text-sm font-semibold">
+                    {formatPriceRub(item.price * item.qty)}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

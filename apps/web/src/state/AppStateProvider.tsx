@@ -15,6 +15,7 @@ export type CartItem = {
   title: string;
   price: number;
   qty: number;
+  imageUrl?: string | null;
 };
 
 export type FavoriteItem = {
@@ -77,7 +78,10 @@ function isCartItem(value: unknown): value is CartItem {
     Number.isFinite(value.price) &&
     typeof value.qty === "number" &&
     Number.isInteger(value.qty) &&
-    value.qty > 0
+    value.qty > 0 &&
+    (value.imageUrl === undefined ||
+      value.imageUrl === null ||
+      typeof value.imageUrl === "string")
   );
 }
 
@@ -132,11 +136,23 @@ function reducer(state: AppState, action: Action): AppState {
         return {
           ...state,
           cart: state.cart.map((x) =>
-            x.productId === action.item.productId ? { ...x, qty: x.qty + 1 } : x,
+            x.productId === action.item.productId
+              ? {
+                  ...x,
+                  qty: x.qty + 1,
+                  imageUrl: x.imageUrl ?? action.item.imageUrl ?? null,
+                }
+              : x,
           ),
         };
       }
-      return { ...state, cart: [...state.cart, { ...action.item, qty: 1 }] };
+      return {
+        ...state,
+        cart: [
+          ...state.cart,
+          { ...action.item, qty: 1, imageUrl: action.item.imageUrl ?? null },
+        ],
+      };
     }
     case "cart/inc":
       return {

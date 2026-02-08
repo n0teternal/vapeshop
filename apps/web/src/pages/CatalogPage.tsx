@@ -578,6 +578,7 @@ export function CatalogPage() {
                     productId: item.id,
                     title: item.title,
                     price: item.price,
+                    imageUrl: item.imageUrl,
                   },
                 })
               }
