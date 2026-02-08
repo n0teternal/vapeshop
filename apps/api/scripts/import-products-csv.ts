@@ -21,6 +21,7 @@ type ParsedProductRow = {
     id: string;
     title: string;
     description: string | null;
+    category_slug: string;
     base_price: number;
     image_url: string | null;
     is_active: boolean;
@@ -326,7 +327,15 @@ async function main(): Promise<void> {
   }
   cityRows.sort((a, b) => a.slug.localeCompare(b.slug));
 
-  const requiredBaseCols = ["id", "title", "description", "base_price", "image_url", "is_active"];
+  const requiredBaseCols = [
+    "id",
+    "title",
+    "description",
+    "category_slug",
+    "base_price",
+    "image_url",
+    "is_active",
+  ];
   const missingBase = requiredBaseCols.filter((c) => !headerSet.has(c));
   if (missingBase.length > 0) {
     throw new Error(`CSV is missing required columns: ${missingBase.join(", ")}`);
@@ -381,6 +390,14 @@ async function main(): Promise<void> {
 
     const descriptionRaw = getCell(record, "description");
     const description = descriptionRaw.length > 0 ? descriptionRaw : null;
+
+    const categorySlugRaw = getCell(record, "category_slug").toLowerCase();
+    const category_slug = categorySlugRaw.length > 0 ? categorySlugRaw : "other";
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(category_slug)) {
+      rowMessages.push(
+        `category_slug must match [a-z0-9_-] and not be empty (got: ${category_slug})`,
+      );
+    }
 
     const imageUrlRaw = getCell(record, "image_url");
     const image_url = imageUrlRaw.length > 0 ? imageUrlRaw : null;
@@ -472,6 +489,7 @@ async function main(): Promise<void> {
         id,
         title,
         description,
+        category_slug,
         base_price,
         image_url,
         is_active,
@@ -571,4 +589,3 @@ main().catch((e: unknown) => {
   console.error(e instanceof Error ? e.message : String(e));
   process.exitCode = 1;
 });
-

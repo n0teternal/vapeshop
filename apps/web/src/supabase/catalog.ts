@@ -28,6 +28,7 @@ export type CatalogItem = {
   title: string;
   description: string | null;
   imageUrl: string | null;
+  categorySlug: string;
   price: number;
   inStock: boolean;
 };
@@ -38,6 +39,7 @@ type JoinedProduct = {
   description: string | null;
   base_price: unknown;
   image_url: string | null;
+  category_slug: string;
   is_active: boolean;
 };
 
@@ -78,6 +80,10 @@ function parseJoinedProduct(value: unknown): JoinedProduct | null {
 
   const description = typeof raw.description === "string" ? raw.description : null;
   const imageUrl = typeof raw.image_url === "string" ? raw.image_url : null;
+  const categorySlug =
+    typeof raw.category_slug === "string" && raw.category_slug.trim().length > 0
+      ? raw.category_slug
+      : "other";
 
   return {
     id,
@@ -85,6 +91,7 @@ function parseJoinedProduct(value: unknown): JoinedProduct | null {
     description,
     base_price: raw.base_price,
     image_url: imageUrl,
+    category_slug: categorySlug,
     is_active: isActive,
   };
 }
@@ -97,7 +104,7 @@ export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogItem[]> {
   const { data, error, status } = await supabase
     .from("inventory")
     .select(
-      "in_stock,price_override,products!inner(id,title,description,base_price,image_url,is_active),cities!inner(slug)",
+      "in_stock,price_override,products!inner(id,title,description,base_price,image_url,category_slug,is_active),cities!inner(slug)",
     )
     .eq("cities.slug", citySlug)
     .eq("products.is_active", true);
@@ -132,6 +139,7 @@ export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogItem[]> {
       title: product.title,
       description: product.description,
       imageUrl: product.image_url,
+      categorySlug: product.category_slug,
       price: overridePrice ?? basePrice,
       inStock: row.in_stock === true,
     });

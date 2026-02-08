@@ -15,6 +15,7 @@ export type Database = {
           id: string;
           title: string;
           description: string | null;
+          category_slug: string;
           base_price: number;
           image_url: string | null;
           is_active: boolean;
@@ -24,6 +25,7 @@ export type Database = {
           id?: string;
           title: string;
           description?: string | null;
+          category_slug?: string;
           base_price: number;
           image_url?: string | null;
           is_active?: boolean;
@@ -33,6 +35,7 @@ export type Database = {
           id?: string;
           title?: string;
           description?: string | null;
+          category_slug?: string;
           base_price?: number;
           image_url?: string | null;
           is_active?: boolean;

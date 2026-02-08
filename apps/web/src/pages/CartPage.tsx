@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { API_BASE_URL } from "../config";
 import { useAppState } from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
@@ -163,10 +164,18 @@ export function CartPage() {
   if (state.cart.length === 0) {
     return (
       <div className="rounded-2xl border border-white/10 bg-[#252a31] p-6 text-center">
+        <div className="mb-3 text-7xl leading-none motion-safe:animate-pulse">🛒</div>
+
         <div className="text-lg font-semibold">Корзина пуста</div>
         <div className="mt-2 text-sm text-slate-400">
           Добавьте товары из каталога.
         </div>
+        <Link
+          to="/"
+          className="mt-4 inline-flex rounded-xl bg-[#2f80ff] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2370e3]"
+        >
+          Перейти в каталог
+        </Link>
       </div>
     );
   }

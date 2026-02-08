@@ -1,4 +1,6 @@
-﻿@tailwind base;
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -21,4 +23,19 @@ body {
   margin: 0;
   background: #1f2328;
   color: #e2e8f0;
+  font-family:
+    "Manrope",
+    "Avenir Next",
+    "Segoe UI",
+    sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }

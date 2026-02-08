@@ -15,9 +15,9 @@ export function FavoritesPage() {
   if (state.favorites.length === 0) {
     return (
       <div className="space-y-4">
-        <div className="text-lg font-semibold">Избранное</div>
-
         <div className="rounded-2xl border border-white/10 bg-[#252a31] p-6 text-center">
+          <div className="mb-3 text-7xl leading-none motion-safe:animate-pulse">❤️</div>
+
           <div className="text-base font-semibold text-slate-100">Пока пусто</div>
           <div className="mt-2 text-sm text-slate-400">
             Добавляйте товары сердечком в каталоге.
@@ -35,9 +35,8 @@ export function FavoritesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-lg font-semibold">Избранное</div>
-        <div className="text-xs text-slate-400">{state.favorites.length} шт</div>
+      <div className="text-right text-xs text-slate-400">
+        {state.favorites.length} шт
       </div>
 
       <div className="space-y-3">

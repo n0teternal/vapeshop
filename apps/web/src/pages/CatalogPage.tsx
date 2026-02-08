@@ -54,6 +54,19 @@ function CatalogSkeleton({ count }: { count: number }) {
   );
 }
 
+function formatCategoryLabel(categorySlug: string): string {
+  const normalized = categorySlug.trim().toLowerCase();
+  if (normalized.length === 0) return "Прочее";
+  if (normalized === "other") return "Прочее";
+
+  const words = normalized.split(/[_-]+/g).filter((x) => x.length > 0);
+  if (words.length === 0) return "Прочее";
+
+  return words
+    .map((word) => word.slice(0, 1).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function ProductCard({
   item,
   isFavorite,
@@ -77,7 +90,9 @@ function ProductCard({
           />
         ) : (
           <div className="flex h-[260px] w-full items-center justify-center rounded-[26px] bg-[#2b3139]">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Photo</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Photo
+            </div>
           </div>
         )}
 
@@ -133,14 +148,23 @@ function mapMockCatalog(): CatalogItem[] {
     title: p.title,
     description: null,
     imageUrl: null,
+    categorySlug: "other",
     price: p.price,
     inStock: p.inStock,
   }));
 }
 
+type CategoryStat = {
+  id: string;
+  label: string;
+  count: number;
+};
+
 export function CatalogPage() {
   const { state, dispatch } = useAppState();
-  const [onlyInStock, setOnlyInStock] = useState(false);
+
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
   const mockItems = useMemo(() => mapMockCatalog(), []);
@@ -174,22 +198,28 @@ export function CatalogPage() {
       })
       .catch((e: unknown) => {
         if (cancelled) return;
+
         if (e instanceof SupabaseQueryError) {
           const details = `table=${e.table} status=${e.status ?? "n/a"} code=${e.code ?? "n/a"} msg=${e.message}`;
           const msgLower = e.message.toLowerCase();
 
           const isInvalidKey =
             e.status === 401 &&
-            (msgLower.includes("invalid api key") || msgLower.includes("apikey") && msgLower.includes("invalid"));
+            (msgLower.includes("invalid api key") ||
+              (msgLower.includes("apikey") && msgLower.includes("invalid")));
           if (isInvalidKey) {
-            setError({ message: "Supabase env не задан/не тот проект", devDetails: details });
+            setError({
+              message: "Supabase env не задан или ключ относится к другому проекту.",
+              devDetails: details,
+            });
             return;
           }
 
-          const isSchemaCache = e.status === 404 || e.code === "PGRST205" || msgLower.includes("schema cache");
+          const isSchemaCache =
+            e.status === 404 || e.code === "PGRST205" || msgLower.includes("schema cache");
           if (isSchemaCache) {
             setError({
-              message: `В базе нет таблицы ${e.table} или не обновился API-кэш`,
+              message: `В базе нет таблицы ${e.table} или не обновился API-кэш.`,
               devDetails: details,
             });
             return;
@@ -201,7 +231,7 @@ export function CatalogPage() {
             e.code === "42501" ||
             msgLower.includes("permission");
           if (isPermission) {
-            setError({ message: "Нет прав (RLS)", devDetails: details });
+            setError({ message: "Нет прав доступа (RLS).", devDetails: details });
             return;
           }
 
@@ -212,7 +242,7 @@ export function CatalogPage() {
         const message =
           e instanceof Error
             ? e.message.includes("Supabase is not configured")
-              ? "Supabase env не задан/не тот проект"
+              ? "Supabase env не задан или ключ относится к другому проекту."
               : e.message
             : "Unknown error";
         setError({ message, devDetails: e instanceof Error ? e.message : String(e) });
@@ -227,13 +257,63 @@ export function CatalogPage() {
     };
   }, [state.city, supabaseEnabled, reloadToken]);
 
+  const catalogWithCategory = useMemo(() => {
+    return items.map((item) => ({
+      item,
+      categoryId:
+        typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
+          ? item.categorySlug.trim().toLowerCase()
+          : "other",
+    }));
+  }, [items]);
+
+  const categories = useMemo<CategoryStat[]>(() => {
+    const counts = new Map<string, number>();
+    for (const row of catalogWithCategory) {
+      counts.set(row.categoryId, (counts.get(row.categoryId) ?? 0) + 1);
+    }
+
+    return Array.from(counts.entries())
+      .map(([id, count]) => ({ id, count, label: formatCategoryLabel(id) }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"));
+  }, [catalogWithCategory]);
+
+  useEffect(() => {
+    const available = new Set(categories.map((x) => x.id));
+    setSelectedCategoryIds((prev) => {
+      const next = prev.filter((id) => available.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [categories]);
+
+  const quickCategories = useMemo(() => categories, [categories]);
+
+  const selectedCategoriesSet = useMemo(() => {
+    return new Set(selectedCategoryIds);
+  }, [selectedCategoryIds]);
+
   const visibleItems = useMemo(() => {
-    return onlyInStock ? items.filter((x) => x.inStock) : items;
-  }, [items, onlyInStock]);
+    return catalogWithCategory
+      .filter((row) => {
+        if (selectedCategoryIds.length > 0 && !selectedCategoriesSet.has(row.categoryId)) {
+          return false;
+        }
+        return true;
+      })
+      .map((row) => row.item);
+  }, [catalogWithCategory, selectedCategoriesSet, selectedCategoryIds.length]);
 
   const favoriteIds = useMemo(() => {
     return new Set(state.favorites.map((item) => item.productId));
   }, [state.favorites]);
+
+  function toggleCategory(categoryId: string): void {
+    setSelectedCategoryIds((prev) =>
+      prev.includes(categoryId)
+        ? prev.filter((id) => id !== categoryId)
+        : [...prev, categoryId],
+    );
+  }
 
   if (!state.city) {
     return (
@@ -260,13 +340,16 @@ export function CatalogPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-lg font-semibold">Каталог</div>
-          {cityLabel ? (
-            <div className="text-xs text-slate-500">Город: {cityLabel}</div>
-          ) : null}
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Город
+          </div>
+          <div className="mt-1 text-lg font-semibold text-slate-100">
+            {cityLabel ?? "Не выбран"}
+          </div>
         </div>
+
         <button
           type="button"
           className="rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#1f2328]"
@@ -274,6 +357,50 @@ export function CatalogPage() {
         >
           Сменить город
         </button>
+      </div>
+
+      <div className="overflow-x-auto">
+        <div className="flex w-max min-w-full items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-[#1f2328] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
+            onClick={() => setFiltersOpen(true)}
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+              <path
+                d="M4 6.5h16M7 12h10M10 17.5h4"
+                className="fill-none stroke-current"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+            Фильтры
+            {selectedCategoryIds.length > 0 ? (
+              <span className="rounded-full bg-[#2f80ff] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                {selectedCategoryIds.length}
+              </span>
+            ) : null}
+          </button>
+
+          {quickCategories.map((category) => {
+            const active = selectedCategoriesSet.has(category.id);
+            return (
+              <button
+                key={category.id}
+                type="button"
+                className={[
+                  "shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+                  active
+                    ? "border-[#2f80ff] bg-[#2f80ff] text-white"
+                    : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                ].join(" ")}
+                onClick={() => toggleCategory(category.id)}
+              >
+                {category.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {!supabaseEnabled ? (
@@ -285,31 +412,17 @@ export function CatalogPage() {
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-[#252a31] px-4 py-3">
-        <label className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-slate-600 text-[#2f80ff]"
-            checked={onlyInStock}
-            onChange={(e) => setOnlyInStock(e.target.checked)}
-          />
-          Только в наличии
-        </label>
-        <div className="text-xs text-slate-500">{visibleItems.length} шт</div>
-      </div>
-
       {supabaseEnabled && error ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
-          <div className="text-sm font-semibold text-rose-900">
-            Ошибка загрузки каталога
-          </div>
+          <div className="text-sm font-semibold text-rose-900">Ошибка загрузки каталога</div>
           <div className="mt-1 text-xs text-rose-800">{error.message}</div>
           {import.meta.env.DEV && error.devDetails ? (
             <div className="mt-2 rounded-xl border border-rose-200 bg-[#1f2328] px-3 py-2 font-mono text-[11px] text-rose-900">
               <div>{error.devDetails}</div>
               <div className="mt-1 text-rose-800">
-                DEV: выполните `supabase/schema.sql`, затем `supabase/seed.sql` в Supabase SQL Editor. Если
-                ошибка “schema cache” не исчезает — выполните `notify pgrst, 'reload schema';`.
+                DEV: выполните `supabase/schema.sql`, затем `supabase/seed.sql` в Supabase
+                SQL Editor. Если ошибка "schema cache" не исчезает, выполните `notify pgrst,
+                'reload schema';`.
               </div>
             </div>
           ) : null}
@@ -329,7 +442,7 @@ export function CatalogPage() {
         <div className="rounded-2xl border border-white/10 bg-[#252a31] p-6 text-center">
           <div className="text-lg font-semibold">Нет товаров</div>
           <div className="mt-2 text-sm text-slate-400">
-            Попробуйте отключить фильтр или выберите другой город.
+            Попробуйте снять часть фильтров или выбрать другой город.
           </div>
         </div>
       ) : (
@@ -365,6 +478,80 @@ export function CatalogPage() {
           ))}
         </div>
       )}
+
+      {filtersOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-4 pt-16 sm:items-center">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/50"
+            aria-label="Закрыть фильтры"
+            onClick={() => setFiltersOpen(false)}
+          />
+
+          <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#252a31] p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold text-slate-100">Фильтры каталога</div>
+                <div className="mt-1 text-xs text-slate-400">
+                  Здесь настраиваются все категории.
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="rounded-xl bg-[#2f80ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2370e3]"
+                onClick={() => setFiltersOpen(false)}
+              >
+                Готово
+              </button>
+            </div>
+
+            {categories.length === 0 ? (
+              <div className="mt-4 text-sm text-slate-400">
+                Категории пока не найдены в текущем каталоге.
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {categories.map((category) => {
+                  const active = selectedCategoriesSet.has(category.id);
+                  return (
+                    <button
+                      key={category.id}
+                      type="button"
+                      className={[
+                        "rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+                        active
+                          ? "border-[#2f80ff] bg-[#2f80ff] text-white"
+                          : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                      ].join(" ")}
+                      onClick={() => toggleCategory(category.id)}
+                    >
+                      {category.label} ({category.count})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                className="rounded-xl border border-white/10 bg-[#1f2328] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={selectedCategoryIds.length === 0}
+                onClick={() => setSelectedCategoryIds([])}
+              >
+                Сбросить
+              </button>
+
+              <div className="text-xs text-slate-400">
+                {selectedCategoryIds.length === 0
+                  ? "Показаны все категории"
+                  : `Выбрано категорий: ${selectedCategoryIds.length}`}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -226,7 +226,15 @@ export async function importProductsCsv(params: {
   const cityRows = (cities ?? []).slice().sort((a, b) => a.slug.localeCompare(b.slug));
   if (cityRows.length === 0) throw new Error("No cities found in DB");
 
-  const requiredBaseCols = ["id", "title", "description", "base_price", "image_url", "is_active"];
+  const requiredBaseCols = [
+    "id",
+    "title",
+    "description",
+    "category_slug",
+    "base_price",
+    "image_url",
+    "is_active",
+  ];
   const missingBase = requiredBaseCols.filter((c) => !headerSet.has(c));
   if (missingBase.length > 0) {
     throw new Error(`CSV is missing required columns: ${missingBase.join(", ")}`);
@@ -248,6 +256,7 @@ export async function importProductsCsv(params: {
     id: string;
     title: string;
     description: string | null;
+    category_slug: string;
     base_price: number;
     image_url: string | null;
     is_active: boolean;
@@ -294,6 +303,14 @@ export async function importProductsCsv(params: {
 
     const descriptionRaw = (record["description"] ?? "").trim();
     const description = descriptionRaw.length > 0 ? descriptionRaw : null;
+
+    const categorySlugRaw = (record["category_slug"] ?? "").trim().toLowerCase();
+    const category_slug = categorySlugRaw.length > 0 ? categorySlugRaw : "other";
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(category_slug)) {
+      rowMessages.push(
+        `category_slug must match [a-z0-9_-] and not be empty (got: ${category_slug})`,
+      );
+    }
 
     const imageUrlRaw = (record["image_url"] ?? "").trim();
     let image_url: string | null = imageUrlRaw.length > 0 ? imageUrlRaw : null;
@@ -402,6 +419,7 @@ export async function importProductsCsv(params: {
       id,
       title,
       description,
+      category_slug,
       base_price,
       image_url,
       is_active,
