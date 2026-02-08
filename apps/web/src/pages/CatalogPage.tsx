@@ -86,10 +86,10 @@ function ProductCard({
             src={item.imageUrl}
             alt={item.title}
             loading="lazy"
-            className="h-[320px] w-full rounded-[26px] object-cover"
+            className="h-[224px] w-full rounded-[26px] object-cover"
           />
         ) : (
-          <div className="flex h-[320px] w-full items-center justify-center rounded-[26px] bg-[#2b3139]">
+          <div className="flex h-[224px] w-full items-center justify-center rounded-[26px] bg-[#2b3139]">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Photo
             </div>
@@ -160,10 +160,16 @@ type CategoryStat = {
   count: number;
 };
 
+type PriceSortMode = "none" | "asc" | "desc";
+
 export function CatalogPage() {
   const { state, dispatch } = useAppState();
 
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [priceSortMode, setPriceSortMode] = useState<PriceSortMode>("none");
+  const [onlyInStock, setOnlyInStock] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
@@ -298,9 +304,12 @@ export function CatalogPage() {
   }, [searchQuery]);
 
   const visibleItems = useMemo(() => {
-    return catalogWithCategory
+    const filteredItems = catalogWithCategory
       .filter((row) => {
         if (selectedCategoryIds.length > 0 && !selectedCategoriesSet.has(row.categoryId)) {
+          return false;
+        }
+        if (onlyInStock && !row.item.inStock) {
           return false;
         }
         if (
@@ -312,9 +321,25 @@ export function CatalogPage() {
         return true;
       })
       .map((row) => row.item);
+
+    if (priceSortMode === "asc") {
+      return [...filteredItems].sort(
+        (a, b) => a.price - b.price || a.title.localeCompare(b.title, "ru"),
+      );
+    }
+
+    if (priceSortMode === "desc") {
+      return [...filteredItems].sort(
+        (a, b) => b.price - a.price || a.title.localeCompare(b.title, "ru"),
+      );
+    }
+
+    return filteredItems;
   }, [
     catalogWithCategory,
     normalizedSearchQuery,
+    onlyInStock,
+    priceSortMode,
     selectedCategoriesSet,
     selectedCategoryIds.length,
   ]);
@@ -375,71 +400,126 @@ export function CatalogPage() {
         </button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1 overflow-x-auto">
-          <div className="flex w-max min-w-full items-center gap-2 pr-1">
-            <button
-              type="button"
-              className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-[#1f2328] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
-              onClick={() => setFiltersOpen(true)}
-            >
-              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-                <path
-                  d="M4 6.5h16M7 12h10M10 17.5h4"
-                  className="fill-none stroke-current"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-              Фильтры
-              {selectedCategoryIds.length > 0 ? (
-                <span className="rounded-full bg-[#2f80ff] px-1.5 py-0.5 text-[10px] font-bold text-white">
-                  {selectedCategoryIds.length}
-                </span>
-              ) : null}
-            </button>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1 overflow-x-auto">
+            <div className="flex w-max min-w-full items-center gap-2 pr-1">
+              <button
+                type="button"
+                className={[
+                  "inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+                  priceSortMode === "none" && !onlyInStock
+                    ? "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]"
+                    : "border-[#2f80ff] bg-[#2f80ff] text-white",
+                ].join(" ")}
+                onClick={() => setSortOpen(true)}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                  <path
+                    d="M7 5v14m0 0-3-3m3 3 3-3M17 19V5m0 0-3 3m3-3 3 3"
+                    className="fill-none stroke-current"
+                    strokeWidth="1.9"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Сортировка
+              </button>
 
-            {quickCategories.map((category) => {
-              const active = selectedCategoriesSet.has(category.id);
-              return (
-                <button
-                  key={category.id}
-                  type="button"
-                  className={[
-                    "shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
-                    active
-                      ? "border-[#2f80ff] bg-[#2f80ff] text-white"
-                      : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
-                  ].join(" ")}
-                  onClick={() => toggleCategory(category.id)}
-                >
-                  {category.label}
-                </button>
-              );
-            })}
+              <button
+                type="button"
+                className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-[#1f2328] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
+                onClick={() => setFiltersOpen(true)}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                  <path
+                    d="M4 6.5h16M7 12h10M10 17.5h4"
+                    className="fill-none stroke-current"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                Фильтры
+                {selectedCategoryIds.length > 0 ? (
+                  <span className="rounded-full bg-[#2f80ff] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {selectedCategoryIds.length}
+                  </span>
+                ) : null}
+              </button>
+
+              
+
+              {quickCategories.map((category) => {
+                const active = selectedCategoriesSet.has(category.id);
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    className={[
+                      "shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+                      active
+                        ? "border-[#2f80ff] bg-[#2f80ff] text-white"
+                        : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                    ].join(" ")}
+                    onClick={() => toggleCategory(category.id)}
+                  >
+                    {category.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
+
+          <button
+            type="button"
+            aria-label={searchOpen ? "Закрыть поиск" : "Открыть поиск"}
+            className={[
+              "grid h-10 w-10 shrink-0 place-items-center rounded-full border transition-colors",
+              searchOpen
+                ? "border-[#2f80ff] bg-[#2f80ff] text-white"
+                : "border-white/10 bg-[#1f2328] text-slate-300 hover:bg-[#20252b]",
+            ].join(" ")}
+            onClick={() =>
+              setSearchOpen((prev) => {
+                if (prev) {
+                  setSearchQuery("");
+                }
+                return !prev;
+              })
+            }
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+              <path
+                d="M15.8 14.4 20 18.6l-1.4 1.4-4.2-4.2a7 7 0 1 1 1.4-1.4ZM10 15a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"
+                className="fill-current"
+              />
+            </svg>
+          </button>
         </div>
 
-        <label className="relative shrink-0">
-          <span className="sr-only">Поиск по названию</span>
-          <svg
-            viewBox="0 0 24 24"
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-            aria-hidden="true"
-          >
-            <path
-              d="M15.8 14.4 20 18.6l-1.4 1.4-4.2-4.2a7 7 0 1 1 1.4-1.4ZM10 15a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"
-              className="fill-current"
+        {searchOpen ? (
+          <label className="relative block">
+            <span className="sr-only">Поиск по названию</span>
+            <svg
+              viewBox="0 0 24 24"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+              aria-hidden="true"
+            >
+              <path
+                d="M15.8 14.4 20 18.6l-1.4 1.4-4.2-4.2a7 7 0 1 1 1.4-1.4ZM10 15a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"
+                className="fill-current"
+              />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Поиск по названию"
+              className="h-10 w-full rounded-xl border border-white/10 bg-[#1f2328] pl-9 pr-3 text-xs font-medium text-slate-100 placeholder:text-slate-500 focus:border-[#2f80ff] focus:outline-none"
+              autoFocus
             />
-          </svg>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Поиск"
-            className="h-10 w-[132px] rounded-xl border border-white/10 bg-[#1f2328] pl-9 pr-3 text-xs font-medium text-slate-100 placeholder:text-slate-500 focus:border-[#2f80ff] focus:outline-none sm:w-[168px]"
-          />
-        </label>
+          </label>
+        ) : null}
       </div>
 
       {!supabaseEnabled ? (
@@ -517,6 +597,71 @@ export function CatalogPage() {
           ))}
         </div>
       )}
+
+      {sortOpen ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-4 pt-16 sm:items-center">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-900/50"
+            aria-label="Закрыть сортировку"
+            onClick={() => setSortOpen(false)}
+          />
+
+          <div className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-[#252a31] p-4 shadow-xl">
+            <div className="text-base font-semibold text-slate-100">Сортировать по</div>
+
+            <div className="mt-4 grid gap-2">
+              <button
+                type="button"
+                className={[
+                  "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
+                  onlyInStock
+                    ? "border-[#2f80ff] bg-[#2f80ff]/20 text-[#b9d4ff]"
+                    : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                ].join(" ")}
+                onClick={() => setOnlyInStock((prev) => !prev)}
+              >
+                <span>Только в наличии</span>
+                {onlyInStock ? <span aria-hidden="true">✓</span> : null}
+              </button>
+
+              <button
+                type="button"
+                className={[
+                  "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
+                  priceSortMode === "asc"
+                    ? "border-[#2f80ff] bg-[#2f80ff]/20 text-[#b9d4ff]"
+                    : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                ].join(" ")}
+                onClick={() => {
+                  setPriceSortMode((prev) => (prev === "asc" ? "none" : "asc"));
+                  setSortOpen(false);
+                }}
+              >
+                <span>По возрастанию цены</span>
+                {priceSortMode === "asc" ? <span aria-hidden="true">✓</span> : null}
+              </button>
+
+              <button
+                type="button"
+                className={[
+                  "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
+                  priceSortMode === "desc"
+                    ? "border-[#2f80ff] bg-[#2f80ff]/20 text-[#b9d4ff]"
+                    : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                ].join(" ")}
+                onClick={() => {
+                  setPriceSortMode((prev) => (prev === "desc" ? "none" : "desc"));
+                  setSortOpen(false);
+                }}
+              >
+                <span>По убыванию цены</span>
+                {priceSortMode === "desc" ? <span aria-hidden="true">✓</span> : null}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {filtersOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-4 pt-16 sm:items-center">
