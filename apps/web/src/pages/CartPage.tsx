@@ -163,8 +163,10 @@ export function CartPage() {
 
   if (state.cart.length === 0) {
     return (
-      <div className="rounded-2xl border border-white/10 bg-[#252a31] p-6 text-center">
-        <div className="mb-3 text-7xl leading-none motion-safe:animate-pulse">🛒</div>
+      <div className="py-6 text-center">
+        <div className="empty-cart-stage" aria-hidden="true">
+          <span className="empty-cart-emoji">🛒</span>
+        </div>
 
         <div className="text-lg font-semibold">Корзина пуста</div>
         <div className="mt-2 text-sm text-slate-400">

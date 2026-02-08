@@ -14,21 +14,21 @@ export function FavoritesPage() {
 
   if (state.favorites.length === 0) {
     return (
-      <div className="space-y-4">
-        <div className="rounded-2xl border border-white/10 bg-[#252a31] p-6 text-center">
-          <div className="mb-3 text-7xl leading-none motion-safe:animate-pulse">❤️</div>
-
-          <div className="text-base font-semibold text-slate-100">Пока пусто</div>
-          <div className="mt-2 text-sm text-slate-400">
-            Добавляйте товары сердечком в каталоге.
-          </div>
-          <Link
-            to="/"
-            className="mt-4 inline-flex rounded-xl bg-[#2f80ff] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2370e3]"
-          >
-            Перейти в каталог
-          </Link>
+      <div className="space-y-4 py-6 text-center">
+        <div className="empty-heart-stage" aria-hidden="true">
+          <span className="empty-heart-emoji">❤️</span>
         </div>
+
+        <div className="text-lg font-semibold text-slate-100">Пока пусто</div>
+        <div className="mt-2 text-sm text-slate-400">
+          Добавляйте товары сердечком в каталоге.
+        </div>
+        <Link
+          to="/"
+          className="mt-4 inline-flex rounded-xl bg-[#2f80ff] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2370e3]"
+        >
+          Перейти в каталог
+        </Link>
       </div>
     );
   }
