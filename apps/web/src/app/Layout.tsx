@@ -20,14 +20,22 @@ function HomeIcon({ active }: TabIconProps) {
   );
 }
 
-function HeartIcon({ active }: TabIconProps) {
+function HeartIcon({ active, badge }: TabIconProps) {
   return (
-    <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden="true">
-      <path
-        d="M12 20.6c-.3 0-.6-.1-.8-.3l-1.3-1.1C6.1 16 4 14.1 4 11.5 4 9.3 5.7 7.6 7.9 7.6c1.3 0 2.5.6 3.3 1.5.8-.9 2-1.5 3.3-1.5 2.2 0 3.9 1.7 3.9 3.9 0 2.6-2.1 4.5-5.9 7.7l-1.3 1.1c-.2.2-.5.3-.8.3Z"
-        className={active ? "fill-[#2f80ff]" : "fill-slate-500"}
-      />
-    </svg>
+    <div className="relative">
+      <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden="true">
+        <path
+          d="M12 20.6c-.3 0-.6-.1-.8-.3l-1.3-1.1C6.1 16 4 14.1 4 11.5 4 9.3 5.7 7.6 7.9 7.6c1.3 0 2.5.6 3.3 1.5.8-.9 2-1.5 3.3-1.5 2.2 0 3.9 1.7 3.9 3.9 0 2.6-2.1 4.5-5.9 7.7l-1.3 1.1c-.2.2-.5.3-.8.3Z"
+          className={active ? "fill-[#2f80ff]" : "fill-slate-500"}
+        />
+      </svg>
+
+      {badge && badge > 0 ? (
+        <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-[#2f80ff] px-1 text-center text-[10px] font-bold leading-4 text-white">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -87,7 +95,7 @@ function tabClassName({ isActive }: { isActive: boolean }): string {
 
 export function Layout() {
   const { isTelegram, webApp } = useTelegram();
-  const { cartCount } = useAppState();
+  const { cartCount, favoritesCount } = useAppState();
 
   const photoUrl =
     typeof webApp.initDataUnsafe?.user?.photo_url === "string"
@@ -128,7 +136,7 @@ export function Layout() {
             <NavLink to="/favorites" className={tabClassName}>
               {({ isActive }) => (
                 <>
-                  <HeartIcon active={isActive} />
+                  <HeartIcon active={isActive} badge={favoritesCount} />
                   <span>Избранное</span>
                 </>
               )}

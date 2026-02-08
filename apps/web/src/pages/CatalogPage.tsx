@@ -56,10 +56,14 @@ function CatalogSkeleton({ count }: { count: number }) {
 
 function ProductCard({
   item,
+  isFavorite,
   onAdd,
+  onToggleFavorite,
 }: {
   item: CatalogItem;
+  isFavorite: boolean;
   onAdd: () => void;
+  onToggleFavorite: () => void;
 }) {
   return (
     <article className="flex h-full flex-col gap-4">
@@ -79,13 +83,18 @@ function ProductCard({
 
         <button
           type="button"
-          aria-label="Favorite"
-          className="absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/35 text-white backdrop-blur-sm"
+          aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          aria-pressed={isFavorite}
+          className={[
+            "absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full backdrop-blur-sm",
+            isFavorite ? "bg-[#ff4d6d]/90 text-white" : "bg-black/35 text-white",
+          ].join(" ")}
+          onClick={onToggleFavorite}
         >
           <svg viewBox="0 0 24 24" className="block h-5 w-5" aria-hidden="true">
             <path
               d="M12 20.6c-.3 0-.6-.1-.8-.3l-1.3-1.1C6.1 16 4 14.1 4 11.5 4 9.3 5.7 7.6 7.9 7.6c1.3 0 2.5.6 3.3 1.5.8-.9 2-1.5 3.3-1.5 2.2 0 3.9 1.7 3.9 3.9 0 2.6-2.1 4.5-5.9 7.7l-1.3 1.1c-.2.2-.5.3-.8.3Z"
-              className="fill-white"
+              className={isFavorite ? "fill-white" : "fill-white/90"}
             />
           </svg>
         </button>
@@ -222,6 +231,10 @@ export function CatalogPage() {
     return onlyInStock ? items.filter((x) => x.inStock) : items;
   }, [items, onlyInStock]);
 
+  const favoriteIds = useMemo(() => {
+    return new Set(state.favorites.map((item) => item.productId));
+  }, [state.favorites]);
+
   if (!state.city) {
     return (
       <FullscreenGate title="Выберите город">
@@ -325,6 +338,7 @@ export function CatalogPage() {
             <ProductCard
               key={item.id}
               item={item}
+              isFavorite={favoriteIds.has(item.id)}
               onAdd={() =>
                 dispatch({
                   type: "cart/add",
@@ -332,6 +346,18 @@ export function CatalogPage() {
                     productId: item.id,
                     title: item.title,
                     price: item.price,
+                  },
+                })
+              }
+              onToggleFavorite={() =>
+                dispatch({
+                  type: "favorite/toggle",
+                  item: {
+                    productId: item.id,
+                    title: item.title,
+                    price: item.price,
+                    imageUrl: item.imageUrl,
+                    inStock: item.inStock,
                   },
                 })
               }

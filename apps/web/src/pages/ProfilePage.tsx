@@ -13,13 +13,11 @@ export function ProfilePage() {
   const { webApp, isTelegram } = useTelegram();
 
   const [admin, setAdmin] = useState<AdminMe | null>(null);
-  const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    setCheckingAdmin(true);
     setError(null);
 
     apiGet<AdminMe>("/api/admin/me")
@@ -36,10 +34,6 @@ export function ProfilePage() {
         }
 
         setError(e instanceof Error ? e.message : "Не удалось проверить доступ");
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setCheckingAdmin(false);
       });
 
     return () => {
@@ -87,12 +81,10 @@ export function ProfilePage() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4">
-        <div className="text-sm font-semibold text-slate-100">Админ-доступ</div>
+      {admin ? (
+        <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4">
+          <div className="text-sm font-semibold text-slate-100">Админ-доступ</div>
 
-        {checkingAdmin ? (
-          <div className="mt-3 h-10 animate-pulse rounded-xl bg-slate-700/60" />
-        ) : admin ? (
           <div className="mt-3 space-y-3">
             <div className="text-xs text-emerald-300">
               Доступ разрешен: {admin.username ? `@${admin.username}` : admin.tgUserId} ({admin.role})
@@ -104,17 +96,15 @@ export function ProfilePage() {
               Открыть админку
             </Link>
           </div>
-        ) : (
-          <div className="mt-3 text-sm text-slate-400">Доступ к админке только для администраторов.</div>
-        )}
 
-        {error ? <div className="mt-3 text-xs text-rose-300">{error}</div> : null}
-        {!isTelegram ? (
-          <div className="mt-3 text-xs text-slate-500">
-            Для корректной проверки открывайте мини-приложение из Telegram.
-          </div>
-        ) : null}
-      </div>
+          {error ? <div className="mt-3 text-xs text-rose-300">{error}</div> : null}
+          {!isTelegram ? (
+            <div className="mt-3 text-xs text-slate-500">
+              Для корректной проверки открывайте мини-приложение из Telegram.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

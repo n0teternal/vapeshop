@@ -17,10 +17,19 @@ export type CartItem = {
   qty: number;
 };
 
+export type FavoriteItem = {
+  productId: string;
+  title: string;
+  price: number;
+  imageUrl: string | null;
+  inStock: boolean;
+};
+
 export type AppState = {
   isAdultConfirmed: boolean;
   city: City | null;
   cart: CartItem[];
+  favorites: FavoriteItem[];
 };
 
 type Action =
@@ -31,12 +40,15 @@ type Action =
   | { type: "cart/inc"; productId: string }
   | { type: "cart/dec"; productId: string }
   | { type: "cart/remove"; productId: string }
-  | { type: "cart/clear" };
+  | { type: "cart/clear" }
+  | { type: "favorite/toggle"; item: FavoriteItem }
+  | { type: "favorite/remove"; productId: string };
 
 type AppStateContextValue = {
   state: AppState;
   dispatch: Dispatch<Action>;
   cartCount: number;
+  favoritesCount: number;
 };
 
 const STORAGE_KEY = "miniapp.state.v1";
@@ -45,6 +57,7 @@ const initialState: AppState = {
   isAdultConfirmed: false,
   city: null,
   cart: [],
+  favorites: [],
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -68,6 +81,18 @@ function isCartItem(value: unknown): value is CartItem {
   );
 }
 
+function isFavoriteItem(value: unknown): value is FavoriteItem {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.productId === "string" &&
+    typeof value.title === "string" &&
+    typeof value.price === "number" &&
+    Number.isFinite(value.price) &&
+    typeof value.inStock === "boolean" &&
+    (value.imageUrl === null || typeof value.imageUrl === "string")
+  );
+}
+
 function loadStateFromStorage(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -84,8 +109,10 @@ function loadStateFromStorage(): AppState {
 
     const cartRaw = Array.isArray(parsed.cart) ? parsed.cart : [];
     const cart = cartRaw.filter(isCartItem);
+    const favoritesRaw = Array.isArray(parsed.favorites) ? parsed.favorites : [];
+    const favorites = favoritesRaw.filter(isFavoriteItem);
 
-    return { isAdultConfirmed, city, cart };
+    return { isAdultConfirmed, city, cart, favorites };
   } catch {
     return initialState;
   }
@@ -134,6 +161,21 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "cart/clear":
       return { ...state, cart: [] };
+    case "favorite/toggle": {
+      const exists = state.favorites.some((x) => x.productId === action.item.productId);
+      if (exists) {
+        return {
+          ...state,
+          favorites: state.favorites.filter((x) => x.productId !== action.item.productId),
+        };
+      }
+      return { ...state, favorites: [...state.favorites, action.item] };
+    }
+    case "favorite/remove":
+      return {
+        ...state,
+        favorites: state.favorites.filter((x) => x.productId !== action.productId),
+      };
     default: {
       const _exhaustiveCheck: never = action;
       return _exhaustiveCheck;
@@ -154,9 +196,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     return state.cart.reduce((sum, item) => sum + item.qty, 0);
   }, [state.cart]);
 
+  const favoritesCount = useMemo(() => {
+    return state.favorites.length;
+  }, [state.favorites]);
+
   const value = useMemo<AppStateContextValue>(() => {
-    return { state, dispatch, cartCount };
-  }, [state, dispatch, cartCount]);
+    return { state, dispatch, cartCount, favoritesCount };
+  }, [state, dispatch, cartCount, favoritesCount]);
 
   return (
     <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
