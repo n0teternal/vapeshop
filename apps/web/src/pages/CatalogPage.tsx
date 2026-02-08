@@ -86,10 +86,10 @@ function ProductCard({
             src={item.imageUrl}
             alt={item.title}
             loading="lazy"
-            className="h-[260px] w-full rounded-[26px] object-cover"
+            className="h-[320px] w-full rounded-[26px] object-cover"
           />
         ) : (
-          <div className="flex h-[260px] w-full items-center justify-center rounded-[26px] bg-[#2b3139]">
+          <div className="flex h-[320px] w-full items-center justify-center rounded-[26px] bg-[#2b3139]">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Photo
             </div>
@@ -164,6 +164,7 @@ export function CatalogPage() {
   const { state, dispatch } = useAppState();
 
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -292,16 +293,31 @@ export function CatalogPage() {
     return new Set(selectedCategoryIds);
   }, [selectedCategoryIds]);
 
+  const normalizedSearchQuery = useMemo(() => {
+    return searchQuery.trim().toLowerCase();
+  }, [searchQuery]);
+
   const visibleItems = useMemo(() => {
     return catalogWithCategory
       .filter((row) => {
         if (selectedCategoryIds.length > 0 && !selectedCategoriesSet.has(row.categoryId)) {
           return false;
         }
+        if (
+          normalizedSearchQuery.length > 0 &&
+          !row.item.title.toLowerCase().includes(normalizedSearchQuery)
+        ) {
+          return false;
+        }
         return true;
       })
       .map((row) => row.item);
-  }, [catalogWithCategory, selectedCategoriesSet, selectedCategoryIds.length]);
+  }, [
+    catalogWithCategory,
+    normalizedSearchQuery,
+    selectedCategoriesSet,
+    selectedCategoryIds.length,
+  ]);
 
   const favoriteIds = useMemo(() => {
     return new Set(state.favorites.map((item) => item.productId));
@@ -359,48 +375,71 @@ export function CatalogPage() {
         </button>
       </div>
 
-      <div className="overflow-x-auto">
-        <div className="flex w-max min-w-full items-center gap-2">
-          <button
-            type="button"
-            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-[#1f2328] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
-            onClick={() => setFiltersOpen(true)}
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-              <path
-                d="M4 6.5h16M7 12h10M10 17.5h4"
-                className="fill-none stroke-current"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
-            Фильтры
-            {selectedCategoryIds.length > 0 ? (
-              <span className="rounded-full bg-[#2f80ff] px-1.5 py-0.5 text-[10px] font-bold text-white">
-                {selectedCategoryIds.length}
-              </span>
-            ) : null}
-          </button>
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 overflow-x-auto">
+          <div className="flex w-max min-w-full items-center gap-2 pr-1">
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-[#1f2328] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
+              onClick={() => setFiltersOpen(true)}
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                <path
+                  d="M4 6.5h16M7 12h10M10 17.5h4"
+                  className="fill-none stroke-current"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+              Фильтры
+              {selectedCategoryIds.length > 0 ? (
+                <span className="rounded-full bg-[#2f80ff] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {selectedCategoryIds.length}
+                </span>
+              ) : null}
+            </button>
 
-          {quickCategories.map((category) => {
-            const active = selectedCategoriesSet.has(category.id);
-            return (
-              <button
-                key={category.id}
-                type="button"
-                className={[
-                  "shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
-                  active
-                    ? "border-[#2f80ff] bg-[#2f80ff] text-white"
-                    : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
-                ].join(" ")}
-                onClick={() => toggleCategory(category.id)}
-              >
-                {category.label}
-              </button>
-            );
-          })}
+            {quickCategories.map((category) => {
+              const active = selectedCategoriesSet.has(category.id);
+              return (
+                <button
+                  key={category.id}
+                  type="button"
+                  className={[
+                    "shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+                    active
+                      ? "border-[#2f80ff] bg-[#2f80ff] text-white"
+                      : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                  ].join(" ")}
+                  onClick={() => toggleCategory(category.id)}
+                >
+                  {category.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
+
+        <label className="relative shrink-0">
+          <span className="sr-only">Поиск по названию</span>
+          <svg
+            viewBox="0 0 24 24"
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+            aria-hidden="true"
+          >
+            <path
+              d="M15.8 14.4 20 18.6l-1.4 1.4-4.2-4.2a7 7 0 1 1 1.4-1.4ZM10 15a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"
+              className="fill-current"
+            />
+          </svg>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Поиск"
+            className="h-10 w-[132px] rounded-xl border border-white/10 bg-[#1f2328] pl-9 pr-3 text-xs font-medium text-slate-100 placeholder:text-slate-500 focus:border-[#2f80ff] focus:outline-none sm:w-[168px]"
+          />
+        </label>
       </div>
 
       {!supabaseEnabled ? (
