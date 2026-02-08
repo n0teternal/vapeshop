@@ -14,13 +14,13 @@ export function FavoritesPage() {
 
   if (state.favorites.length === 0) {
     return (
-      <div className="space-y-4 py-6 text-center">
+      <div className="py-6 text-center">
         <div className="empty-heart-stage" aria-hidden="true">
           <span className="empty-heart-emoji">❤️</span>
         </div>
 
-        <div className="text-lg font-semibold text-slate-100">Пока пусто</div>
-        <div className="mt-2 text-sm text-slate-400">
+        <div className="text-lg font-semibold leading-tight text-slate-100">Пока пусто</div>
+        <div className="mt-2 text-sm leading-[1.35] text-slate-400">
           Добавляйте товары сердечком в каталоге.
         </div>
         <Link

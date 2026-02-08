@@ -168,8 +168,8 @@ export function CartPage() {
           <span className="empty-cart-emoji">🛒</span>
         </div>
 
-        <div className="text-lg font-semibold">Корзина пуста</div>
-        <div className="mt-2 text-sm text-slate-400">
+        <div className="text-lg font-semibold leading-tight text-slate-100">Корзина пуста</div>
+        <div className="mt-2 text-sm leading-[1.35] text-slate-400">
           Добавьте товары из каталога.
         </div>
         <Link
@@ -184,7 +184,7 @@ export function CartPage() {
 
   return (
     <div className="space-y-4">
-      <div className="text-lg font-semibold">Корзина</div>
+      <div className="text-lg font-semibold leading-tight text-slate-100">Корзина</div>
 
       <div className="space-y-3">
         {state.cart.map((item) => (
@@ -247,7 +247,7 @@ export function CartPage() {
       <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4">
         <div className="flex items-center justify-between">
           <div className="text-sm text-slate-400">Итого</div>
-          <div className="text-lg font-semibold">{formatPriceRub(total)}</div>
+          <div className="text-lg font-semibold leading-tight text-slate-100">{formatPriceRub(total)}</div>
         </div>
 
         <div className="mt-4 grid gap-3">
