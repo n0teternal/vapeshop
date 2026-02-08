@@ -79,7 +79,7 @@ function ProductCard({
   onToggleFavorite: () => void;
 }) {
   return (
-    <article className="flex h-full flex-col gap-4">
+    <article className="flex h-full flex-col gap-2">
       <div className="relative overflow-hidden rounded-[26px] border border-white/10">
         {item.imageUrl ? (
           <img
@@ -134,7 +134,7 @@ function ProductCard({
         <div className="text-[clamp(1.15rem,4.5vw,1.45rem)] font-black leading-none text-white">
           {formatPriceRub(item.price)}
         </div>
-        <div className="mt-2 line-clamp-2 min-h-[2.6em] text-[clamp(0.86rem,3.25vw,1rem)] font-normal leading-snug text-slate-200">
+        <div className="mt-1 line-clamp-2 min-h-[2.6em] text-[clamp(0.86rem,3.25vw,1rem)] font-normal leading-snug text-slate-200">
           {item.title}
         </div>
       </div>
