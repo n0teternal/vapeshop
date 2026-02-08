@@ -44,6 +44,110 @@ function sanitizeFileName(filename: string): string {
   return base.replaceAll(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
 }
 
+type ListedImageFile = { name: string; size: number; updatedAt: string };
+type StorageLocation = { bucket: string; prefix: string };
+
+function parseStorageLocationFromBaseUrl(baseUrl: string | null): StorageLocation | null {
+  if (!baseUrl) return null;
+
+  try {
+    const url = new URL(baseUrl);
+    const marker = "/storage/v1/object/public/";
+    const markerIndex = url.pathname.indexOf(marker);
+    if (markerIndex < 0) return null;
+
+    const tail = url.pathname
+      .slice(markerIndex + marker.length)
+      .replace(/^\/+|\/+$/g, "");
+    if (!tail) return null;
+
+    const [bucket, ...prefixParts] = tail.split("/").map((part) => decodeURIComponent(part));
+    if (!bucket) return null;
+
+    return { bucket, prefix: prefixParts.join("/") };
+  } catch {
+    return null;
+  }
+}
+
+function joinStoragePath(prefix: string, filename: string): string {
+  return prefix ? `${prefix}/${filename}` : filename;
+}
+
+function isStorageNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { message?: unknown; statusCode?: unknown };
+  const message =
+    typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  const statusCode = maybeError.statusCode;
+  return message.includes("not found") || statusCode === 404 || statusCode === "404";
+}
+
+async function listLocalItemFiles(itemsDir: string): Promise<ListedImageFile[]> {
+  await fs.mkdir(itemsDir, { recursive: true });
+  const entries = await fs.readdir(itemsDir, { withFileTypes: true });
+  const files: ListedImageFile[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const name = entry.name;
+    if (name === ".gitkeep") continue;
+    const fullPath = path.join(itemsDir, name);
+    const stat = await fs.stat(fullPath);
+    files.push({ name, size: stat.size, updatedAt: stat.mtime.toISOString() });
+  }
+
+  files.sort((a, b) => a.name.localeCompare(b.name));
+  return files;
+}
+
+async function listStorageItemFiles(location: StorageLocation): Promise<ListedImageFile[]> {
+  const supabase = createServiceSupabaseClient();
+  const files: ListedImageFile[] = [];
+  const pageSize = 1000;
+  let offset = 0;
+
+  for (;;) {
+    const { data, error } = await supabase.storage.from(location.bucket).list(location.prefix, {
+      limit: pageSize,
+      offset,
+      sortBy: { column: "name", order: "asc" },
+    });
+
+    if (error) {
+      throw new HttpError(500, "STORAGE", `Failed to list storage files: ${error.message}`);
+    }
+
+    const page = data ?? [];
+    for (const entry of page) {
+      if (!entry || typeof entry.name !== "string") continue;
+      if (entry.name === ".gitkeep") continue;
+      if (entry.id === null) continue;
+
+      const size =
+        entry.metadata && typeof entry.metadata === "object" && "size" in entry.metadata
+          ? Number((entry.metadata as { size?: unknown }).size ?? 0)
+          : 0;
+      const updatedAt =
+        typeof entry.updated_at === "string" && entry.updated_at.length > 0
+          ? entry.updated_at
+          : new Date(0).toISOString();
+
+      files.push({
+        name: entry.name,
+        size: Number.isFinite(size) ? size : 0,
+        updatedAt,
+      });
+    }
+
+    if (page.length < pageSize) break;
+    offset += page.length;
+  }
+
+  files.sort((a, b) => a.name.localeCompare(b.name));
+  return files;
+}
+
 function getParamId(request: FastifyRequest): string {
   const params = request.params as unknown;
   const parsed = z.object({ id: z.string().uuid() }).safeParse(params);
@@ -612,21 +716,28 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       try {
         await requireAdmin(request);
 
-        await fs.mkdir(itemsDir, { recursive: true });
-        const entries = await fs.readdir(itemsDir, { withFileTypes: true });
-        const files: Array<{ name: string; size: number; updatedAt: string }> = [];
+        const localFiles = await listLocalItemFiles(itemsDir);
+        const storageLocation = parseStorageLocationFromBaseUrl(config.productImagesBaseUrl);
 
-        for (const entry of entries) {
-          if (!entry.isFile()) continue;
-          const name = entry.name;
-          if (name === ".gitkeep") continue;
-          const fullPath = path.join(itemsDir, name);
-          const stat = await fs.stat(fullPath);
-          files.push({ name, size: stat.size, updatedAt: stat.mtime.toISOString() });
+        if (!storageLocation) {
+          return reply
+            .code(200)
+            .send(ok({ files: localFiles, baseUrl: config.productImagesBaseUrl ?? null }));
         }
 
-        files.sort((a, b) => a.name.localeCompare(b.name));
-        return reply.code(200).send(ok({ files, baseUrl: config.productImagesBaseUrl ?? null }));
+        const storageFiles = await listStorageItemFiles(storageLocation);
+        const mergedFiles = [...localFiles];
+        const existingNames = new Set(localFiles.map((file) => file.name));
+
+        for (const file of storageFiles) {
+          if (existingNames.has(file.name)) continue;
+          mergedFiles.push(file);
+        }
+
+        mergedFiles.sort((a, b) => a.name.localeCompare(b.name));
+        return reply
+          .code(200)
+          .send(ok({ files: mergedFiles, baseUrl: config.productImagesBaseUrl ?? null }));
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
@@ -652,8 +763,41 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const target = path.join(itemsDir, safeName);
-        await fs.rm(target);
-        return reply.code(200).send(ok({ deleted: safeName }));
+        try {
+          await fs.rm(target);
+          return reply.code(200).send(ok({ deleted: safeName }));
+        } catch (e) {
+          const isLocalMissing =
+            e &&
+            typeof e === "object" &&
+            "code" in e &&
+            (e as { code?: unknown }).code === "ENOENT";
+          if (!isLocalMissing) {
+            throw e;
+          }
+
+          const storageLocation = parseStorageLocationFromBaseUrl(config.productImagesBaseUrl);
+          if (!storageLocation) {
+            const body = fail("NOT_FOUND", "File not found");
+            return reply.code(404).send(body);
+          }
+
+          const objectPath = joinStoragePath(storageLocation.prefix, safeName);
+          const supabase = createServiceSupabaseClient();
+          const { error: removeError } = await supabase.storage
+            .from(storageLocation.bucket)
+            .remove([objectPath]);
+
+          if (removeError) {
+            if (isStorageNotFoundError(removeError)) {
+              const body = fail("NOT_FOUND", "File not found");
+              return reply.code(404).send(body);
+            }
+            throw new HttpError(500, "STORAGE", `Failed to delete file: ${removeError.message}`);
+          }
+
+          return reply.code(200).send(ok({ deleted: safeName }));
+        }
       } catch (e) {
         if (e && typeof e === "object" && "code" in e && (e as { code?: unknown }).code === "ENOENT") {
           const body = fail("NOT_FOUND", "File not found");
@@ -690,9 +834,42 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
 
         const fromPath = path.join(itemsDir, fromSafe);
         const toPath = path.join(itemsDir, toSafe);
-        await fs.rename(fromPath, toPath);
+        try {
+          await fs.rename(fromPath, toPath);
+          return reply.code(200).send(ok({ from: fromSafe, to: toSafe }));
+        } catch (e) {
+          const isLocalMissing =
+            e &&
+            typeof e === "object" &&
+            "code" in e &&
+            (e as { code?: unknown }).code === "ENOENT";
+          if (!isLocalMissing) {
+            throw e;
+          }
 
-        return reply.code(200).send(ok({ from: fromSafe, to: toSafe }));
+          const storageLocation = parseStorageLocationFromBaseUrl(config.productImagesBaseUrl);
+          if (!storageLocation) {
+            const body = fail("NOT_FOUND", "File not found");
+            return reply.code(404).send(body);
+          }
+
+          const fromObjectPath = joinStoragePath(storageLocation.prefix, fromSafe);
+          const toObjectPath = joinStoragePath(storageLocation.prefix, toSafe);
+          const supabase = createServiceSupabaseClient();
+          const { error: moveError } = await supabase.storage
+            .from(storageLocation.bucket)
+            .move(fromObjectPath, toObjectPath);
+
+          if (moveError) {
+            if (isStorageNotFoundError(moveError)) {
+              const body = fail("NOT_FOUND", "File not found");
+              return reply.code(404).send(body);
+            }
+            throw new HttpError(500, "STORAGE", `Failed to rename file: ${moveError.message}`);
+          }
+
+          return reply.code(200).send(ok({ from: fromSafe, to: toSafe }));
+        }
       } catch (e) {
         if (e && typeof e === "object" && "code" in e && (e as { code?: unknown }).code === "ENOENT") {
           const body = fail("NOT_FOUND", "File not found");

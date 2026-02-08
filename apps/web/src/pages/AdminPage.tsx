@@ -104,6 +104,16 @@ function formatDateTime(iso: string): string {
   return d.toLocaleString("ru-RU");
 }
 
+function buildPublicFileUrl(baseUrl: string, name: string): string {
+  const normalizedBase = baseUrl.replace(/\/+$/g, "");
+  const encodedPath = name
+    .split("/")
+    .filter((part) => part.length > 0)
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  return `${normalizedBase}/${encodedPath}`;
+}
+
 function Card({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4 shadow-sm">
@@ -505,7 +515,7 @@ function AdminUploadImages() {
                     {baseUrl ? (
                       <div className="overflow-hidden rounded-xl border border-white/10 bg-[#252a31]">
                         <img
-                          src={`${baseUrl}/${encodeURIComponent(f.name)}`}
+                          src={buildPublicFileUrl(baseUrl, f.name)}
                           alt={f.name}
                           className="aspect-square w-full object-cover"
                           loading="lazy"
