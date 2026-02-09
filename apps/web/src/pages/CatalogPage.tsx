@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
 import { isSupabaseConfigured } from "../supabase/client";
@@ -282,6 +283,54 @@ type CategoryStat = {
 
 type PriceSortMode = "none" | "asc" | "desc";
 type CatalogToast = { key: number; message: string };
+type CatalogLoadError = { message: string; devDetails?: string };
+
+function mapCatalogLoadError(error: unknown): CatalogLoadError {
+  if (error instanceof SupabaseQueryError) {
+    const details = `table=${error.table} status=${error.status ?? "n/a"} code=${error.code ?? "n/a"} msg=${error.message}`;
+    const msgLower = error.message.toLowerCase();
+
+    const isInvalidKey =
+      error.status === 401 &&
+      (msgLower.includes("invalid api key") ||
+        (msgLower.includes("apikey") && msgLower.includes("invalid")));
+    if (isInvalidKey) {
+      return {
+        message: "Supabase env не задан или ключ относится к другому проекту.",
+        devDetails: details,
+      };
+    }
+
+    const isSchemaCache =
+      error.status === 404 || error.code === "PGRST205" || msgLower.includes("schema cache");
+    if (isSchemaCache) {
+      return {
+        message: `В базе нет таблицы ${error.table} или не обновился API-кэш.`,
+        devDetails: details,
+      };
+    }
+
+    const isPermission =
+      error.status === 401 ||
+      error.status === 403 ||
+      error.code === "42501" ||
+      msgLower.includes("permission");
+    if (isPermission) {
+      return { message: "Нет прав доступа (RLS).", devDetails: details };
+    }
+
+    return { message: `Supabase error: ${error.message}`, devDetails: details };
+  }
+
+  const message =
+    error instanceof Error
+      ? error.message.includes("Supabase is not configured")
+        ? "Supabase env не задан или ключ относится к другому проекту."
+        : error.message
+      : "Unknown error";
+
+  return { message, devDetails: error instanceof Error ? error.message : String(error) };
+}
 
 export function CatalogPage() {
   const { state, dispatch } = useAppState();
@@ -293,18 +342,28 @@ export function CatalogPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [reloadToken, setReloadToken] = useState(0);
   const [toast, setToast] = useState<CatalogToast | null>(null);
   const toastKeyRef = useRef(0);
 
   const mockItems = useMemo(() => mapMockCatalog(), []);
-  const [supabaseItems, setSupabaseItems] = useState<CatalogItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<{ message: string; devDetails?: string } | null>(
-    null,
-  );
-
   const supabaseEnabled = isSupabaseConfigured();
+  const catalogQuery = useQuery({
+    queryKey: ["catalog", state.city] as const,
+    queryFn: ({ queryKey }) => {
+      const [, citySlug] = queryKey;
+      if (!citySlug) {
+        throw new Error("City is not selected");
+      }
+      return fetchCatalog(citySlug);
+    },
+    enabled: supabaseEnabled && state.city !== null,
+  });
+  const supabaseItems = catalogQuery.data ?? [];
+  const loading = supabaseEnabled && catalogQuery.isPending;
+  const error = useMemo(() => {
+    if (!catalogQuery.error) return null;
+    return mapCatalogLoadError(catalogQuery.error);
+  }, [catalogQuery.error]);
   const items = supabaseEnabled ? supabaseItems : mockItems;
 
   const cityLabel = useMemo(() => {
@@ -312,80 +371,6 @@ export function CatalogPage() {
     if (state.city === "blg") return "Благовещенск (BLG)";
     return null;
   }, [state.city]);
-
-  useEffect(() => {
-    if (!supabaseEnabled) return;
-    if (!state.city) return;
-
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    fetchCatalog(state.city)
-      .then((data) => {
-        if (cancelled) return;
-        setSupabaseItems(data);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-
-        if (e instanceof SupabaseQueryError) {
-          const details = `table=${e.table} status=${e.status ?? "n/a"} code=${e.code ?? "n/a"} msg=${e.message}`;
-          const msgLower = e.message.toLowerCase();
-
-          const isInvalidKey =
-            e.status === 401 &&
-            (msgLower.includes("invalid api key") ||
-              (msgLower.includes("apikey") && msgLower.includes("invalid")));
-          if (isInvalidKey) {
-            setError({
-              message: "Supabase env не задан или ключ относится к другому проекту.",
-              devDetails: details,
-            });
-            return;
-          }
-
-          const isSchemaCache =
-            e.status === 404 || e.code === "PGRST205" || msgLower.includes("schema cache");
-          if (isSchemaCache) {
-            setError({
-              message: `В базе нет таблицы ${e.table} или не обновился API-кэш.`,
-              devDetails: details,
-            });
-            return;
-          }
-
-          const isPermission =
-            e.status === 401 ||
-            e.status === 403 ||
-            e.code === "42501" ||
-            msgLower.includes("permission");
-          if (isPermission) {
-            setError({ message: "Нет прав доступа (RLS).", devDetails: details });
-            return;
-          }
-
-          setError({ message: `Supabase error: ${e.message}`, devDetails: details });
-          return;
-        }
-
-        const message =
-          e instanceof Error
-            ? e.message.includes("Supabase is not configured")
-              ? "Supabase env не задан или ключ относится к другому проекту."
-              : e.message
-            : "Unknown error";
-        setError({ message, devDetails: e instanceof Error ? e.message : String(e) });
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [state.city, supabaseEnabled, reloadToken]);
 
   const catalogWithCategory = useMemo(() => {
     return items.map((item) => ({
@@ -708,7 +693,9 @@ export function CatalogPage() {
           <button
             type="button"
             className="mt-3 rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700"
-            onClick={() => setReloadToken((x) => x + 1)}
+            onClick={() => {
+              void catalogQuery.refetch();
+            }}
           >
             Повторить
           </button>
