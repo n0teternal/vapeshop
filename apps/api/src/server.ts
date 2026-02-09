@@ -118,6 +118,24 @@ function pickTelegramChatId(citySlug: CitySlug): string {
   return config.telegram.chatIdOwner;
 }
 
+function parseUrlHost(rawUrl: string | null | undefined): string | null {
+  if (!rawUrl) return null;
+  try {
+    return new URL(rawUrl).host;
+  } catch {
+    return null;
+  }
+}
+
+const imageProxyAllowedHosts = new Set<string>();
+{
+  const supabaseHost = parseUrlHost(config.supabase.url);
+  if (supabaseHost) imageProxyAllowedHosts.add(supabaseHost);
+
+  const productImagesHost = parseUrlHost(config.productImagesBaseUrl);
+  if (productImagesHost) imageProxyAllowedHosts.add(productImagesHost);
+}
+
 const app = Fastify({ logger: true });
 
 await app.register(cors, {
@@ -159,6 +177,75 @@ await registerTelegramWebhookRoutes(app);
 
 app.get("/health", async () => {
   return { ok: true };
+});
+
+app.get<{
+  Querystring: { url?: string };
+  Reply: Buffer | ErrorResponse;
+}>("/api/image-proxy", async (request, reply) => {
+  try {
+    const rawUrl = request.query.url?.trim() ?? "";
+    if (!rawUrl) {
+      throw new HttpError(400, "BAD_REQUEST", "url query is required");
+    }
+
+    let target: URL;
+    try {
+      target = new URL(rawUrl);
+    } catch {
+      throw new HttpError(400, "BAD_REQUEST", "url query must be a valid absolute URL");
+    }
+
+    if (target.protocol !== "http:" && target.protocol !== "https:") {
+      throw new HttpError(400, "BAD_REQUEST", "Only http/https image URLs are allowed");
+    }
+
+    if (target.pathname.startsWith("/api/image-proxy")) {
+      throw new HttpError(400, "BAD_REQUEST", "Recursive proxy URL is not allowed");
+    }
+
+    if (!imageProxyAllowedHosts.has(target.host)) {
+      throw new HttpError(400, "BAD_REQUEST", "Host is not allowed for image proxy");
+    }
+
+    let upstream: Response;
+    try {
+      upstream = await fetch(target.toString(), { redirect: "follow" });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to fetch upstream image";
+      throw new HttpError(502, "UPSTREAM", message);
+    }
+
+    if (!upstream.ok) {
+      if (upstream.status === 404) {
+        throw new HttpError(404, "NOT_FOUND", "Image not found");
+      }
+      throw new HttpError(502, "UPSTREAM", `Upstream image request failed with ${upstream.status}`);
+    }
+
+    const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
+    const cacheControl =
+      upstream.headers.get("cache-control") ??
+      "public, max-age=300, s-maxage=1800, stale-while-revalidate=3600";
+    const body = Buffer.from(await upstream.arrayBuffer());
+
+    return reply
+      .header("Content-Type", contentType)
+      .header("Cache-Control", cacheControl)
+      .code(200)
+      .send(body);
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Image proxy request failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
 });
 
 app.get<{

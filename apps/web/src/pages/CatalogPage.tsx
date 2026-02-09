@@ -77,42 +77,69 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
+function buildProxyImageUrl(absoluteUrl: string): string | null {
+  if (absoluteUrl.startsWith("/api/image-proxy?url=")) return null;
+
+  try {
+    const parsed = new URL(absoluteUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return `/api/image-proxy?url=${encodeURIComponent(parsed.toString())}`;
+  } catch {
+    return null;
+  }
+}
+
 function buildImageCandidates(imageUrl: string | null): string[] {
   const raw = imageUrl?.trim() ?? "";
   if (!raw) return [];
 
-  const m = raw.match(/^([^?#]+)(.*)$/);
-  if (!m) return [raw];
-
-  const pathPart = m[1];
-  const suffix = m[2] ?? "";
-  if (!pathPart) return [raw];
-
-  const unique = new Set<string>();
-  const push = (value: string) => {
+  const directCandidates = new Set<string>();
+  const pushDirect = (value: string) => {
     if (value.trim().length === 0) return;
-    unique.add(value);
+    directCandidates.add(value);
   };
 
-  push(raw);
+  const m = raw.match(/^([^?#]+)(.*)$/);
+  if (!m) {
+    pushDirect(raw);
+  } else {
+    const pathPart = m[1];
+    const suffix = m[2] ?? "";
+    if (pathPart) {
+      pushDirect(raw);
 
-  const extMatch = pathPart.match(/\.([a-z0-9]{2,10})$/i);
-  if (extMatch) {
-    const ext = `.${(extMatch[1] ?? "").toLowerCase()}`;
-    const base = pathPart.slice(0, -ext.length);
-    const variants = [".webp", ".jpg", ".jpeg", ".png"];
-    for (const variant of variants) {
-      if (variant === ext) continue;
-      push(`${base}${variant}${suffix}`);
+      const extMatch = pathPart.match(/\.([a-z0-9]{2,10})$/i);
+      if (extMatch) {
+        const ext = `.${(extMatch[1] ?? "").toLowerCase()}`;
+        const base = pathPart.slice(0, -ext.length);
+        const variants = [".webp", ".jpg", ".jpeg", ".png"];
+        for (const variant of variants) {
+          if (variant === ext) continue;
+          pushDirect(`${base}${variant}${suffix}`);
+        }
+      } else {
+        pushDirect(`${pathPart}.webp${suffix}`);
+        pushDirect(`${pathPart}.jpg${suffix}`);
+        pushDirect(`${pathPart}.jpeg${suffix}`);
+        pushDirect(`${pathPart}.png${suffix}`);
+      }
+    } else {
+      pushDirect(raw);
     }
-    return Array.from(unique);
   }
 
-  push(`${pathPart}.webp${suffix}`);
-  push(`${pathPart}.jpg${suffix}`);
-  push(`${pathPart}.jpeg${suffix}`);
-  push(`${pathPart}.png${suffix}`);
-  return Array.from(unique);
+  const candidates = new Set<string>();
+  for (const candidate of directCandidates) {
+    candidates.add(candidate);
+    const proxied = buildProxyImageUrl(candidate);
+    if (proxied) {
+      candidates.add(proxied);
+    }
+  }
+
+  return Array.from(candidates);
 }
 
 function isSubsequence(query: string, target: string): boolean {
