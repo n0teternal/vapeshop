@@ -1,4 +1,4 @@
-import { API_BASE_URL } from "../config";
+import { buildApiUrl } from "../config";
 
 export class ApiError extends Error {
   public readonly code: string;
@@ -76,7 +76,7 @@ function buildHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const res = await fetch(buildApiUrl(path), {
     ...init,
     headers: buildHeaders(init.headers),
   });

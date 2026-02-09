@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { API_BASE_URL } from "../config";
+import { buildApiUrl } from "../config";
 import { useAppState } from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
 
@@ -119,7 +119,7 @@ export function CartPage() {
 
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
 
-      const res = await fetch(`${API_BASE_URL}/api/order`, {
+      const res = await fetch(buildApiUrl("/api/order"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
