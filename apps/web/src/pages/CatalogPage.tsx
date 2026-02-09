@@ -132,11 +132,11 @@ function buildImageCandidates(imageUrl: string | null): string[] {
 
   const candidates = new Set<string>();
   for (const candidate of directCandidates) {
-    candidates.add(candidate);
     const proxied = buildProxyImageUrl(candidate);
     if (proxied) {
       candidates.add(proxied);
     }
+    candidates.add(candidate);
   }
 
   return Array.from(candidates);
