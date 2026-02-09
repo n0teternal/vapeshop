@@ -670,7 +670,12 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         await requireAdmin(request);
 
         const files = await request.files();
-        await fs.mkdir(itemsDir, { recursive: true });
+        const storageLocation = parseStorageLocationFromBaseUrl(config.productImagesBaseUrl);
+        const supabase = storageLocation ? createServiceSupabaseClient() : null;
+
+        if (!storageLocation) {
+          await fs.mkdir(itemsDir, { recursive: true });
+        }
 
         const saved: Array<{ originalName: string; fileName: string; size: number }> = [];
         const errors: Array<{ originalName: string; message: string }> = [];
@@ -680,11 +685,26 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           received += 1;
           const originalName = file.filename || `file_${Date.now()}`;
           const safeName = sanitizeFileName(originalName) || `file_${Date.now()}`;
-          const target = path.join(itemsDir, safeName);
 
           try {
             const buffer = await file.toBuffer();
-            await fs.writeFile(target, buffer);
+            if (storageLocation && supabase) {
+              const objectPath = joinStoragePath(storageLocation.prefix, safeName);
+              const { error: uploadError } = await supabase.storage
+                .from(storageLocation.bucket)
+                .upload(objectPath, buffer, {
+                  upsert: true,
+                  contentType: file.mimetype,
+                });
+
+              if (uploadError) {
+                throw new HttpError(500, "STORAGE", `Failed to save file: ${uploadError.message}`);
+              }
+            } else {
+              const target = path.join(itemsDir, safeName);
+              await fs.writeFile(target, buffer);
+            }
+
             saved.push({ originalName, fileName: safeName, size: buffer.byteLength });
           } catch (e: unknown) {
             const message = e instanceof Error ? e.message : "Failed to save file";

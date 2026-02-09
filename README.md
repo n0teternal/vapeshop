@@ -67,6 +67,7 @@ copy .env.example .env.local
 - `TELEGRAM_CHAT_ID_OWNER` — чат по умолчанию (fallback)
 - `TELEGRAM_CHAT_ID_VVO` — чат для VVO
 - `TELEGRAM_CHAT_ID_BLG` — чат для BLG
+- `PRODUCT_IMAGES_BASE_URL` — базовый публичный URL для картинок товаров (рекомендуется Supabase Storage URL)
 - `CORS_ORIGINS` — **только для production**, список origin через запятую
 
 Если env не заданы — каталог продолжит работать на моках и покажет предупреждение.
@@ -106,9 +107,16 @@ Dashboard → **SQL Editor** → выполните:
 1) Dashboard → **Storage** → **Create bucket**:
    - name: `product-images`
    - Public: `true`
-2) (опционально) Загрузите 1–2 картинки и обновите `products.image_url` на публичные URL вида:
+2) Для backend задайте `PRODUCT_IMAGES_BASE_URL`, например:
+
+`https://<project-ref>.supabase.co/storage/v1/object/public/product-images/items`
+
+3) Загружайте файлы через админку — API будет писать их в Storage (переживают redeploy).
+4) (опционально) Обновите `products.image_url` на публичные URL вида:
 
 `https://<project-ref>.supabase.co/storage/v1/object/public/product-images/<path>`
+
+Важно: локальная папка `apps/api/static/items` не является надёжным хранилищем в Railway (после redeploy может очиститься).
 
 ## Админка (backend only)
 
