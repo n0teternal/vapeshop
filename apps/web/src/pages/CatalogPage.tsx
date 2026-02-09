@@ -77,6 +77,30 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
+function hasImageExtension(value: string): boolean {
+  return /\.(jpe?g|png|webp|gif|avif|svg)$/i.test(value);
+}
+
+function buildImageCandidates(imageUrl: string | null): string[] {
+  const raw = imageUrl?.trim() ?? "";
+  if (!raw) return [];
+
+  const m = raw.match(/^([^?#]+)(.*)$/);
+  if (!m) return [raw];
+
+  const pathPart = m[1];
+  const suffix = m[2] ?? "";
+  if (!pathPart || hasImageExtension(pathPart)) return [raw];
+
+  return [
+    `${pathPart}.webp${suffix}`,
+    `${pathPart}.jpg${suffix}`,
+    `${pathPart}.jpeg${suffix}`,
+    `${pathPart}.png${suffix}`,
+    raw,
+  ];
+}
+
 function isSubsequence(query: string, target: string): boolean {
   if (query.length === 0) return true;
   let queryIndex = 0;
@@ -199,15 +223,30 @@ function ProductCard({
   onAdd: () => void;
   onToggleFavorite: () => void;
 }) {
+  const imageCandidates = useMemo(() => buildImageCandidates(item.imageUrl), [item.imageUrl]);
+  const [imageIndex, setImageIndex] = useState(0);
+
+  useEffect(() => {
+    setImageIndex(0);
+  }, [item.imageUrl]);
+
+  const imageSrc = imageCandidates[imageIndex] ?? null;
+
   return (
     <article className="flex h-full flex-col gap-2">
       <div className="relative overflow-hidden rounded-[26px] border border-white/10">
-        {item.imageUrl ? (
+        {imageSrc ? (
           <img
-            src={item.imageUrl}
+            src={imageSrc}
             alt={item.title}
             loading="lazy"
             className="h-[224px] w-full rounded-[26px] object-cover"
+            onError={() => {
+              setImageIndex((prev) => {
+                if (prev >= imageCandidates.length - 1) return prev;
+                return prev + 1;
+              });
+            }}
           />
         ) : (
           <div className="flex h-[224px] w-full items-center justify-center rounded-[26px] bg-[#2b3139]">
@@ -288,6 +327,15 @@ type CatalogLoadError = { message: string; devDetails?: string };
 function mapCatalogLoadError(error: unknown): CatalogLoadError {
   if (error instanceof SupabaseQueryError) {
     const details = `table=${error.table} status=${error.status ?? "n/a"} code=${error.code ?? "n/a"} msg=${error.message}`;
+
+    if (error.code === "BAD_RESPONSE") {
+      return {
+        message:
+          "API вернул неожиданный ответ. Проверьте, что `/api/catalog` доступен и возвращает JSON.",
+        devDetails: details,
+      };
+    }
+
     const msgLower = error.message.toLowerCase();
 
     const isInvalidKey =
@@ -683,11 +731,19 @@ export function CatalogPage() {
           {import.meta.env.DEV && error.devDetails ? (
             <div className="mt-2 rounded-xl border border-rose-200 bg-[#1f2328] px-3 py-2 font-mono text-[11px] text-rose-900">
               <div>{error.devDetails}</div>
-              <div className="mt-1 text-rose-800">
-                DEV: выполните `supabase/schema.sql`, затем `supabase/seed.sql` в Supabase
-                SQL Editor. Если ошибка "schema cache" не исчезает, выполните `notify pgrst,
-                'reload schema';`.
-              </div>
+              {error.devDetails.includes("code=BAD_RESPONSE") ? (
+                <div className="mt-1 text-rose-800">
+                  DEV: проверьте, что API доступен (`/api/catalog?citySlug=vvo`), и что
+                  dev-proxy направлен на рабочий backend (`VITE_DEV_API_TARGET`) или локальный
+                  API запущен.
+                </div>
+              ) : (
+                <div className="mt-1 text-rose-800">
+                  DEV: выполните `supabase/schema.sql`, затем `supabase/seed.sql` в Supabase
+                  SQL Editor. Если ошибка "schema cache" не исчезает, выполните `notify pgrst,
+                  'reload schema';`.
+                </div>
+              )}
             </div>
           ) : null}
           <button

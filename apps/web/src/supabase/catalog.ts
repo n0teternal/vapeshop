@@ -42,6 +42,7 @@ export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogItem[]> {
   try {
     const data = await apiGet<CatalogApiResponse>(
       `/api/catalog?citySlug=${encodeURIComponent(citySlug)}`,
+      { withTelegramAuth: false },
     );
     return data.items;
   } catch (error: unknown) {

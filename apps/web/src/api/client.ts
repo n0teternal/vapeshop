@@ -60,7 +60,16 @@ function mergeHeaders(...parts: Array<HeadersInit | undefined>): Record<string, 
   return out;
 }
 
-function buildHeaders(extra?: HeadersInit): HeadersInit {
+type RequestOptions = {
+  withTelegramAuth?: boolean;
+};
+
+function buildHeaders(extra?: HeadersInit, options?: RequestOptions): HeadersInit {
+  const withTelegramAuth = options?.withTelegramAuth !== false;
+  if (!withTelegramAuth) {
+    return mergeHeaders(extra);
+  }
+
   const tgInitData = window.Telegram?.WebApp?.initData ?? "";
   const base: Record<string, string> = {};
 
@@ -75,10 +84,14 @@ function buildHeaders(extra?: HeadersInit): HeadersInit {
   return mergeHeaders(base, extra);
 }
 
-async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  init: RequestInit,
+  options?: RequestOptions,
+): Promise<T> {
   const res = await fetch(buildApiUrl(path), {
     ...init,
-    headers: buildHeaders(init.headers),
+    headers: buildHeaders(init.headers, options),
   });
 
   const json = (await res.json().catch(() => null)) as unknown;
@@ -93,8 +106,8 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   return envelope.data;
 }
 
-export function apiGet<T>(path: string): Promise<T> {
-  return requestJson<T>(path, { method: "GET" });
+export function apiGet<T>(path: string, options?: RequestOptions): Promise<T> {
+  return requestJson<T>(path, { method: "GET" }, options);
 }
 
 export function apiPost<T>(path: string, body: unknown): Promise<T> {

@@ -648,11 +648,28 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           );
         }
 
+        const imageFileNames = new Set<string>();
+        if (useImagePrefix) {
+          const localFiles = await listLocalItemFiles(itemsDir);
+          for (const file of localFiles) {
+            imageFileNames.add(file.name);
+          }
+
+          const storageLocation = parseStorageLocationFromBaseUrl(config.productImagesBaseUrl);
+          if (storageLocation) {
+            const storageFiles = await listStorageItemFiles(storageLocation);
+            for (const file of storageFiles) {
+              imageFileNames.add(file.name);
+            }
+          }
+        }
+
         const result = await importProductsCsv({
           supabase,
           csvText,
           imageBaseUrl: useImagePrefix ? config.productImagesBaseUrl : null,
           imageItemsDir: useImagePrefix ? itemsDir : null,
+          imageFileNames: useImagePrefix ? imageFileNames : null,
         });
 
         return reply.code(200).send(ok(result));

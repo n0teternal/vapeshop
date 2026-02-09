@@ -195,9 +195,13 @@ export async function importProductsCsv(params: {
   dryRun?: boolean;
   imageBaseUrl?: string | null;
   imageItemsDir?: string | null;
+  imageFileNames?: Iterable<string> | null;
 }): Promise<ImportProductsCsvResult> {
   const dryRun = params.dryRun === true;
   const imageBaseUrlRaw = params.imageBaseUrl?.trim() ?? "";
+  const normalizedImageFileNames = params.imageFileNames
+    ? new Set(Array.from(params.imageFileNames, (x) => x.toLowerCase()))
+    : null;
   let normalizedImageBaseUrl: string | null = null;
   if (imageBaseUrlRaw) {
     try {
@@ -326,15 +330,31 @@ export async function importProductsCsv(params: {
       if (!isValidUrl) {
         if (normalizedImageBaseUrl) {
           let fileName = image_url.replace(/^\/+/, "");
-          if (!hasFileExtension(fileName) && params.imageItemsDir) {
+          if (!hasFileExtension(fileName)) {
             const base = fileName;
             const variants = [".jpg", ".jpeg", ".png", ".webp"];
-            for (const ext of variants) {
-              const candidate = base + ext;
-              const fullPath = path.join(params.imageItemsDir, candidate);
-              if (fs.existsSync(fullPath)) {
-                fileName = candidate;
-                break;
+            let resolved = false;
+
+            if (normalizedImageFileNames) {
+              for (const ext of variants) {
+                const candidate = base + ext;
+                if (normalizedImageFileNames.has(candidate.toLowerCase())) {
+                  fileName = candidate;
+                  resolved = true;
+                  break;
+                }
+              }
+            }
+
+            if (!resolved && params.imageItemsDir) {
+              for (const ext of variants) {
+                const candidate = base + ext;
+                const fullPath = path.join(params.imageItemsDir, candidate);
+                if (fs.existsSync(fullPath)) {
+                  fileName = candidate;
+                  resolved = true;
+                  break;
+                }
               }
             }
           }
