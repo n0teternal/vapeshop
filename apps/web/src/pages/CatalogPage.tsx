@@ -77,10 +77,6 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
-function hasImageExtension(value: string): boolean {
-  return /\.(jpe?g|png|webp|gif|avif|svg)$/i.test(value);
-}
-
 function buildImageCandidates(imageUrl: string | null): string[] {
   const raw = imageUrl?.trim() ?? "";
   if (!raw) return [];
@@ -90,15 +86,33 @@ function buildImageCandidates(imageUrl: string | null): string[] {
 
   const pathPart = m[1];
   const suffix = m[2] ?? "";
-  if (!pathPart || hasImageExtension(pathPart)) return [raw];
+  if (!pathPart) return [raw];
 
-  return [
-    `${pathPart}.webp${suffix}`,
-    `${pathPart}.jpg${suffix}`,
-    `${pathPart}.jpeg${suffix}`,
-    `${pathPart}.png${suffix}`,
-    raw,
-  ];
+  const unique = new Set<string>();
+  const push = (value: string) => {
+    if (value.trim().length === 0) return;
+    unique.add(value);
+  };
+
+  push(raw);
+
+  const extMatch = pathPart.match(/\.([a-z0-9]{2,10})$/i);
+  if (extMatch) {
+    const ext = `.${(extMatch[1] ?? "").toLowerCase()}`;
+    const base = pathPart.slice(0, -ext.length);
+    const variants = [".webp", ".jpg", ".jpeg", ".png"];
+    for (const variant of variants) {
+      if (variant === ext) continue;
+      push(`${base}${variant}${suffix}`);
+    }
+    return Array.from(unique);
+  }
+
+  push(`${pathPart}.webp${suffix}`);
+  push(`${pathPart}.jpg${suffix}`);
+  push(`${pathPart}.jpeg${suffix}`);
+  push(`${pathPart}.png${suffix}`);
+  return Array.from(unique);
 }
 
 function isSubsequence(query: string, target: string): boolean {
@@ -239,7 +253,8 @@ function ProductCard({
           <img
             src={imageSrc}
             alt={item.title}
-            loading="lazy"
+            loading="eager"
+            referrerPolicy="no-referrer"
             className="h-[224px] w-full rounded-[26px] object-cover"
             onError={() => {
               setImageIndex((prev) => {
