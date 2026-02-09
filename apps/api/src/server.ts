@@ -8,11 +8,21 @@ import { verifyTelegramInitData } from "./telegram/verifyInitData.js";
 import { createOrder, type CreateOrderPayload } from "./order/createOrder.js";
 import { HttpError, isHttpError } from "./httpError.js";
 import { registerAdminRoutes } from "./admin/routes.js";
+import {
+  fetchCatalogByCity,
+  type CatalogCitySlug,
+  type CatalogItem,
+} from "./catalog/getCatalog.js";
 import { config } from "./config.js";
 import { createServiceSupabaseClient } from "./supabase/serviceClient.js";
 import { sendMessage } from "./telegram/api.js";
 import { registerTelegramWebhookRoutes } from "./telegram/webhookRoutes.js";
 import { ensureTelegramWebhook } from "./telegram/webhookSetup.js";
+
+type ApiSuccess<T> = {
+  ok: true;
+  data: T;
+};
 
 type ErrorResponse = {
   ok: false;
@@ -30,6 +40,10 @@ type CitySlug = "vvo" | "blg";
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
 };
+
+function ok<T>(data: T): ApiSuccess<T> {
+  return { ok: true, data };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -145,6 +159,38 @@ await registerTelegramWebhookRoutes(app);
 
 app.get("/health", async () => {
   return { ok: true };
+});
+
+app.get<{
+  Querystring: { citySlug?: string };
+  Reply:
+    | ApiSuccess<{ citySlug: CatalogCitySlug; items: CatalogItem[] }>
+    | ErrorResponse;
+}>("/api/catalog", async (request, reply) => {
+  try {
+    const citySlug = request.query.citySlug;
+    if (citySlug !== "vvo" && citySlug !== "blg") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
+    }
+
+    const items = await fetchCatalogByCity(citySlug);
+
+    return reply
+      .header("Cache-Control", "public, max-age=30, s-maxage=120, stale-while-revalidate=300")
+      .code(200)
+      .send(ok({ citySlug, items }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Catalog request failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
 });
 
 app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
