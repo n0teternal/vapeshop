@@ -193,4 +193,4 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 - Telegram чат: после заказа сообщение с кнопками, нажатия меняют статус и редактируют сообщение
 
 
-NO LOL
+NO LOL NO LOL
