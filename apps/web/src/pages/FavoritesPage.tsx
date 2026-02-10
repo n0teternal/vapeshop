@@ -1,5 +1,9 @@
+import { Heart, ShoppingBag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ProductImagePreview } from "../components/ProductImagePreview";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { useAppState } from "../state/AppStateProvider";
 
 function formatPriceRub(value: number): string {
@@ -15,88 +19,87 @@ export function FavoritesPage() {
 
   if (state.favorites.length === 0) {
     return (
-      <div className="py-6 text-center">
-        <div className="empty-heart-stage" aria-hidden="true">
-          <span className="empty-heart-emoji">❤️</span>
-        </div>
-
-        <div className="text-lg font-semibold leading-tight text-slate-100">Пока пусто</div>
-        <div className="mt-2 text-sm leading-[1.35] text-slate-400">
-          Добавляйте товары сердечком в каталоге.
-        </div>
-        <Link
-          to="/"
-          className="mt-4 inline-flex rounded-xl bg-[#2f80ff] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2370e3]"
-        >
-          Перейти в каталог
-        </Link>
-      </div>
+      <Card className="overflow-hidden border-border/80 bg-card/90">
+        <CardContent className="flex flex-col items-center py-10 text-center">
+          <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
+            <Heart className="h-8 w-8" />
+          </div>
+          <div className="text-lg font-semibold">Пока пусто</div>
+          <p className="mt-2 max-w-[24ch] text-sm text-muted-foreground">
+            Добавляйте товары сердечком в каталоге.
+          </p>
+          <Button asChild className="mt-5">
+            <Link to="/">Перейти в каталог</Link>
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="text-right text-xs text-slate-400">
-        {state.favorites.length} шт
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Избранное</h2>
+        <Badge variant="secondary">{state.favorites.length} шт</Badge>
       </div>
 
       <div className="space-y-3">
         {state.favorites.map((item) => (
-          <article
-            key={item.productId}
-            className="rounded-2xl border border-white/10 bg-[#252a31] p-4"
-          >
-            <div className="flex gap-3">
-              <ProductImagePreview
-                imageUrl={item.imageUrl}
-                alt={item.title}
-                loading="lazy"
-                className="h-16 w-16 rounded-xl object-cover"
-                placeholderClassName="flex h-16 w-16 items-center justify-center rounded-xl bg-[#2b3139] text-[10px] font-semibold uppercase text-slate-500"
-              />
+          <Card key={item.productId} className="border-border/80 bg-card/90">
+            <CardHeader className="pb-3">
+              <div className="flex gap-3">
+                <ProductImagePreview
+                  imageUrl={item.imageUrl}
+                  alt={item.title}
+                  loading="lazy"
+                  className="h-20 w-20 rounded-lg object-cover"
+                  placeholderClassName="flex h-20 w-20 items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
+                />
 
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold text-slate-100">
-                  {item.title}
+                <div className="min-w-0 flex-1">
+                  <CardTitle className="line-clamp-2 text-base">{item.title}</CardTitle>
+                  <div className="mt-1 text-sm font-semibold">{formatPriceRub(item.price)}</div>
+                  <Badge className="mt-2" variant={item.inStock ? "success" : "outline"}>
+                    {item.inStock ? "В наличии" : "Нет в наличии"}
+                  </Badge>
                 </div>
-                <div className="mt-1 text-sm font-semibold text-white">
-                  {formatPriceRub(item.price)}
-                </div>
-                <div className="mt-1 text-xs text-slate-400">
-                  {item.inStock ? "В наличии" : "Нет в наличии"}
-                </div>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="self-start text-destructive hover:text-destructive"
+                  onClick={() =>
+                    dispatch({ type: "favorite/remove", productId: item.productId })
+                  }
+                >
+                  Убрать
+                </Button>
               </div>
+            </CardHeader>
 
-              <button
+            <CardContent className="pt-0">
+              <Button
                 type="button"
-                className="self-start text-xs font-semibold text-rose-400 hover:text-rose-300"
+                className="w-full"
+                disabled={!item.inStock}
                 onClick={() =>
-                  dispatch({ type: "favorite/remove", productId: item.productId })
+                  dispatch({
+                    type: "cart/add",
+                    item: {
+                      productId: item.productId,
+                      title: item.title,
+                      price: item.price,
+                      imageUrl: item.imageUrl,
+                    },
+                  })
                 }
               >
-                Убрать
-              </button>
-            </div>
-
-            <button
-              type="button"
-              className="mt-3 w-full rounded-xl bg-[#2f80ff] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2370e3] disabled:cursor-not-allowed disabled:bg-slate-600"
-              disabled={!item.inStock}
-              onClick={() =>
-                dispatch({
-                  type: "cart/add",
-                  item: {
-                    productId: item.productId,
-                    title: item.title,
-                    price: item.price,
-                    imageUrl: item.imageUrl,
-                  },
-                })
-              }
-            >
-              {item.inStock ? "В корзину" : "Нет в наличии"}
-            </button>
-          </article>
+                <ShoppingBag className="h-4 w-4" />
+                {item.inStock ? "В корзину" : "Нет в наличии"}
+              </Button>
+            </CardContent>
+          </Card>
         ))}
       </div>
     </div>

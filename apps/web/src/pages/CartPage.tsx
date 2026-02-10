@@ -1,6 +1,13 @@
+import { Minus, Plus, ShoppingBag } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ProductImagePreview } from "../components/ProductImagePreview";
+import { Alert, AlertDescription } from "../components/ui/alert";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
 import { buildApiUrl } from "../config";
 import { useAppState } from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
@@ -142,7 +149,7 @@ export function CartPage() {
         const message = parsed.ok === false ? parsed.error.message : "Request failed";
 
         if ((code === "TG_INIT_DATA_REQUIRED" || code === "TG_INIT_DATA_INVALID") && !tgInitData) {
-          setSubmitError("Откройте мини-апп внутри Telegram, чтобы оформить заказ.");
+          setSubmitError("Откройте мини-приложение внутри Telegram, чтобы оформить заказ.");
         } else {
           setSubmitError(message);
         }
@@ -164,113 +171,116 @@ export function CartPage() {
 
   if (state.cart.length === 0) {
     return (
-      <div className="py-6 text-center">
-        <div className="empty-cart-stage" aria-hidden="true">
-          <span className="empty-cart-emoji">🛒</span>
-        </div>
-
-        <div className="text-lg font-semibold leading-tight text-slate-100">Корзина пуста</div>
-        <div className="mt-2 text-sm leading-[1.35] text-slate-400">
-          Добавьте товары из каталога.
-        </div>
-        <Link
-          to="/"
-          className="mt-4 inline-flex rounded-xl bg-[#2f80ff] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2370e3]"
-        >
-          Перейти в каталог
-        </Link>
-      </div>
+      <Card className="overflow-hidden border-border/80 bg-card/90">
+        <CardContent className="flex flex-col items-center py-10 text-center">
+          <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
+            <ShoppingBag className="h-8 w-8" />
+          </div>
+          <div className="text-lg font-semibold">Корзина пуста</div>
+          <p className="mt-2 max-w-[24ch] text-sm text-muted-foreground">
+            Добавьте товары из каталога.
+          </p>
+          <Button asChild className="mt-5">
+            <Link to="/">Перейти в каталог</Link>
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="text-lg font-semibold leading-tight text-slate-100">Корзина</div>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Корзина</h2>
+        <Badge variant="secondary">{state.cart.length} позиций</Badge>
+      </div>
 
       <div className="space-y-3">
         {state.cart.map((item) => (
-          <div
-            key={item.productId}
-            className="rounded-2xl border border-white/10 bg-[#252a31] p-4"
-          >
-            <div className="flex items-start gap-3">
-              <ProductImagePreview
-                imageUrl={item.imageUrl}
-                alt={item.title}
-                loading="lazy"
-                className="h-16 w-16 shrink-0 rounded-xl object-cover"
-                placeholderClassName="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[#2b3139] text-[10px] font-semibold uppercase text-slate-500"
-              />
+          <Card key={item.productId} className="border-border/80 bg-card/90">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <ProductImagePreview
+                  imageUrl={item.imageUrl}
+                  alt={item.title}
+                  loading="lazy"
+                  className="h-20 w-20 shrink-0 rounded-lg object-cover"
+                  placeholderClassName="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
+                />
 
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">{item.title}</div>
-                    <div className="mt-1 text-xs text-slate-400">
-                      {formatPriceRub(item.price)}
-                      {" / \u0448\u0442"}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{item.title}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {formatPriceRub(item.price)} / шт
+                      </div>
                     </div>
-                  </div>
-                  <button
-                    type="button"
-                    className="text-xs font-semibold text-rose-600 hover:text-rose-700"
-                    onClick={() =>
-                      dispatch({ type: "cart/remove", productId: item.productId })
-                    }
-                  >
-                    {"\u0423\u0434\u0430\u043b\u0438\u0442\u044c"}
-                  </button>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <button
+                    <Button
                       type="button"
-                      className="h-9 w-9 rounded-xl border border-white/10 bg-[#252a31] text-sm font-semibold hover:bg-[#303743] disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={submitting}
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
                       onClick={() =>
-                        dispatch({ type: "cart/dec", productId: item.productId })
+                        dispatch({ type: "cart/remove", productId: item.productId })
                       }
                     >
-                      -
-                    </button>
-                    <div className="min-w-10 text-center text-sm font-semibold">
-                      {item.qty}
-                    </div>
-                    <button
-                      type="button"
-                      className="h-9 w-9 rounded-xl border border-white/10 bg-[#252a31] text-sm font-semibold hover:bg-[#303743] disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={submitting}
-                      onClick={() =>
-                        dispatch({ type: "cart/inc", productId: item.productId })
-                      }
-                    >
-                      +
-                    </button>
+                      Удалить
+                    </Button>
                   </div>
-                  <div className="text-sm font-semibold">
-                    {formatPriceRub(item.price * item.qty)}
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8"
+                        disabled={submitting}
+                        onClick={() =>
+                          dispatch({ type: "cart/dec", productId: item.productId })
+                        }
+                      >
+                        <Minus className="h-3.5 w-3.5" />
+                      </Button>
+                      <div className="min-w-9 text-center text-sm font-semibold">{item.qty}</div>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8"
+                        disabled={submitting}
+                        onClick={() =>
+                          dispatch({ type: "cart/inc", productId: item.productId })
+                        }
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    <div className="text-sm font-semibold">
+                      {formatPriceRub(item.price * item.qty)}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4">
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-slate-400">Итого</div>
-          <div className="text-lg font-semibold leading-tight text-slate-100">{formatPriceRub(total)}</div>
-        </div>
+      <Card className="border-border/80 bg-card/90">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Оформление</CardTitle>
+            <div className="text-lg font-semibold">{formatPriceRub(total)}</div>
+          </div>
+        </CardHeader>
 
-        <div className="mt-4 grid gap-3">
-          <label className="grid gap-1 text-sm">
-            <span className="text-xs font-semibold text-slate-400">
-              Способ получения
-            </span>
+        <CardContent className="space-y-3">
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-semibold text-muted-foreground">Способ получения</span>
             <select
-              className="h-10 rounded-xl border border-white/10 bg-[#252a31] px-3 text-sm"
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
               value={deliveryMethod}
               disabled={submitting}
               onChange={(e) =>
@@ -283,12 +293,11 @@ export function CartPage() {
           </label>
 
           {deliveryMethod === "delivery" ? (
-            <label className="grid gap-1 text-sm">
-              <span className="text-xs font-semibold text-slate-400">
-                Ваш адрес <span className="text-rose-600">*</span>
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-semibold text-muted-foreground">
+                Ваш адрес <span className="text-destructive">*</span>
               </span>
-              <input
-                className="h-10 rounded-xl border border-white/10 bg-[#252a31] px-3 text-sm"
+              <Input
                 value={address}
                 disabled={submitting}
                 onChange={(e) => setAddress(e.target.value)}
@@ -297,40 +306,38 @@ export function CartPage() {
             </label>
           ) : null}
 
-          <label className="grid gap-1 text-sm">
-            <span className="text-xs font-semibold text-slate-400">Комментарий</span>
-            <textarea
-              className="min-h-20 rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-sm"
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-semibold text-muted-foreground">Комментарий</span>
+            <Textarea
               value={comment}
               disabled={submitting}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Опционально"
             />
           </label>
-        </div>
 
-        {submitError ? (
-          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
-            {submitError}
-          </div>
-        ) : null}
+          {submitError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{submitError}</AlertDescription>
+            </Alert>
+          ) : null}
 
-        <button
-          type="button"
-          className="mt-4 w-full rounded-xl bg-[#2f80ff] px-4 py-3 text-sm font-semibold text-white hover:bg-[#2370e3] disabled:cursor-not-allowed disabled:bg-slate-600"
-          disabled={!canSubmit}
-          onClick={() => void submitOrder()}
-        >
-          {submitting ? "Отправляем..." : "Оформить"}
-        </button>
+          <Button
+            type="button"
+            className="w-full"
+            disabled={!canSubmit}
+            onClick={() => void submitOrder()}
+          >
+            {submitting ? "Отправляем..." : "Оформить"}
+          </Button>
 
-        {!state.city ? (
-          <div className="mt-2 text-xs text-slate-500">
-            Для оформления выберите город в каталоге.
-          </div>
-        ) : null}
-      </div>
+          {!state.city ? (
+            <div className="text-xs text-muted-foreground">
+              Для оформления сначала выберите город в каталоге.
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
     </div>
   );
 }
-

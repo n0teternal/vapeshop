@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ProductImagePreview } from "../components/ProductImagePreview";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
 import { isSupabaseConfigured } from "../supabase/client";
@@ -23,11 +24,11 @@ function FullscreenGate({
   children: ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1f2328] px-4">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#252a31] p-6 shadow-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md rounded-2xl border border-border/70 bg-card/90 p-6 shadow-sm">
         <div className="text-lg font-semibold">{title}</div>
         {description ? (
-          <div className="mt-2 text-sm text-slate-400">{description}</div>
+          <div className="mt-2 text-sm text-muted-foreground">{description}</div>
         ) : null}
         <div className="mt-6">{children}</div>
       </div>
@@ -41,13 +42,13 @@ function CatalogSkeleton({ count }: { count: number }) {
       {Array.from({ length: count }).map((_, idx) => (
         <div
           key={`sk-${idx}`}
-          className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#252a31] shadow-sm"
+          className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-sm"
         >
-          <div className="aspect-[4/3] animate-pulse bg-slate-700/60" />
+          <div className="aspect-[4/3] animate-pulse bg-muted/60" />
           <div className="flex flex-1 flex-col space-y-2 p-3">
-            <div className="h-4 w-3/4 animate-pulse rounded bg-slate-700/60" />
-            <div className="h-4 w-1/2 animate-pulse rounded bg-slate-700/60" />
-            <div className="mt-auto h-8 w-full animate-pulse rounded-xl bg-slate-700/60" />
+            <div className="h-4 w-3/4 animate-pulse rounded bg-muted/60" />
+            <div className="h-4 w-1/2 animate-pulse rounded bg-muted/60" />
+            <div className="mt-auto h-8 w-full animate-pulse rounded-xl bg-muted/60" />
           </div>
         </div>
       ))}
@@ -77,70 +78,6 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
-function buildProxyImageUrl(absoluteUrl: string): string | null {
-  if (absoluteUrl.startsWith("/api/image-proxy?url=")) return null;
-
-  try {
-    const parsed = new URL(absoluteUrl);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
-    }
-    return `/api/image-proxy?url=${encodeURIComponent(parsed.toString())}`;
-  } catch {
-    return null;
-  }
-}
-
-function buildImageCandidates(imageUrl: string | null): string[] {
-  const raw = imageUrl?.trim() ?? "";
-  if (!raw) return [];
-
-  const directCandidates = new Set<string>();
-  const pushDirect = (value: string) => {
-    if (value.trim().length === 0) return;
-    directCandidates.add(value);
-  };
-
-  const m = raw.match(/^([^?#]+)(.*)$/);
-  if (!m) {
-    pushDirect(raw);
-  } else {
-    const pathPart = m[1];
-    const suffix = m[2] ?? "";
-    if (pathPart) {
-      pushDirect(raw);
-
-      const extMatch = pathPart.match(/\.([a-z0-9]{2,10})$/i);
-      if (extMatch) {
-        const ext = `.${(extMatch[1] ?? "").toLowerCase()}`;
-        const base = pathPart.slice(0, -ext.length);
-        const variants = [".webp", ".jpg", ".jpeg", ".png"];
-        for (const variant of variants) {
-          if (variant === ext) continue;
-          pushDirect(`${base}${variant}${suffix}`);
-        }
-      } else {
-        pushDirect(`${pathPart}.webp${suffix}`);
-        pushDirect(`${pathPart}.jpg${suffix}`);
-        pushDirect(`${pathPart}.jpeg${suffix}`);
-        pushDirect(`${pathPart}.png${suffix}`);
-      }
-    } else {
-      pushDirect(raw);
-    }
-  }
-
-  const candidates = new Set<string>();
-  for (const candidate of directCandidates) {
-    const proxied = buildProxyImageUrl(candidate);
-    if (proxied) {
-      candidates.add(proxied);
-    }
-    candidates.add(candidate);
-  }
-
-  return Array.from(candidates);
-}
 
 function isSubsequence(query: string, target: string): boolean {
   if (query.length === 0) return true;
@@ -264,47 +201,26 @@ function ProductCard({
   onAdd: () => void;
   onToggleFavorite: () => void;
 }) {
-  const imageCandidates = useMemo(() => buildImageCandidates(item.imageUrl), [item.imageUrl]);
-  const [imageIndex, setImageIndex] = useState(0);
-
-  useEffect(() => {
-    setImageIndex(0);
-  }, [item.imageUrl]);
-
-  const imageSrc = imageCandidates[imageIndex] ?? null;
-
   return (
     <article className="flex h-full flex-col gap-2">
-      <div className="relative overflow-hidden rounded-[26px] border border-white/10">
-        {imageSrc ? (
-          <img
-            src={imageSrc}
-            alt={item.title}
-            loading="eager"
-            referrerPolicy="no-referrer"
-            className="h-[224px] w-full rounded-[26px] object-cover"
-            onError={() => {
-              setImageIndex((prev) => {
-                if (prev >= imageCandidates.length - 1) return prev;
-                return prev + 1;
-              });
-            }}
-          />
-        ) : (
-          <div className="flex h-[224px] w-full items-center justify-center rounded-[26px] bg-[#2b3139]">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Photo
-            </div>
-          </div>
-        )}
+      <div className="relative overflow-hidden rounded-[20px] border border-border/60">
+        <ProductImagePreview
+          imageUrl={item.imageUrl}
+          alt={item.title}
+          loading="eager"
+          className="h-[224px] w-full rounded-[20px] object-cover"
+          placeholderClassName="flex h-[224px] w-full items-center justify-center rounded-[20px] bg-muted text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+        />
 
         <button
           type="button"
           aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
           aria-pressed={isFavorite}
           className={[
-            "absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full backdrop-blur-sm",
-            isFavorite ? "bg-[#ff4d6d]/90 text-white" : "bg-black/35 text-white",
+            "absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full border border-border/70 backdrop-blur-sm transition-colors",
+            isFavorite
+              ? "bg-destructive text-destructive-foreground"
+              : "bg-background/65 text-foreground hover:bg-background/80",
           ].join(" ")}
           onClick={onToggleFavorite}
         >
@@ -319,7 +235,7 @@ function ProductCard({
         <button
           type="button"
           aria-label="Add to cart"
-          className="absolute bottom-3 right-3 z-10 grid h-12 w-12 place-items-center rounded-full bg-white text-[#10151d] shadow-[0_10px_24px_rgba(0,0,0,0.45)] disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200"
+          className="absolute bottom-3 right-3 z-10 grid h-12 w-12 place-items-center rounded-full bg-primary text-primary-foreground shadow-glow disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           disabled={!item.inStock}
           onClick={onAdd}
         >
@@ -333,10 +249,10 @@ function ProductCard({
       </div>
 
       <div className="px-1 pb-1">
-        <div className="text-[clamp(1.15rem,4.5vw,1.45rem)] font-black leading-none text-white">
+        <div className="text-[clamp(1.15rem,4.5vw,1.45rem)] font-black leading-none text-foreground">
           {formatPriceRub(item.price)}
         </div>
-        <div className="mt-1 line-clamp-2 min-h-[2.6em] text-[clamp(0.86rem,3.25vw,1rem)] font-normal leading-snug text-slate-200">
+        <div className="mt-1 line-clamp-2 min-h-[2.6em] text-[clamp(0.86rem,3.25vw,1rem)] font-normal leading-snug text-foreground/85">
           {item.title}
         </div>
       </div>
@@ -618,17 +534,17 @@ export function CatalogPage() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/80">
             Город
           </div>
-          <div className="mt-1 text-lg font-semibold text-slate-100">
+          <div className="mt-1 text-lg font-semibold text-foreground">
             {cityLabel ?? "Не выбран"}
           </div>
         </div>
 
         <button
           type="button"
-          className="rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#1f2328]"
+          className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-background"
           onClick={() => dispatch({ type: "city/clear" })}
         >
           Сменить город
@@ -644,8 +560,8 @@ export function CatalogPage() {
                 className={[
                   "inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
                   priceSortMode === "none" && !onlyInStock
-                    ? "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]"
-                    : "border-[#2f80ff] bg-[#2f80ff] text-white",
+                    ? "border-border/70 bg-background text-foreground/85 hover:bg-muted/55"
+                    : "border-primary bg-primary text-white",
                 ].join(" ")}
                 onClick={() => setSortOpen(true)}
               >
@@ -663,7 +579,7 @@ export function CatalogPage() {
 
               <button
                 type="button"
-                className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-[#1f2328] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
+                className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-border/70 bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
                 onClick={() => setFiltersOpen(true)}
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
@@ -676,7 +592,7 @@ export function CatalogPage() {
                 </svg>
                 Фильтры
                 {selectedCategoryIds.length > 0 ? (
-                  <span className="rounded-full bg-[#2f80ff] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-white">
                     {selectedCategoryIds.length}
                   </span>
                 ) : null}
@@ -693,8 +609,8 @@ export function CatalogPage() {
                     className={[
                       "shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
                       active
-                        ? "border-[#2f80ff] bg-[#2f80ff] text-white"
-                        : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                        ? "border-primary bg-primary text-white"
+                        : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
                     ].join(" ")}
                     onClick={() => toggleCategory(category.id)}
                   >
@@ -711,8 +627,8 @@ export function CatalogPage() {
             className={[
               "grid h-10 w-10 shrink-0 place-items-center rounded-full border transition-colors",
               searchOpen
-                ? "border-[#2f80ff] bg-[#2f80ff] text-white"
-                : "border-white/10 bg-[#1f2328] text-slate-300 hover:bg-[#20252b]",
+                ? "border-primary bg-primary text-white"
+                : "border-border/70 bg-background text-foreground/80 hover:bg-muted/55",
             ].join(" ")}
             onClick={() =>
               setSearchOpen((prev) => {
@@ -737,7 +653,7 @@ export function CatalogPage() {
             <span className="sr-only">Поиск по названию</span>
             <svg
               viewBox="0 0 24 24"
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80"
               aria-hidden="true"
             >
               <path
@@ -750,7 +666,7 @@ export function CatalogPage() {
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Поиск по названию"
-              className="h-10 w-full rounded-xl border border-white/10 bg-[#1f2328] pl-9 pr-3 text-xs font-medium text-slate-100 placeholder:text-slate-500 focus:border-[#2f80ff] focus:outline-none"
+              className="h-10 w-full rounded-xl border border-border/70 bg-background pl-9 pr-3 text-xs font-medium text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
               autoFocus
             />
           </label>
@@ -758,29 +674,29 @@ export function CatalogPage() {
       </div>
 
       {!supabaseEnabled ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200">
           Supabase env не задан: используется мок-каталог (DEV).
-          <div className="mt-1 text-xs text-amber-800">
+          <div className="mt-1 text-xs text-amber-300">
             Заполните `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` в `.env.local`.
           </div>
         </div>
       ) : null}
 
       {supabaseEnabled && error ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
-          <div className="text-sm font-semibold text-rose-900">Ошибка загрузки каталога</div>
-          <div className="mt-1 text-xs text-rose-800">{error.message}</div>
+        <div className="rounded-2xl border border-destructive/35 bg-destructive/10 p-4">
+          <div className="text-sm font-semibold text-destructive">Ошибка загрузки каталога</div>
+          <div className="mt-1 text-xs text-destructive/90">{error.message}</div>
           {import.meta.env.DEV && error.devDetails ? (
-            <div className="mt-2 rounded-xl border border-rose-200 bg-[#1f2328] px-3 py-2 font-mono text-[11px] text-rose-900">
+            <div className="mt-2 rounded-xl border border-destructive/35 bg-background px-3 py-2 font-mono text-[11px] text-destructive">
               <div>{error.devDetails}</div>
               {error.devDetails.includes("code=BAD_RESPONSE") ? (
-                <div className="mt-1 text-rose-800">
+                <div className="mt-1 text-destructive/90">
                   DEV: проверьте, что API доступен (`/api/catalog?citySlug=vvo`), и что
                   dev-proxy направлен на рабочий backend (`VITE_DEV_API_TARGET`) или локальный
                   API запущен.
                 </div>
               ) : (
-                <div className="mt-1 text-rose-800">
+                <div className="mt-1 text-destructive/90">
                   DEV: выполните `supabase/schema.sql`, затем `supabase/seed.sql` в Supabase
                   SQL Editor. Если ошибка "schema cache" не исчезает, выполните `notify pgrst,
                   'reload schema';`.
@@ -803,9 +719,9 @@ export function CatalogPage() {
       {supabaseEnabled && loading ? (
         <CatalogSkeleton count={6} />
       ) : visibleItems.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-[#252a31] p-6 text-center">
+        <div className="rounded-2xl border border-border/70 bg-card/90 p-6 text-center">
           <div className="text-lg font-semibold">Нет товаров</div>
-          <div className="mt-2 text-sm text-slate-400">
+          <div className="mt-2 text-sm text-muted-foreground">
             Попробуйте снять часть фильтров или выбрать другой город.
           </div>
         </div>
@@ -855,13 +771,13 @@ export function CatalogPage() {
         <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-4 pt-16 sm:items-center">
           <button
             type="button"
-            className="absolute inset-0 bg-slate-900/50"
+            className="absolute inset-0 bg-background/70"
             aria-label="Закрыть сортировку"
             onClick={() => setSortOpen(false)}
           />
 
-          <div className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-[#252a31] p-4 shadow-xl">
-            <div className="text-base font-semibold text-slate-100">Сортировать по</div>
+          <div className="relative w-full max-w-sm rounded-2xl border border-border/70 bg-card/90 p-4 shadow-xl">
+            <div className="text-base font-semibold text-foreground">Сортировать по</div>
 
             <div className="mt-4 grid gap-2">
               <button
@@ -869,8 +785,8 @@ export function CatalogPage() {
                 className={[
                   "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
                   onlyInStock
-                    ? "border-[#2f80ff] bg-[#2f80ff]/20 text-[#b9d4ff]"
-                    : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                    ? "border-primary bg-primary/20 text-[#b9d4ff]"
+                    : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
                 ].join(" ")}
                 onClick={() => setOnlyInStock((prev) => !prev)}
               >
@@ -883,8 +799,8 @@ export function CatalogPage() {
                 className={[
                   "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
                   priceSortMode === "asc"
-                    ? "border-[#2f80ff] bg-[#2f80ff]/20 text-[#b9d4ff]"
-                    : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                    ? "border-primary bg-primary/20 text-[#b9d4ff]"
+                    : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
                 ].join(" ")}
                 onClick={() => {
                   setPriceSortMode((prev) => (prev === "asc" ? "none" : "asc"));
@@ -900,8 +816,8 @@ export function CatalogPage() {
                 className={[
                   "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
                   priceSortMode === "desc"
-                    ? "border-[#2f80ff] bg-[#2f80ff]/20 text-[#b9d4ff]"
-                    : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                    ? "border-primary bg-primary/20 text-[#b9d4ff]"
+                    : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
                 ].join(" ")}
                 onClick={() => {
                   setPriceSortMode((prev) => (prev === "desc" ? "none" : "desc"));
@@ -920,23 +836,23 @@ export function CatalogPage() {
         <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-4 pt-16 sm:items-center">
           <button
             type="button"
-            className="absolute inset-0 bg-slate-900/50"
+            className="absolute inset-0 bg-background/70"
             aria-label="Закрыть фильтры"
             onClick={() => setFiltersOpen(false)}
           />
 
-          <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#252a31] p-4 shadow-xl">
+          <div className="relative w-full max-w-md rounded-2xl border border-border/70 bg-card/90 p-4 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-base font-semibold text-slate-100">Фильтры каталога</div>
-                <div className="mt-1 text-xs text-slate-400">
+                <div className="text-base font-semibold text-foreground">Фильтры каталога</div>
+                <div className="mt-1 text-xs text-muted-foreground">
                   Здесь настраиваются все категории.
                 </div>
               </div>
 
               <button
                 type="button"
-                className="rounded-xl bg-[#2f80ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2370e3]"
+                className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
                 onClick={() => setFiltersOpen(false)}
               >
                 Готово
@@ -944,7 +860,7 @@ export function CatalogPage() {
             </div>
 
             {categories.length === 0 ? (
-              <div className="mt-4 text-sm text-slate-400">
+              <div className="mt-4 text-sm text-muted-foreground">
                 Категории пока не найдены в текущем каталоге.
               </div>
             ) : (
@@ -958,8 +874,8 @@ export function CatalogPage() {
                       className={[
                         "rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
                         active
-                          ? "border-[#2f80ff] bg-[#2f80ff] text-white"
-                          : "border-white/10 bg-[#1f2328] text-slate-200 hover:bg-[#20252b]",
+                          ? "border-primary bg-primary text-white"
+                          : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
                       ].join(" ")}
                       onClick={() => toggleCategory(category.id)}
                     >
@@ -973,14 +889,14 @@ export function CatalogPage() {
             <div className="mt-4 flex items-center justify-between gap-3">
               <button
                 type="button"
-                className="rounded-xl border border-white/10 bg-[#1f2328] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b] disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-xl border border-border/70 bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={selectedCategoryIds.length === 0}
                 onClick={() => setSelectedCategoryIds([])}
               >
                 Сбросить
               </button>
 
-              <div className="text-xs text-slate-400">
+              <div className="text-xs text-muted-foreground">
                 {selectedCategoryIds.length === 0
                   ? "Показаны все категории"
                   : `Выбрано категорий: ${selectedCategoryIds.length}`}
@@ -994,10 +910,10 @@ export function CatalogPage() {
         <div className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4 [bottom:calc(env(safe-area-inset-bottom,0px)+7.1rem)]">
           <div
             key={toast.key}
-            className="w-full max-w-md rounded-2xl border border-white/15 bg-[linear-gradient(135deg,#2b3442_0%,#232a33_100%)] px-4 py-3.5 text-sm font-semibold text-slate-100 shadow-[0_14px_40px_rgba(0,0,0,0.5)] backdrop-blur"
+            className="w-full max-w-md rounded-2xl border border-border/80 bg-[linear-gradient(135deg,#2b3442_0%,#232a33_100%)] px-4 py-3.5 text-sm font-semibold text-foreground shadow-[0_14px_40px_rgba(0,0,0,0.5)] backdrop-blur"
           >
             <div className="flex items-center gap-3">
-              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#2f80ff]/25 text-[#8fbeff]">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/25 text-[#8fbeff]">
                 <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
                   <path
                     d="M9.6 16.2 5.8 12.4 4.4 13.8l5.2 5.2L20 8.6l-1.4-1.4z"
@@ -1013,3 +929,4 @@ export function CatalogPage() {
     </div>
   );
 }
+

@@ -116,7 +116,7 @@ function buildPublicFileUrl(baseUrl: string, name: string): string {
 
 function Card({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4 shadow-sm">
+    <div className="rounded-2xl border border-border/70 bg-card/90 p-4 shadow-sm">
       {children}
     </div>
   );
@@ -188,13 +188,13 @@ function AdminImportProductsCsv() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">Import products (CSV)</div>
-          <div className="mt-1 text-xs text-slate-500">
+          <div className="mt-1 text-xs text-muted-foreground/80">
             Upload a CSV based on `CUSTOMER_PRODUCTS_TEMPLATE.csv`.
           </div>
         </div>
         <button
           type="button"
-          className="rounded-xl bg-[#2f80ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2370e3] disabled:cursor-not-allowed disabled:bg-slate-600"
+          className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
           disabled={!file || submitting}
           onClick={() => void runImport()}
         >
@@ -216,7 +216,7 @@ function AdminImportProductsCsv() {
         />
       </div>
 
-      <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-400">
+      <label className="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
         <input
           type="checkbox"
           className="h-4 w-4 rounded border-slate-600"
@@ -228,13 +228,13 @@ function AdminImportProductsCsv() {
       </label>
 
       {error ? (
-        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+        <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       ) : null}
 
       {result ? (
-        <div className="mt-3 space-y-2 text-sm text-slate-300">
+        <div className="mt-3 space-y-2 text-sm text-foreground/80">
           <div>
             Rows: total={result.rows.total} valid={result.rows.valid} invalid={result.rows.invalid}
           </div>
@@ -255,22 +255,22 @@ function AdminImportProductsCsv() {
           ) : null}
 
           {result.errors.length > 0 ? (
-            <details className="rounded-xl border border-white/10 bg-[#20252b] px-3 py-2">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+            <details className="rounded-xl border border-border/70 bg-muted/55 px-3 py-2">
+              <summary className="cursor-pointer text-sm font-semibold text-foreground">
                 Errors ({result.errors.length})
               </summary>
-              <div className="mt-2 space-y-2 text-xs text-slate-300">
+              <div className="mt-2 space-y-2 text-xs text-foreground/80">
                 {result.errors.slice(0, 20).map((er) => (
                   <div key={`row-${er.rowNum}`}>
                     <div className="font-semibold">
                       row {er.rowNum}
                       {er.title ? ` (${er.title})` : ""}
                     </div>
-                    <div className="text-slate-300">{er.messages.join("; ")}</div>
+                    <div className="text-foreground/80">{er.messages.join("; ")}</div>
                   </div>
                 ))}
                 {result.errors.length > 20 ? (
-                  <div className="text-slate-400">...and {result.errors.length - 20} more</div>
+                  <div className="text-muted-foreground">...and {result.errors.length - 20} more</div>
                 ) : null}
               </div>
             </details>
@@ -380,7 +380,7 @@ function AdminUploadImages() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">Upload product images</div>
-          <div className="mt-1 text-xs text-slate-500">
+          <div className="mt-1 text-xs text-muted-foreground/80">
             Назови файлы как id/slug товара (например: pods-grape.jpg).
           </div>
         </div>
@@ -399,19 +399,19 @@ function AdminUploadImages() {
       </div>
 
       {error ? (
-        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+        <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       ) : null}
 
       {result ? (
-        <div className="mt-3 space-y-2 text-sm text-slate-300">
+        <div className="mt-3 space-y-2 text-sm text-foreground/80">
           <div>Загружено: {result.saved.length}</div>
           {result.errors.length > 0 ? (
-            <div className="text-rose-700">Ошибки: {result.errors.length}</div>
+            <div className="text-destructive/85">Ошибки: {result.errors.length}</div>
           ) : null}
           {result.baseUrl ? (
-            <div className="text-xs text-slate-500">Base URL: {result.baseUrl}</div>
+            <div className="text-xs text-muted-foreground/80">Base URL: {result.baseUrl}</div>
           ) : null}
         </div>
       ) : null}
@@ -419,7 +419,7 @@ function AdminUploadImages() {
       <div className="mt-4">
         <button
           type="button"
-          className="rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
+          className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
           onClick={() => setFilesOpen(true)}
         >
           Файлы
@@ -434,18 +434,18 @@ function AdminUploadImages() {
             onClick={() => setFilesOpen(false)}
             aria-label="Закрыть"
           />
-          <div className="relative w-full max-w-3xl rounded-2xl bg-[#252a31] p-4 shadow-xl">
+          <div className="relative w-full max-w-3xl rounded-2xl bg-card/90 p-4 shadow-xl">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-lg font-semibold">Файлы</div>
                 {baseUrl ? (
-                  <div className="mt-1 text-xs text-slate-500">Base URL: {baseUrl}</div>
+                  <div className="mt-1 text-xs text-muted-foreground/80">Base URL: {baseUrl}</div>
                 ) : null}
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
+                  className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
                   disabled={loadingFiles}
                   onClick={() => void loadFiles()}
                 >
@@ -453,7 +453,7 @@ function AdminUploadImages() {
                 </button>
                 <button
                   type="button"
-                  className="rounded-xl bg-[#2f80ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2370e3]"
+                  className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
                   onClick={() => setFilesOpen(false)}
                 >
                   Закрыть
@@ -462,33 +462,33 @@ function AdminUploadImages() {
             </div>
 
             {listError ? (
-              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+              <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {listError}
               </div>
             ) : null}
 
             {loadingFiles ? (
-              <div className="mt-3 text-xs text-slate-500">Загрузка...</div>
+              <div className="mt-3 text-xs text-muted-foreground/80">Загрузка...</div>
             ) : files.length === 0 ? (
-              <div className="mt-3 text-xs text-slate-500">Файлов нет</div>
+              <div className="mt-3 text-xs text-muted-foreground/80">Файлов нет</div>
             ) : (
               <div className="mt-3 space-y-2">
                 {files.map((f) => (
                   <div
                     key={f.name}
-                    className="grid grid-cols-[1fr_128px] gap-3 rounded-xl border border-white/10 bg-[#20252b] p-3 text-xs sm:grid-cols-[1fr_200px]"
+                    className="grid grid-cols-[1fr_128px] gap-3 rounded-xl border border-border/70 bg-muted/55 p-3 text-xs sm:grid-cols-[1fr_200px]"
                   >
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-100">
+                      <div className="truncate text-sm font-semibold text-foreground">
                         {f.name}
                       </div>
-                      <div className="mt-1 text-xs text-slate-400">
+                      <div className="mt-1 text-xs text-muted-foreground">
                         {Math.round(f.size / 1024)} KB
                       </div>
 
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <input
-                          className="h-8 w-44 rounded-lg border border-white/10 bg-[#252a31] px-2 text-xs"
+                          className="h-8 w-44 rounded-lg border border-border/70 bg-card/90 px-2 text-xs"
                           placeholder="Новое имя"
                           value={renameDrafts[f.name] ?? ""}
                           onChange={(e) =>
@@ -497,7 +497,7 @@ function AdminUploadImages() {
                         />
                         <button
                           type="button"
-                          className="rounded-lg border border-white/10 bg-[#252a31] px-2 py-1 text-xs font-semibold text-slate-100 hover:bg-slate-700/60"
+                          className="rounded-lg border border-border/70 bg-card/90 px-2 py-1 text-xs font-semibold text-foreground hover:bg-muted/60"
                           onClick={() => void handleRename(f.name)}
                         >
                           Переименовать
@@ -513,7 +513,7 @@ function AdminUploadImages() {
                     </div>
 
                     {baseUrl ? (
-                      <div className="overflow-hidden rounded-xl border border-white/10 bg-[#252a31]">
+                      <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
                         <img
                           src={buildPublicFileUrl(baseUrl, f.name)}
                           alt={f.name}
@@ -522,7 +522,7 @@ function AdminUploadImages() {
                         />
                       </div>
                     ) : (
-                      <div className="flex aspect-square items-center justify-center rounded-xl border border-white/10 bg-[#252a31] text-[10px] text-slate-500">
+                      <div className="flex aspect-square items-center justify-center rounded-xl border border-border/70 bg-card/90 text-[10px] text-muted-foreground/80">
                         no preview
                       </div>
                     )}
@@ -607,7 +607,7 @@ function AdminProductsManager() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">Manage products</div>
-          <div className="mt-1 text-xs text-slate-500">
+          <div className="mt-1 text-xs text-muted-foreground/80">
             Активные: {activeCountLabel} • Архив: {archiveCountLabel}
           </div>
         </div>
@@ -615,7 +615,7 @@ function AdminProductsManager() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="rounded-xl bg-[#2f80ff] px-3 py-2 text-xs font-semibold text-white hover:bg-[#2370e3]"
+            className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
             onClick={() => setOpen((v) => !v)}
           >
             {open ? "Закрыть" : "Редактировать"}
@@ -623,7 +623,7 @@ function AdminProductsManager() {
 
           <button
             type="button"
-            className="rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={!open || loading || savingId !== null}
             onClick={() => void load()}
           >
@@ -635,7 +635,7 @@ function AdminProductsManager() {
       {open ? (
         <>
           {error ? (
-            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+            <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
             </div>
           ) : null}
@@ -647,7 +647,7 @@ function AdminProductsManager() {
                 "rounded-xl px-3 py-2 text-xs font-semibold border",
                 tab === "active"
                   ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-white/10 bg-[#252a31] text-slate-100 hover:bg-[#20252b]",
+                  : "border-border/70 bg-card/90 text-foreground hover:bg-muted/55",
               ].join(" ")}
               disabled={loading}
               onClick={() => setTab("active")}
@@ -660,7 +660,7 @@ function AdminProductsManager() {
                 "rounded-xl px-3 py-2 text-xs font-semibold border",
                 tab === "archive"
                   ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-white/10 bg-[#252a31] text-slate-100 hover:bg-[#20252b]",
+                  : "border-border/70 bg-card/90 text-foreground hover:bg-muted/55",
               ].join(" ")}
               disabled={loading}
               onClick={() => setTab("archive")}
@@ -671,11 +671,11 @@ function AdminProductsManager() {
 
           {loading ? (
             <div className="mt-3 grid gap-3">
-              <div className="h-20 animate-pulse rounded-2xl bg-slate-700/60" />
-              <div className="h-20 animate-pulse rounded-2xl bg-slate-700/60" />
+              <div className="h-20 animate-pulse rounded-2xl bg-muted/60" />
+              <div className="h-20 animate-pulse rounded-2xl bg-muted/60" />
             </div>
           ) : products.length === 0 ? (
-            <div className="mt-3 rounded-2xl border border-white/10 bg-[#252a31] p-4 text-sm text-slate-400">
+            <div className="mt-3 rounded-2xl border border-border/70 bg-card/90 p-4 text-sm text-muted-foreground">
               Пусто
             </div>
           ) : (
@@ -687,12 +687,12 @@ function AdminProductsManager() {
                 return (
                   <div
                     key={p.id}
-                    className="rounded-2xl border border-white/10 bg-[#252a31] p-3"
+                    className="rounded-2xl border border-border/70 bg-card/90 p-3"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-semibold">{p.title}</div>
-                        <div className="mt-1 text-xs text-slate-400">
+                        <div className="mt-1 text-xs text-muted-foreground">
                           {formatRub(p.base_price)}
                         </div>
                       </div>
@@ -721,7 +721,7 @@ function AdminProductsManager() {
                             "rounded-full px-2 py-0.5 text-[10px] font-semibold",
                             inv.in_stock
                               ? "bg-emerald-100 text-emerald-800"
-                              : "bg-slate-700/60 text-slate-300",
+                              : "bg-muted/60 text-foreground/80",
                           ].join(" ")}
                         >
                           {inv.city_slug.toUpperCase()}: {inv.in_stock ? "в наличии" : "нет"}
@@ -782,7 +782,7 @@ function AdminOrdersView() {
         <div className="text-lg font-semibold">Заказы</div>
         <div className="flex items-center gap-2">
           <select
-            className="h-10 rounded-xl border border-white/10 bg-[#252a31] px-3 text-sm font-semibold"
+            className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm font-semibold"
             value={status}
             disabled={loading}
             onChange={(e) => {
@@ -796,7 +796,7 @@ function AdminOrdersView() {
           </select>
           <button
             type="button"
-            className="rounded-xl border border-white/10 bg-[#252a31] px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-[#20252b]"
+            className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
             onClick={() => void load(status)}
             disabled={loading}
           >
@@ -805,18 +805,18 @@ function AdminOrdersView() {
         </div>
       </div>
       {error ? (
-        <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+        <div className="mt-3 rounded-2xl border border-destructive/35 bg-destructive/10 p-4 text-sm text-destructive">
           {error}
         </div>
       ) : null}
 
       {loading ? (
         <div className="mt-3 grid gap-3">
-          <div className="h-24 animate-pulse rounded-2xl bg-slate-700/60" />
-          <div className="h-24 animate-pulse rounded-2xl bg-slate-700/60" />
+          <div className="h-24 animate-pulse rounded-2xl bg-muted/60" />
+          <div className="h-24 animate-pulse rounded-2xl bg-muted/60" />
         </div>
       ) : orders.length === 0 ? (
-        <div className="mt-3 text-sm text-slate-400">Пусто</div>
+        <div className="mt-3 text-sm text-muted-foreground">Пусто</div>
       ) : (
         <div className="mt-3 grid gap-3">
           {orders.map((o) => (
@@ -826,9 +826,9 @@ function AdminOrdersView() {
                   <div className="text-sm font-semibold">
                     {formatDateTime(o.created_at)} •{" "}
                     {o.city_slug ? o.city_slug.toUpperCase() : "—"} •{" "}
-                    <span className="text-slate-400">{o.status}</span>
+                    <span className="text-muted-foreground">{o.status}</span>
                   </div>
-                  <div className="mt-1 text-xs text-slate-400">
+                  <div className="mt-1 text-xs text-muted-foreground">
                     Юзер:{" "}
                     {o.tg_username ? `@${o.tg_username} (${o.tg_user_id})` : o.tg_user_id}
                     {" • "}
@@ -851,15 +851,15 @@ function AdminOrdersView() {
                 </div>
               </div>
 
-              <div className="mt-3 border-t border-white/10 pt-3">
-                <div className="text-xs font-semibold text-slate-500">Позиции</div>
+              <div className="mt-3 border-t border-border/70 pt-3">
+                <div className="text-xs font-semibold text-muted-foreground/80">Позиции</div>
                 <div className="mt-2 space-y-1 text-sm">
                   {o.items.map((it, idx) => (
                     <div key={`${o.id}:${idx}`} className="flex justify-between gap-3">
                       <div className="truncate">
                         {it.title ?? it.product_id ?? "unknown"} ×{it.qty}
                       </div>
-                      <div className="shrink-0 font-semibold text-slate-300">
+                      <div className="shrink-0 font-semibold text-foreground/80">
                         {formatRub(it.unit_price)}
                       </div>
                     </div>
@@ -867,8 +867,8 @@ function AdminOrdersView() {
                 </div>
 
                 {o.comment ? (
-                  <div className="mt-3 rounded-xl bg-[#20252b] px-3 py-2 text-sm text-slate-300">
-                    <span className="text-xs font-semibold text-slate-500">
+                  <div className="mt-3 rounded-xl bg-muted/55 px-3 py-2 text-sm text-foreground/80">
+                    <span className="text-xs font-semibold text-muted-foreground/80">
                       Комментарий:
                     </span>{" "}
                     {o.comment}
@@ -932,7 +932,7 @@ export function AdminPage() {
     <div className="space-y-4">
       <div>
         <div className="text-lg font-semibold">Admin</div>
-        <div className="mt-1 text-sm text-slate-400">
+        <div className="mt-1 text-sm text-muted-foreground">
           {accessState === "ok"
             ? `Logged in as ${me?.username ? `@${me.username}` : me?.tgUserId} (role: ${me?.role})`
             : "Admin access is restricted to allowlist users."}
@@ -940,13 +940,13 @@ export function AdminPage() {
       </div>
 
       {accessState === "loading" ? (
-        <div className="h-24 animate-pulse rounded-2xl bg-slate-700/60" />
+        <div className="h-24 animate-pulse rounded-2xl bg-muted/60" />
       ) : null}
 
       {accessState !== "ok" && accessState !== "loading" ? (
         <Card>
           <div className="text-sm font-semibold">No access</div>
-          <div className="mt-2 text-sm text-slate-400">
+          <div className="mt-2 text-sm text-muted-foreground">
             {accessState === "forbidden"
               ? "Your tg_user_id is not in the admins table."
               : accessState === "unauthorized"
@@ -955,7 +955,7 @@ export function AdminPage() {
           </div>
 
           {!isTelegram && import.meta.env.DEV ? (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
               DEV: enable bypass (server): `DEV_ADMIN_TG_USER_ID` + header `x-dev-admin=1` (frontend sends automatically
               in dev).
             </div>
@@ -974,3 +974,4 @@ export function AdminPage() {
     </div>
   );
 }
+

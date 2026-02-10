@@ -1,6 +1,10 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { ShieldCheck, UserRound } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet } from "../api/client";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { useTelegram } from "../telegram/TelegramProvider";
 
 type AdminMe = {
@@ -17,7 +21,6 @@ export function ProfilePage() {
 
   useEffect(() => {
     let cancelled = false;
-
     setError(null);
 
     apiGet<AdminMe>("/api/admin/me")
@@ -60,50 +63,53 @@ export function ProfilePage() {
 
   return (
     <div className="space-y-4">
-      <div className="text-lg font-semibold">Профиль</div>
+      <h2 className="text-lg font-semibold">Профиль</h2>
 
-      <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4">
-        <div className="flex items-center gap-3">
-          {photoUrl ? (
-            <img src={photoUrl} alt={displayName} className="h-12 w-12 rounded-full object-cover" />
-          ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-700 text-sm font-bold">
-              {displayName.slice(1, 2).toUpperCase() || "U"}
-            </div>
-          )}
+      <Card className="border-border/80 bg-card/90">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-3">
+            {photoUrl ? (
+              <img src={photoUrl} alt={displayName} className="h-14 w-14 rounded-full object-cover" />
+            ) : (
+              <div className="grid h-14 w-14 place-items-center rounded-full bg-primary/15 text-primary">
+                <UserRound className="h-7 w-7" />
+              </div>
+            )}
 
-          <div>
-            <div className="text-sm font-semibold text-slate-100">{displayName}</div>
-            <div className="text-xs text-slate-400">
-              {typeof tgUser?.id === "number" ? `ID: ${tgUser.id}` : "Telegram user"}
+            <div>
+              <div className="text-base font-semibold">{displayName}</div>
+              <div className="text-xs text-muted-foreground">
+                {typeof tgUser?.id === "number" ? `ID: ${tgUser.id}` : "Telegram user"}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {admin ? (
-        <div className="rounded-2xl border border-white/10 bg-[#252a31] p-4">
-          <div className="text-sm font-semibold text-slate-100">Админ-доступ</div>
-
-          <div className="mt-3 space-y-3">
-            <div className="text-xs text-emerald-300">
-              Доступ разрешен: {admin.username ? `@${admin.username}` : admin.tgUserId} ({admin.role})
+        <Card className="border-border/80 bg-card/90">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Админ-доступ</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Badge variant="success" className="inline-flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {admin.username ? `@${admin.username}` : admin.tgUserId} ({admin.role})
+            </Badge>
+            <div>
+              <Button asChild>
+                <Link to="/admin">Открыть админку</Link>
+              </Button>
             </div>
-            <Link
-              to="/admin"
-              className="inline-flex rounded-xl bg-[#2f80ff] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2370e3]"
-            >
-              Открыть админку
-            </Link>
-          </div>
 
-          {error ? <div className="mt-3 text-xs text-rose-300">{error}</div> : null}
-          {!isTelegram ? (
-            <div className="mt-3 text-xs text-slate-500">
-              Для корректной проверки открывайте мини-приложение из Telegram.
-            </div>
-          ) : null}
-        </div>
+            {error ? <div className="text-xs text-destructive">{error}</div> : null}
+            {!isTelegram ? (
+              <div className="text-xs text-muted-foreground">
+                Для корректной проверки открывайте мини-приложение из Telegram.
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
       ) : null}
     </div>
   );
