@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { ProductImagePreview } from "../components/ProductImagePreview";
 import { buildApiUrl } from "../config";
 import { useAppState } from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
@@ -193,18 +194,13 @@ export function CartPage() {
             className="rounded-2xl border border-white/10 bg-[#252a31] p-4"
           >
             <div className="flex items-start gap-3">
-              {item.imageUrl ? (
-                <img
-                  src={item.imageUrl}
-                  alt={item.title}
-                  loading="lazy"
-                  className="h-16 w-16 shrink-0 rounded-xl object-cover"
-                />
-              ) : (
-                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[#2b3139] text-[10px] font-semibold uppercase text-slate-500">
-                  Photo
-                </div>
-              )}
+              <ProductImagePreview
+                imageUrl={item.imageUrl}
+                alt={item.title}
+                loading="lazy"
+                className="h-16 w-16 shrink-0 rounded-xl object-cover"
+                placeholderClassName="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl bg-[#2b3139] text-[10px] font-semibold uppercase text-slate-500"
+              />
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-3">
