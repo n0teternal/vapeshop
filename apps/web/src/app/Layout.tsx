@@ -22,7 +22,7 @@ function TabLink({ to, label, badge, end, icon, photoUrl }: TabLinkProps) {
       {({ isActive }) => (
         <span
           className={cn(
-            "flex min-h-[68px] flex-col items-center justify-center gap-1 rounded-2xl px-2 text-[11px] font-semibold transition-colors",
+            "flex min-h-[58px] flex-col items-center justify-center gap-0.5 rounded-2xl px-2 text-[11px] font-semibold transition-colors",
             isActive
               ? "bg-primary/12 text-primary"
               : "text-muted-foreground hover:bg-accent/55 hover:text-foreground",
@@ -79,8 +79,8 @@ export function Layout() {
           <Outlet />
         </main>
 
-        <nav className="fixed inset-x-0 bottom-0 z-40 px-2 pb-2 [padding-bottom:calc(env(safe-area-inset-bottom,0px)+0.5rem)]">
-          <div className="mx-auto w-full max-w-md rounded-[2rem] border border-border/80 bg-card/95 p-2 shadow-[0_-14px_45px_-24px_rgba(15,23,42,0.65)] backdrop-blur-xl">
+        <nav className="fixed inset-x-0 bottom-0 z-40 px-2 pb-1 [padding-bottom:calc(env(safe-area-inset-bottom,0px)+0.35rem)]">
+          <div className="mx-auto w-full max-w-md rounded-[2rem] border border-border/70 bg-card/78 px-2 py-1 shadow-[0_-14px_45px_-24px_rgba(15,23,42,0.65)] backdrop-blur-xl">
             <div className="grid grid-cols-4 gap-1">
               <TabLink
                 to="/"
