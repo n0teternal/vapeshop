@@ -19,7 +19,7 @@ export function FavoritesPage() {
 
   if (state.favorites.length === 0) {
     return (
-      <Card className="overflow-hidden border-border/70 bg-card/82">
+      <Card className="overflow-hidden border-border/70 bg-card">
         <CardContent className="flex flex-col items-center py-10 text-center">
           <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
             <Heart className="h-8 w-8" />
@@ -45,7 +45,7 @@ export function FavoritesPage() {
 
       <div className="space-y-3">
         {state.favorites.map((item) => (
-          <Card key={item.productId} className="border-border/70 bg-card/82">
+          <Card key={item.productId} className="border-border/70 bg-card">
             <CardHeader className="pb-3">
               <div className="flex gap-3">
                 <ProductImagePreview
