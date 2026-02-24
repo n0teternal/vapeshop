@@ -99,6 +99,17 @@ function sanitizeFileName(filename: string): string {
     .slice(0, 120);
 }
 
+function inferMimeType(fileName: string): string | null {
+  const ext = path.extname(fileName).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".png") return "image/png";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".heic") return "image/heic";
+  if (ext === ".avif") return "image/avif";
+  return null;
+}
+
 type ListedImageFile = { name: string; size: number; updatedAt: string };
 type StorageLocation = { bucket: string; prefix: string };
 
@@ -543,7 +554,12 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-        if (!allowedTypes.has(file.mimetype)) {
+        const inferredMime = inferMimeType(file.filename ?? "");
+        const mimeType =
+          typeof file.mimetype === "string" && file.mimetype.trim().length > 0
+            ? file.mimetype.trim().toLowerCase()
+            : inferredMime;
+        if (!mimeType || !allowedTypes.has(mimeType)) {
           throw new HttpError(400, "BAD_REQUEST", "Only jpeg/png/webp allowed");
         }
 
@@ -574,7 +590,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         const { error: uploadError } = await supabase.storage
           .from("product-images")
           .upload(objectPath, buffer, {
-            contentType: file.mimetype,
+            contentType: mimeType,
             upsert: false,
           });
 
@@ -782,6 +798,11 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           received += 1;
           const originalName = file.filename || `file_${Date.now()}`;
           const safeName = sanitizeFileName(originalName) || `file_${Date.now()}`;
+          const inferredMime = inferMimeType(safeName);
+          const mimeType =
+            typeof file.mimetype === "string" && file.mimetype.trim().length > 0
+              ? file.mimetype.trim().toLowerCase()
+              : inferredMime ?? "application/octet-stream";
 
           try {
             const buffer = await file.toBuffer();
@@ -791,7 +812,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
                 .from(storageLocation.bucket)
                 .upload(objectPath, buffer, {
                   upsert: true,
-                  contentType: file.mimetype,
+                  contentType: mimeType,
                 });
 
               if (uploadError) {

@@ -29,22 +29,24 @@ export function buildImageCandidates(imageUrl: string | null | undefined): strin
     const pathPart = match[1];
     const suffix = match[2] ?? "";
     if (pathPart) {
-      pushDirect(raw);
-
       const extMatch = pathPart.match(/\.([a-z0-9]{2,10})$/i);
       if (extMatch) {
         const ext = `.${(extMatch[1] ?? "").toLowerCase()}`;
         const base = pathPart.slice(0, -ext.length);
         const variants = [".webp", ".jpg", ".jpeg", ".png"];
+        // Keep the original first when extension is already known.
+        pushDirect(raw);
         for (const variant of variants) {
           if (variant === ext) continue;
           pushDirect(`${base}${variant}${suffix}`);
         }
       } else {
+        // If extension is missing, try common image formats first.
         pushDirect(`${pathPart}.webp${suffix}`);
         pushDirect(`${pathPart}.jpg${suffix}`);
         pushDirect(`${pathPart}.jpeg${suffix}`);
         pushDirect(`${pathPart}.png${suffix}`);
+        pushDirect(raw);
       }
     } else {
       pushDirect(raw);
@@ -53,11 +55,10 @@ export function buildImageCandidates(imageUrl: string | null | undefined): strin
 
   const candidates = new Set<string>();
   for (const candidate of directCandidates) {
-    const proxied = buildProxyImageUrl(candidate);
-    if (proxied) {
-      candidates.add(proxied);
-    }
+    // Prefer direct URL first; proxy is a fallback.
     candidates.add(candidate);
+    const proxied = buildProxyImageUrl(candidate);
+    if (proxied) candidates.add(proxied);
   }
 
   return Array.from(candidates);

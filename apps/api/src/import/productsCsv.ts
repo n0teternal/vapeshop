@@ -319,50 +319,83 @@ export async function importProductsCsv(params: {
     const imageUrlRaw = (record["image_url"] ?? "").trim();
     let image_url: string | null = imageUrlRaw.length > 0 ? imageUrlRaw : null;
     if (image_url) {
-      let isValidUrl = false;
+      let parsedImageUrl: URL | null = null;
       try {
         const u = new URL(image_url);
-        isValidUrl = u.protocol === "http:" || u.protocol === "https:";
+        if (u.protocol === "http:" || u.protocol === "https:") {
+          parsedImageUrl = u;
+        }
       } catch {
-        isValidUrl = false;
+        parsedImageUrl = null;
       }
 
-      if (!isValidUrl) {
-        if (normalizedImageBaseUrl) {
-          let fileName = image_url.replace(/^\/+/, "");
-          if (!hasFileExtension(fileName)) {
-            const base = fileName;
-            const variants = [".jpg", ".jpeg", ".png", ".webp"];
-            let resolved = false;
+      const resolveFileNameExtension = (inputName: string): string => {
+        const trimmed = inputName.trim().replace(/^\/+/, "");
+        if (!trimmed || hasFileExtension(trimmed)) return trimmed;
 
-            if (normalizedImageFileNames) {
-              for (const ext of variants) {
-                const candidate = base + ext;
-                if (normalizedImageFileNames.has(candidate.toLowerCase())) {
-                  fileName = candidate;
-                  resolved = true;
-                  break;
-                }
-              }
-            }
-
-            if (!resolved && params.imageItemsDir) {
-              for (const ext of variants) {
-                const candidate = base + ext;
-                const fullPath = path.join(params.imageItemsDir, candidate);
-                if (fs.existsSync(fullPath)) {
-                  fileName = candidate;
-                  resolved = true;
-                  break;
-                }
-              }
+        const variants = [".webp", ".jpg", ".jpeg", ".png"];
+        if (normalizedImageFileNames) {
+          for (const ext of variants) {
+            const candidate = trimmed + ext;
+            if (normalizedImageFileNames.has(candidate.toLowerCase())) {
+              return candidate;
             }
           }
-          const encodedName = encodeURIComponent(fileName);
-          image_url = `${normalizedImageBaseUrl}${encodedName}`;
+        }
+
+        if (params.imageItemsDir) {
+          for (const ext of variants) {
+            const candidate = trimmed + ext;
+            const fullPath = path.join(params.imageItemsDir, candidate);
+            if (fs.existsSync(fullPath)) {
+              return candidate;
+            }
+          }
+        }
+
+        return trimmed;
+      };
+
+      if (normalizedImageBaseUrl) {
+        let fileNameForBase: string | null = null;
+
+        if (parsedImageUrl) {
+          let baseUrl: URL | null = null;
+          try {
+            baseUrl = new URL(normalizedImageBaseUrl);
+          } catch {
+            baseUrl = null;
+          }
+
+          if (
+            baseUrl &&
+            parsedImageUrl.origin === baseUrl.origin &&
+            parsedImageUrl.pathname.startsWith(baseUrl.pathname)
+          ) {
+            const rawRelative = parsedImageUrl.pathname.slice(baseUrl.pathname.length);
+            try {
+              fileNameForBase = decodeURIComponent(rawRelative).replace(/^\/+/, "");
+            } catch {
+              fileNameForBase = rawRelative.replace(/^\/+/, "");
+            }
+          }
         } else {
+          fileNameForBase = image_url;
+        }
+
+        if (fileNameForBase) {
+          const resolvedFileName = resolveFileNameExtension(fileNameForBase);
+          const encodedName = resolvedFileName
+            .split("/")
+            .filter((part) => part.length > 0)
+            .map((part) => encodeURIComponent(part))
+            .join("/");
+          image_url = `${normalizedImageBaseUrl}${encodedName}`;
+        } else if (!parsedImageUrl) {
           rowMessages.push(`image_url is not a valid URL (got: ${image_url})`);
         }
+      } else if (!parsedImageUrl) {
+        rowMessages.push(`image_url is not a valid URL (got: ${image_url})`);
       }
     }
 
