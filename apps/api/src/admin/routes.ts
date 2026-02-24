@@ -683,6 +683,120 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.get<{ Reply: Buffer | ApiFailure }>(
+    "/api/admin/export/products.xlsx",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        const supabase = createServiceSupabaseClient();
+        const [{ data: cities, error: citiesError }, { data: products, error: productsError }] =
+          await Promise.all([
+            supabase.from("cities").select("id,slug,name").order("slug", { ascending: true }),
+            supabase
+              .from("products")
+              .select(
+                "id,title,description,category_slug,base_price,image_url,is_active,created_at",
+              )
+              .order("title", { ascending: true }),
+          ]);
+
+        if (citiesError) {
+          throw new HttpError(500, "DB", `Failed to load cities: ${citiesError.message}`);
+        }
+        if (productsError) {
+          throw new HttpError(500, "DB", `Failed to load products: ${productsError.message}`);
+        }
+
+        const cityList = (cities ?? []).map((c) => ({ id: c.id, slug: c.slug, name: c.name }));
+        const productList = products ?? [];
+        const productIds = productList.map((p) => p.id);
+
+        const { data: inventory, error: inventoryError } =
+          productIds.length > 0
+            ? await supabase
+                .from("inventory")
+                .select("product_id,city_id,in_stock,stock_qty,price_override")
+                .in("product_id", productIds)
+            : { data: [], error: null };
+
+        if (inventoryError) {
+          throw new HttpError(500, "DB", `Failed to load inventory: ${inventoryError.message}`);
+        }
+
+        type ExportInventoryRow = {
+          product_id: string;
+          city_id: number;
+          in_stock: boolean;
+          stock_qty: number | null;
+          price_override: number | null;
+        };
+        const invRows = (inventory ?? []) as unknown as ExportInventoryRow[];
+        const invByKey = new Map<string, ExportInventoryRow>();
+        for (const row of invRows) {
+          invByKey.set(`${row.product_id}:${row.city_id}`, row);
+        }
+
+        const headers = [
+          "id",
+          "title",
+          "description",
+          "category_slug",
+          "base_price",
+          "image_url",
+          "is_active",
+          ...cityList.flatMap((c) => [
+            `${c.slug}_in_stock`,
+            `${c.slug}_stock_qty`,
+            `${c.slug}_price_override`,
+          ]),
+        ];
+
+        const aoa: Array<Array<string | number | boolean>> = [headers];
+
+        for (const product of productList) {
+          const row: Array<string | number | boolean> = [
+            product.id,
+            product.title,
+            product.description ?? "",
+            product.category_slug ?? "other",
+            toNumber(product.base_price, "products.base_price"),
+            product.image_url ?? "",
+            product.is_active === true,
+          ];
+
+          for (const city of cityList) {
+            const inv = invByKey.get(`${product.id}:${city.id}`);
+            row.push(inv?.in_stock ?? false);
+            row.push(inv?.stock_qty ?? "");
+            row.push(inv?.price_override ?? "");
+          }
+
+          aoa.push(row);
+        }
+
+        const sheet = XLSX.utils.aoa_to_sheet(aoa);
+        const book = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(book, sheet, "products");
+        const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
+        const fileName = `products.latest.${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+        return reply
+          .header(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          )
+          .header("Content-Disposition", `attachment; filename=\"${fileName}\"`)
+          .header("Cache-Control", "no-store")
+          .code(200)
+          .send(buffer);
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
   app.post<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
     "/api/admin/import/products",
     async (request, reply) => {

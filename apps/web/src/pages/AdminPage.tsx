@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, apiUpload } from "../api/client";
+import { buildApiUrl } from "../config";
 
 type AdminMe = {
   tgUserId: number;
@@ -130,7 +131,9 @@ function AdminImportProductsCsv() {
     "auto" | "utf-8" | "windows-1251" | "ibm866" | "koi8-r"
   >("auto");
   const [submitting, setSubmitting] = useState(false);
+  const [downloadingLastXlsx, setDownloadingLastXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportProductsCsvResult | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadName, setDownloadName] = useState<string>("products.with_ids.xlsx");
@@ -146,6 +149,7 @@ function AdminImportProductsCsv() {
 
     setSubmitting(true);
     setError(null);
+    setDownloadError(null);
     setResult(null);
 
     if (downloadUrl) {
@@ -190,6 +194,86 @@ function AdminImportProductsCsv() {
     }
   }
 
+  function parseDownloadFileName(contentDisposition: string | null, fallback: string): string {
+    if (!contentDisposition) return fallback;
+
+    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+      const encoded = utf8Match[1].trim().replace(/^"|"$/g, "");
+      try {
+        return decodeURIComponent(encoded);
+      } catch {
+        return encoded;
+      }
+    }
+
+    const basicMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+    if (basicMatch?.[1]) {
+      return basicMatch[1].trim();
+    }
+
+    return fallback;
+  }
+
+  async function downloadLastXlsx(): Promise<void> {
+    setDownloadingLastXlsx(true);
+    setDownloadError(null);
+    try {
+      const headers: Record<string, string> = {};
+      const tgInitData = window.Telegram?.WebApp?.initData ?? "";
+      if (tgInitData) {
+        headers["x-telegram-init-data"] = tgInitData;
+      }
+      if (import.meta.env.DEV && !tgInitData) {
+        headers["x-dev-admin"] = "1";
+      }
+
+      const res = await fetch(buildApiUrl("/api/admin/export/products.xlsx"), {
+        method: "GET",
+        headers,
+      });
+
+      if (!res.ok) {
+        let message = `Failed to download XLSX (${res.status})`;
+        try {
+          const payload = (await res.json()) as {
+            ok?: boolean;
+            error?: { message?: string };
+          };
+          const apiMessage = payload?.error?.message;
+          if (typeof apiMessage === "string" && apiMessage.trim().length > 0) {
+            message = apiMessage;
+          }
+        } catch {
+          // ignore JSON parse failures for non-JSON error responses
+        }
+        throw new Error(message);
+      }
+
+      const blob = await res.blob();
+      const fallbackName = `products.latest.${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fileName = parseDownloadFileName(
+        res.headers.get("content-disposition"),
+        fallbackName,
+      );
+      const objectUrl = URL.createObjectURL(blob);
+
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to download XLSX";
+      setDownloadError(message);
+    } finally {
+      setDownloadingLastXlsx(false);
+    }
+  }
+
   return (
     <Card>
       <div className="flex items-center justify-between gap-3">
@@ -199,14 +283,24 @@ function AdminImportProductsCsv() {
             Upload CSV/XLSX based on `CUSTOMER_PRODUCTS_TEMPLATE.csv`.
           </div>
         </div>
-        <button
-          type="button"
-          className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
-          disabled={!file || submitting}
-          onClick={() => void runImport()}
-        >
-          {submitting ? "Importing..." : "Import"}
-        </button>
+        <div className="flex flex-col items-end gap-2">
+          <button
+            type="button"
+            className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
+            disabled={!file || submitting || downloadingLastXlsx}
+            onClick={() => void runImport()}
+          >
+            {submitting ? "Importing..." : "Import"}
+          </button>
+          <button
+            type="button"
+            className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={downloadingLastXlsx || submitting}
+            onClick={() => void downloadLastXlsx()}
+          >
+            {downloadingLastXlsx ? "Preparing..." : "Upload last XLSX"}
+          </button>
+        </div>
       </div>
 
       <div className="mt-3">
@@ -257,6 +351,11 @@ function AdminImportProductsCsv() {
       {error ? (
         <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
+        </div>
+      ) : null}
+      {downloadError ? (
+        <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {downloadError}
         </div>
       ) : null}
 

@@ -1,12 +1,17 @@
+import { buildApiUrl } from "../config";
+
 function buildProxyImageUrl(absoluteUrl: string): string | null {
   if (absoluteUrl.startsWith("/api/image-proxy?url=")) return null;
 
   try {
     const parsed = new URL(absoluteUrl);
+    if (parsed.pathname.startsWith("/api/image-proxy")) {
+      return null;
+    }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return null;
     }
-    return `/api/image-proxy?url=${encodeURIComponent(parsed.toString())}`;
+    return buildApiUrl(`/api/image-proxy?url=${encodeURIComponent(parsed.toString())}`);
   } catch {
     return null;
   }
@@ -55,10 +60,10 @@ export function buildImageCandidates(imageUrl: string | null | undefined): strin
 
   const candidates = new Set<string>();
   for (const candidate of directCandidates) {
-    // Prefer direct URL first; proxy is a fallback.
-    candidates.add(candidate);
+    // Prefer proxy first to avoid cross-origin/network quirks on mobile webviews.
     const proxied = buildProxyImageUrl(candidate);
     if (proxied) candidates.add(proxied);
+    candidates.add(candidate);
   }
 
   return Array.from(candidates);
