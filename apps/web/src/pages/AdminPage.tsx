@@ -445,6 +445,7 @@ function AdminUploadImages() {
         <input
           type="file"
           multiple
+          accept=".webp,image/webp,.jpg,.jpeg,.png,.heic,image/*"
           disabled={uploading}
           onChange={(e) => {
             void handleUpload(e.target.files);
