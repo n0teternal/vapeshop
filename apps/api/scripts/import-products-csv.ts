@@ -219,12 +219,58 @@ function parseUuid(value: string): boolean {
   );
 }
 
+const TRUE_BOOL_VALUES = new Set([
+  "true",
+  "1",
+  "yes",
+  "y",
+  "\u0434\u0430", // да
+  "\u0438\u0441\u0442\u0438\u043d\u0430", // истина
+]);
+
+const FALSE_BOOL_VALUES = new Set([
+  "false",
+  "0",
+  "no",
+  "n",
+  "\u043d\u0435\u0442", // нет
+  "\u043b\u043e\u0436\u044c", // ложь
+]);
+
 function parseBool(value: string, fallback: boolean): boolean {
   const v = value.trim().toLowerCase();
   if (v.length === 0) return fallback;
-  if (v === "true" || v === "1" || v === "yes" || v === "y" || v === "да") return true;
-  if (v === "false" || v === "0" || v === "no" || v === "n" || v === "нет") return false;
+  if (TRUE_BOOL_VALUES.has(v)) return true;
+  if (FALSE_BOOL_VALUES.has(v)) return false;
   throw new Error(`Invalid boolean: ${value}`);
+}
+
+const CATEGORY_ALIAS_MAP: Record<string, string> = {
+  other: "other",
+  disposable: "disposable",
+  disposables: "disposable",
+  accessory: "accessory",
+  accessories: "accessory",
+  liquid: "liquid",
+  liquids: "liquid",
+  cartridge: "cartridge",
+  cartridges: "cartridge",
+  "\u043e\u0434\u043d\u043e\u0440\u0430\u0437\u043a\u0438": "disposable", // одноразки
+  "\u043e\u0434\u043d\u043e\u0440\u0430\u0437\u043a\u0430": "disposable", // одноразка
+  "\u0430\u043a\u0441\u0435\u0441\u0441\u0443\u0430\u0440\u044b": "accessory", // аксессуары
+  "\u0430\u043a\u0441\u0435\u0441\u0441\u0443\u0430\u0440": "accessory", // аксессуар
+  "\u0436\u0438\u0434\u043a\u043e\u0441\u0442\u0438": "liquid", // жидкости
+  "\u0436\u0438\u0434\u043a\u043e\u0441\u0442\u044c": "liquid", // жидкость
+  "\u043a\u0430\u0440\u0442\u0440\u0438\u0434\u0436\u0438": "cartridge", // картриджи
+  "\u043a\u0430\u0440\u0442\u0440\u0438\u0434\u0436": "cartridge", // картридж
+  "\u0438\u0441\u043f\u0430\u0440\u0438\u0442\u0435\u043b\u0438": "cartridge", // испарители
+  "\u0438\u0441\u043f\u0430\u0440\u0438\u0442\u0435\u043b\u044c": "cartridge", // испаритель
+};
+
+function normalizeCategorySlug(value: string): string {
+  const v = value.trim().toLowerCase();
+  if (v.length === 0) return "other";
+  return CATEGORY_ALIAS_MAP[v] ?? v;
 }
 
 function parseNumber(value: string): number {
@@ -394,8 +440,8 @@ async function main(): Promise<void> {
     const descriptionRaw = getCell(record, "description");
     const description = descriptionRaw.length > 0 ? descriptionRaw : null;
 
-    const categorySlugRaw = getCell(record, "category_slug").toLowerCase();
-    const category_slug = categorySlugRaw.length > 0 ? categorySlugRaw : "other";
+    const categorySlugRaw = getCell(record, "category_slug");
+    const category_slug = normalizeCategorySlug(categorySlugRaw);
     if (!/^[a-z0-9][a-z0-9_-]*$/i.test(category_slug)) {
       rowMessages.push(
         `category_slug must match [a-z0-9_-] and not be empty (got: ${category_slug})`,
