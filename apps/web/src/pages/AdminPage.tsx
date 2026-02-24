@@ -316,6 +316,7 @@ function AdminUploadImages() {
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [files, setFiles] = useState<UploadedImageFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
   const [filesOpen, setFilesOpen] = useState(false);
@@ -379,6 +380,32 @@ function AdminUploadImages() {
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Delete failed";
       setError(message);
+    }
+  }
+
+  async function handleDeleteAll(): Promise<void> {
+    if (files.length === 0) return;
+    const confirmed = window.confirm(`Delete all files (${files.length})?`);
+    if (!confirmed) return;
+
+    setDeletingAll(true);
+    setError(null);
+    const failed: string[] = [];
+    try {
+      for (const file of files) {
+        try {
+          await apiDelete(`/api/admin/upload/items/${encodeURIComponent(file.name)}`);
+        } catch {
+          failed.push(file.name);
+        }
+      }
+
+      await loadFiles();
+      if (failed.length > 0) {
+        setError(`Failed to delete ${failed.length} of ${files.length} files`);
+      }
+    } finally {
+      setDeletingAll(false);
     }
   }
 
@@ -474,10 +501,18 @@ function AdminUploadImages() {
                 <button
                   type="button"
                   className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
-                  disabled={loadingFiles}
+                  disabled={loadingFiles || deletingAll}
                   onClick={() => void loadFiles()}
                 >
                   Обновить
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={loadingFiles || deletingAll || files.length === 0}
+                  onClick={() => void handleDeleteAll()}
+                >
+                  {deletingAll ? "Deleting..." : "Delete all"}
                 </button>
                 <button
                   type="button"
@@ -519,6 +554,7 @@ function AdminUploadImages() {
                           className="h-8 w-44 rounded-lg border border-border/70 bg-card/90 px-2 text-xs"
                           placeholder="Новое имя"
                           value={renameDrafts[f.name] ?? ""}
+                          disabled={deletingAll}
                           onChange={(e) =>
                             setRenameDrafts((prev) => ({ ...prev, [f.name]: e.target.value }))
                           }
@@ -526,6 +562,7 @@ function AdminUploadImages() {
                         <button
                           type="button"
                           className="rounded-lg border border-border/70 bg-card/90 px-2 py-1 text-xs font-semibold text-foreground hover:bg-muted/60"
+                          disabled={deletingAll}
                           onClick={() => void handleRename(f.name)}
                         >
                           Переименовать
@@ -533,6 +570,7 @@ function AdminUploadImages() {
                         <button
                           type="button"
                           className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-700"
+                          disabled={deletingAll}
                           onClick={() => void handleDelete(f.name)}
                         >
                           Удалить
