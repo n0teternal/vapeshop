@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
+import { decodeCsvBuffer } from "../src/import/decodeCsvBuffer.js";
 
 type CityRow = { id: number; slug: string; name: string };
 
@@ -304,7 +305,9 @@ async function main(): Promise<void> {
     throw new Error(`CSV file not found: ${filePath}`);
   }
 
-  const fileRaw = fs.readFileSync(filePath, "utf8");
+  const fileBuffer = fs.readFileSync(filePath);
+  const { text: fileRaw, encoding } = decodeCsvBuffer(fileBuffer);
+  console.log(`Detected CSV encoding: ${encoding}`);
   const delimiter = detectDelimiter(fileRaw);
   const table = parseDelimited(fileRaw, delimiter);
   if (table.length === 0) throw new Error("CSV is empty");

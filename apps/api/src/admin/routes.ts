@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { config } from "../config.js";
 import { HttpError, isHttpError } from "../httpError.js";
+import { decodeCsvBuffer } from "../import/decodeCsvBuffer.js";
 import { importProductsCsv } from "../import/productsCsv.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { deleteMessage } from "../telegram/api.js";
@@ -40,8 +41,15 @@ function toCount(value: number | null): number {
 
 function sanitizeFileName(filename: string): string {
   const base = path.basename(filename);
-  // Keep it simple: replace everything suspicious with underscore.
-  return base.replaceAll(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120);
+  // Keep Unicode letters/numbers; replace only truly unsafe filename chars.
+  return base
+    .normalize("NFKC")
+    .replace(/[\u0000-\u001F\u007F]+/g, "")
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+/, "")
+    .slice(0, 120);
 }
 
 type ListedImageFile = { name: string; size: number; updatedAt: string };
@@ -637,7 +645,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           throw new HttpError(400, "BAD_REQUEST", "File too large (max 5MB)");
         }
 
-        const csvText = buffer.toString("utf8");
+        const { text: csvText, encoding } = decodeCsvBuffer(buffer);
+        request.log.info({ encoding }, "Decoded imported CSV");
         const supabase = createServiceSupabaseClient();
         const useImagePrefix = parsedQuery.data.imageMode === "filename";
         if (useImagePrefix && !config.productImagesBaseUrl) {
