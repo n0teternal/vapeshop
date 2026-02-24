@@ -628,6 +628,9 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
 
         const querySchema = z.object({
           imageMode: z.enum(["filename"]).optional(),
+          encoding: z
+            .enum(["auto", "utf-8", "windows-1251", "ibm866", "koi8-r"])
+            .optional(),
         });
         const parsedQuery = querySchema.safeParse(request.query);
         if (!parsedQuery.success) {
@@ -645,7 +648,11 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           throw new HttpError(400, "BAD_REQUEST", "File too large (max 5MB)");
         }
 
-        const { text: csvText, encoding } = decodeCsvBuffer(buffer);
+        const encodingMode = parsedQuery.data.encoding ?? "auto";
+        const { text: csvText, encoding } = decodeCsvBuffer({
+          buffer,
+          forcedEncoding: encodingMode === "auto" ? null : encodingMode,
+        });
         request.log.info({ encoding }, "Decoded imported CSV");
         const supabase = createServiceSupabaseClient();
         const useImagePrefix = parsedQuery.data.imageMode === "filename";
@@ -681,7 +688,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           imageFileNames: useImagePrefix ? imageFileNames : null,
         });
 
-        return reply.code(200).send(ok(result));
+        return reply.code(200).send(ok({ ...result, decodedEncoding: encoding }));
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);

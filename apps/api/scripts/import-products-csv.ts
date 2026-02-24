@@ -306,7 +306,7 @@ async function main(): Promise<void> {
   }
 
   const fileBuffer = fs.readFileSync(filePath);
-  const { text: fileRaw, encoding } = decodeCsvBuffer(fileBuffer);
+  const { text: fileRaw, encoding } = decodeCsvBuffer({ buffer: fileBuffer });
   console.log(`Detected CSV encoding: ${encoding}`);
   const delimiter = detectDelimiter(fileRaw);
   const table = parseDelimited(fileRaw, delimiter);

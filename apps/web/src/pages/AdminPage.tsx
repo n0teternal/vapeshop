@@ -9,6 +9,7 @@ type AdminMe = {
 
 type ImportProductsCsvResult = {
   delimiter: ";" | "," | "\t";
+  decodedEncoding?: "utf-8" | "windows-1251" | "ibm866" | "koi8-r";
   cities: Array<{ id: number; slug: string; name: string }>;
   rows: { total: number; valid: number; invalid: number };
   products: { inserted: number; updated: number };
@@ -125,6 +126,9 @@ function Card({ children }: { children: ReactNode }) {
 function AdminImportProductsCsv() {
   const [file, setFile] = useState<File | null>(null);
   const [useImagePrefix, setUseImagePrefix] = useState(false);
+  const [csvEncoding, setCsvEncoding] = useState<
+    "auto" | "utf-8" | "windows-1251" | "ibm866" | "koi8-r"
+  >("auto");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportProductsCsvResult | null>(null);
@@ -153,7 +157,10 @@ function AdminImportProductsCsv() {
       const form = new FormData();
       form.append("file", file);
 
-      const query = useImagePrefix ? "?imageMode=filename" : "";
+      const search = new URLSearchParams();
+      if (useImagePrefix) search.set("imageMode", "filename");
+      if (csvEncoding !== "auto") search.set("encoding", csvEncoding);
+      const query = search.toString() ? `?${search.toString()}` : "";
       const res = await apiUpload<ImportProductsCsvResult>(
         `/api/admin/import/products${query}`,
         form,
@@ -227,6 +234,26 @@ function AdminImportProductsCsv() {
         image_url = имя файла (добавить префикс)
       </label>
 
+      <label className="mt-2 block text-xs text-muted-foreground">
+        CSV encoding
+        <select
+          className="mt-1 block rounded-md border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+          value={csvEncoding}
+          disabled={submitting}
+          onChange={(e) =>
+            setCsvEncoding(
+              e.target.value as "auto" | "utf-8" | "windows-1251" | "ibm866" | "koi8-r",
+            )
+          }
+        >
+          <option value="auto">auto (recommended)</option>
+          <option value="utf-8">utf-8</option>
+          <option value="windows-1251">windows-1251</option>
+          <option value="ibm866">ibm866</option>
+          <option value="koi8-r">koi8-r</option>
+        </select>
+      </label>
+
       {error ? (
         <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -238,6 +265,7 @@ function AdminImportProductsCsv() {
           <div>
             Rows: total={result.rows.total} valid={result.rows.valid} invalid={result.rows.invalid}
           </div>
+          {result.decodedEncoding ? <div>Decoded encoding: {result.decodedEncoding}</div> : null}
           <div>
             Products: inserted={result.products.inserted} updated={result.products.updated}
           </div>

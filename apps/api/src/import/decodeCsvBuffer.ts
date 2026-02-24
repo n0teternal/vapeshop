@@ -1,12 +1,12 @@
-type SupportedEncoding = "utf-8" | "windows-1251" | "ibm866" | "koi8-r";
+export type SupportedCsvEncoding = "utf-8" | "windows-1251" | "ibm866" | "koi8-r";
 
 type DecodedCandidate = {
-  encoding: SupportedEncoding;
+  encoding: SupportedCsvEncoding;
   text: string;
   score: number;
 };
 
-const ENCODINGS: SupportedEncoding[] = ["utf-8", "windows-1251", "ibm866", "koi8-r"];
+const ENCODINGS: SupportedCsvEncoding[] = ["utf-8", "windows-1251", "ibm866", "koi8-r"];
 
 function countMatches(text: string, pattern: RegExp): number {
   const matches = text.match(pattern);
@@ -19,15 +19,13 @@ function scoreDecodedText(text: string): number {
 
   const replacementCount = countMatches(text, /\uFFFD/g);
   const controlCount = countMatches(text, /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g);
+  const cyrillicCount = countMatches(text, /[\u0400-\u04FF]/g);
+  const questionCount = countMatches(text, /\?/g);
 
-  const cyrillicChars = text.match(/[А-Яа-яЁё]/g) ?? [];
-  const cyrillicCount = cyrillicChars.length;
-  const suspiciousRsCount = cyrillicChars.filter((ch) => ch === "Р" || ch === "С").length;
-  const suspiciousRsRatio = cyrillicCount > 0 ? suspiciousRsCount / cyrillicCount : 0;
-
-  // Typical UTF-8 mojibake markers when decoded with CP1251/CP866.
-  const mojibakeRuPairs = countMatches(text, /(?:Р[А-яЁё]|С[А-яЁё])/g);
-  const mojibakeLatinPairs = countMatches(text, /(?:Ð.|Ñ.)/g);
+  // Typical UTF-8 mojibake if decoded as CP1251/CP866: "Р..." / "С..."
+  const mojibakeRuPairs = countMatches(text, /(?:\u0420[\u0400-\u04FF]|\u0421[\u0400-\u04FF])/g);
+  // Typical UTF-8 mojibake with Latin fallback: "Ð..." / "Ñ..."
+  const mojibakeLatinPairs = countMatches(text, /(?:\u00D0.|\u00D1.)/g);
 
   if (/(^|[\r\n])[ \t]*id[;, \t]+title[;, \t]+description/i.test(text)) {
     score += 500;
@@ -35,31 +33,42 @@ function scoreDecodedText(text: string): number {
 
   score -= replacementCount * 1000;
   score -= controlCount * 200;
-  score -= mojibakeRuPairs * 3;
-  score -= mojibakeLatinPairs * 3;
+  score -= mojibakeRuPairs * 4;
+  score -= mojibakeLatinPairs * 4;
 
-  if (suspiciousRsRatio > 0.45) {
-    score -= Math.round((suspiciousRsRatio - 0.45) * 2500);
+  // If text has many "?" and almost no readable Cyrillic, it is likely broken.
+  if (questionCount > 5 && cyrillicCount < Math.min(questionCount, 25)) {
+    score -= questionCount * 3;
   }
 
-  // Mild positive signal: decoded text contains readable Cyrillic.
+  // Mild positive signal for readable Cyrillic.
   score += Math.min(cyrillicCount, 300);
 
   return score;
 }
 
-function decodeWithEncoding(buffer: Buffer, encoding: SupportedEncoding): string {
+function decodeWithEncoding(buffer: Buffer, encoding: SupportedCsvEncoding): string {
   const decoder = new TextDecoder(encoding, { fatal: false });
   return decoder.decode(buffer);
 }
 
-export function decodeCsvBuffer(buffer: Buffer): { text: string; encoding: SupportedEncoding } {
+export function decodeCsvBuffer(params: {
+  buffer: Buffer;
+  forcedEncoding?: SupportedCsvEncoding | null;
+}): { text: string; encoding: SupportedCsvEncoding } {
+  if (params.forcedEncoding) {
+    return {
+      text: decodeWithEncoding(params.buffer, params.forcedEncoding),
+      encoding: params.forcedEncoding,
+    };
+  }
+
   let best: DecodedCandidate | null = null;
 
   for (const encoding of ENCODINGS) {
     let text: string;
     try {
-      text = decodeWithEncoding(buffer, encoding);
+      text = decodeWithEncoding(params.buffer, encoding);
     } catch {
       continue;
     }
@@ -76,7 +85,7 @@ export function decodeCsvBuffer(buffer: Buffer): { text: string; encoding: Suppo
   }
 
   if (!best) {
-    return { text: buffer.toString("utf8"), encoding: "utf-8" };
+    return { text: params.buffer.toString("utf8"), encoding: "utf-8" };
   }
 
   return { text: best.text, encoding: best.encoding };
