@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import fs from "node:fs/promises";
 import path from "node:path";
+import * as XLSX from "xlsx";
 import { z } from "zod";
 import { config } from "../config.js";
 import { HttpError, isHttpError } from "../httpError.js";
@@ -37,6 +38,52 @@ function toNumber(value: unknown, fieldName: string): number {
 
 function toCount(value: number | null): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function stringifyDelimitedRow(values: string[], delimiter: string): string {
+  const out: string[] = [];
+  for (const v of values) {
+    const needsQuotes =
+      v.includes("\"") || v.includes("\n") || v.includes("\r") || v.includes(delimiter);
+    if (!needsQuotes) {
+      out.push(v);
+      continue;
+    }
+    out.push(`\"${v.replace(/\"/g, '\"\"')}\"`);
+  }
+  return out.join(delimiter);
+}
+
+function decodeSpreadsheetBuffer(buffer: Buffer): string {
+  const book = XLSX.read(buffer, { type: "buffer" });
+  const firstSheetName = book.SheetNames[0];
+  if (!firstSheetName) {
+    throw new HttpError(400, "BAD_REQUEST", "Spreadsheet is empty");
+  }
+
+  const sheet = book.Sheets[firstSheetName];
+  if (!sheet) {
+    throw new HttpError(400, "BAD_REQUEST", "Spreadsheet sheet is missing");
+  }
+
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    raw: false,
+    defval: "",
+    blankrows: false,
+  });
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new HttpError(400, "BAD_REQUEST", "Spreadsheet has no rows");
+  }
+
+  return rows
+    .map((row) => {
+      const cells = Array.isArray(row)
+        ? row.map((cell) => (cell === null || cell === undefined ? "" : String(cell)))
+        : [];
+      return stringifyDelimitedRow(cells, ";");
+    })
+    .join("\n");
 }
 
 function sanitizeFileName(filename: string): string {
@@ -648,12 +695,29 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           throw new HttpError(400, "BAD_REQUEST", "File too large (max 5MB)");
         }
 
-        const encodingMode = parsedQuery.data.encoding ?? "auto";
-        const { text: csvText, encoding } = decodeCsvBuffer({
-          buffer,
-          forcedEncoding: encodingMode === "auto" ? null : encodingMode,
-        });
-        request.log.info({ encoding }, "Decoded imported CSV");
+        const fileName = (file.filename ?? "").toLowerCase();
+        const mimeType = (file.mimetype ?? "").toLowerCase();
+        const isSpreadsheet =
+          fileName.endsWith(".xlsx") ||
+          fileName.endsWith(".xls") ||
+          mimeType.includes("spreadsheetml") ||
+          mimeType.includes("ms-excel");
+
+        let csvText: string;
+        let encoding: string;
+        if (isSpreadsheet) {
+          csvText = decodeSpreadsheetBuffer(buffer);
+          encoding = "xlsx";
+        } else {
+          const encodingMode = parsedQuery.data.encoding ?? "auto";
+          const decoded = decodeCsvBuffer({
+            buffer,
+            forcedEncoding: encodingMode === "auto" ? null : encodingMode,
+          });
+          csvText = decoded.text;
+          encoding = decoded.encoding;
+        }
+        request.log.info({ encoding, fileName, mimeType }, "Decoded imported products file");
         const supabase = createServiceSupabaseClient();
         const useImagePrefix = parsedQuery.data.imageMode === "filename";
         if (useImagePrefix && !config.productImagesBaseUrl) {

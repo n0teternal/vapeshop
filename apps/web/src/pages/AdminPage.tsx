@@ -9,7 +9,7 @@ type AdminMe = {
 
 type ImportProductsCsvResult = {
   delimiter: ";" | "," | "\t";
-  decodedEncoding?: "utf-8" | "windows-1251" | "ibm866" | "koi8-r";
+  decodedEncoding?: "utf-8" | "windows-1251" | "ibm866" | "koi8-r" | "xlsx";
   cities: Array<{ id: number; slug: string; name: string }>;
   rows: { total: number; valid: number; invalid: number };
   products: { inserted: number; updated: number };
@@ -194,9 +194,9 @@ function AdminImportProductsCsv() {
     <Card>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold">Import products (CSV)</div>
+          <div className="text-sm font-semibold">Import products (CSV/XLSX)</div>
           <div className="mt-1 text-xs text-muted-foreground/80">
-            Upload a CSV based on `CUSTOMER_PRODUCTS_TEMPLATE.csv`.
+            Upload CSV/XLSX based on `CUSTOMER_PRODUCTS_TEMPLATE.csv`.
           </div>
         </div>
         <button
@@ -212,7 +212,7 @@ function AdminImportProductsCsv() {
       <div className="mt-3">
         <input
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
           disabled={submitting}
           onChange={(e) => {
             const next = e.target.files?.[0] ?? null;
