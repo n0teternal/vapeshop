@@ -228,10 +228,16 @@ function AdminImportProductsCsv() {
         headers["x-dev-admin"] = "1";
       }
 
-      const res = await fetch(buildApiUrl("/api/admin/export/products.xlsx"), {
+      let res = await fetch(buildApiUrl("/api/admin/export/products.xlsx"), {
         method: "GET",
         headers,
       });
+      if (res.status === 404) {
+        res = await fetch(buildApiUrl("/api/admin/export/products"), {
+          method: "GET",
+          headers,
+        });
+      }
 
       if (!res.ok) {
         let message = `Failed to download XLSX (${res.status})`;
