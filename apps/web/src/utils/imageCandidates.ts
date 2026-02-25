@@ -1,11 +1,60 @@
 import { buildApiUrl } from "../config";
 
+const SUPABASE_OBJECT_PUBLIC_MARKER = "/storage/v1/object/public/";
+const SUPABASE_RENDER_PUBLIC_MARKER = "/storage/v1/render/image/public/";
+
+function buildSupabaseRenderUrl(absoluteUrl: string, width: number): string | null {
+  try {
+    const parsed = new URL(absoluteUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    if (!parsed.pathname.includes(SUPABASE_OBJECT_PUBLIC_MARKER)) {
+      return null;
+    }
+
+    const markerIndex = parsed.pathname.indexOf(SUPABASE_OBJECT_PUBLIC_MARKER);
+    if (markerIndex < 0) return null;
+    const tail = parsed.pathname.slice(markerIndex + SUPABASE_OBJECT_PUBLIC_MARKER.length);
+    if (!tail) return null;
+
+    const rendered = new URL(parsed.toString());
+    rendered.pathname = `${parsed.pathname.slice(
+      0,
+      markerIndex,
+    )}${SUPABASE_RENDER_PUBLIC_MARKER}${tail}`;
+
+    const query = rendered.searchParams;
+    query.set("width", String(width));
+    query.set("quality", "76");
+    query.set("format", "webp");
+    rendered.search = query.toString();
+    return rendered.toString();
+  } catch {
+    return null;
+  }
+}
+
+function getResponsiveWidths(targetWidth: number | undefined): number[] {
+  if (!targetWidth || !Number.isFinite(targetWidth)) {
+    return [];
+  }
+
+  const safe = Math.max(64, Math.min(1920, Math.round(targetWidth)));
+  const retina = Math.max(64, Math.min(1920, Math.round(safe * 2)));
+  if (retina === safe) return [safe];
+  return [retina, safe];
+}
+
 function buildProxyImageUrl(absoluteUrl: string): string | null {
   if (absoluteUrl.startsWith("/api/image-proxy?url=")) return null;
 
   try {
     const parsed = new URL(absoluteUrl);
     if (parsed.pathname.startsWith("/api/image-proxy")) {
+      return null;
+    }
+    if (parsed.pathname.includes(SUPABASE_RENDER_PUBLIC_MARKER)) {
       return null;
     }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -17,9 +66,13 @@ function buildProxyImageUrl(absoluteUrl: string): string | null {
   }
 }
 
-export function buildImageCandidates(imageUrl: string | null | undefined): string[] {
+export function buildImageCandidates(
+  imageUrl: string | null | undefined,
+  options?: { targetWidth?: number },
+): string[] {
   const raw = imageUrl?.trim() ?? "";
   if (!raw) return [];
+  const responsiveWidths = getResponsiveWidths(options?.targetWidth);
 
   const directCandidates = new Set<string>();
   const pushDirect = (value: string) => {
@@ -58,12 +111,21 @@ export function buildImageCandidates(imageUrl: string | null | undefined): strin
     }
   }
 
-  const candidates = new Set<string>();
+  const prioritizedDirect = new Set<string>();
   for (const candidate of directCandidates) {
-    // Prefer proxy first to avoid cross-origin/network quirks on mobile webviews.
+    for (const width of responsiveWidths) {
+      const rendered = buildSupabaseRenderUrl(candidate, width);
+      if (rendered) prioritizedDirect.add(rendered);
+    }
+    prioritizedDirect.add(candidate);
+  }
+
+  const candidates = new Set<string>();
+  for (const candidate of prioritizedDirect) {
+    // Try direct URLs first; proxy is fallback.
+    candidates.add(candidate);
     const proxied = buildProxyImageUrl(candidate);
     if (proxied) candidates.add(proxied);
-    candidates.add(candidate);
   }
 
   return Array.from(candidates);

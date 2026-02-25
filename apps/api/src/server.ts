@@ -4,6 +4,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { verifyTelegramInitData } from "./telegram/verifyInitData.js";
 import { createOrder, type CreateOrderPayload } from "./order/createOrder.js";
 import { HttpError, isHttpError } from "./httpError.js";
@@ -181,7 +182,7 @@ app.get("/health", async () => {
 
 app.get<{
   Querystring: { url?: string };
-  Reply: Buffer | ErrorResponse;
+  Reply: Buffer | NodeJS.ReadableStream | ErrorResponse;
 }>("/api/image-proxy", async (request, reply) => {
   try {
     const rawUrl = request.query.url?.trim() ?? "";
@@ -227,13 +228,26 @@ app.get<{
     const cacheControl =
       upstream.headers.get("cache-control") ??
       "public, max-age=300, s-maxage=1800, stale-while-revalidate=3600";
-    const body = Buffer.from(await upstream.arrayBuffer());
+    const contentLength = upstream.headers.get("content-length");
+    const etag = upstream.headers.get("etag");
+    const lastModified = upstream.headers.get("last-modified");
+    const stream = upstream.body;
+    if (!stream) {
+      throw new HttpError(502, "UPSTREAM", "Upstream image body is empty");
+    }
 
-    return reply
+    const response = reply
       .header("Content-Type", contentType)
       .header("Cache-Control", cacheControl)
-      .code(200)
-      .send(body);
+      .code(200);
+
+    if (contentLength) response.header("Content-Length", contentLength);
+    if (etag) response.header("ETag", etag);
+    if (lastModified) response.header("Last-Modified", lastModified);
+
+    return response.send(
+      Readable.fromWeb(stream as unknown as import("node:stream/web").ReadableStream),
+    );
   } catch (e: unknown) {
     const statusCode = isHttpError(e) ? e.statusCode : 500;
     const code = isHttpError(e) ? e.code : "INTERNAL";

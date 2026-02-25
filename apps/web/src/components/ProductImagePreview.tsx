@@ -8,6 +8,7 @@ type ProductImagePreviewProps = {
   placeholderClassName: string;
   placeholderLabel?: string;
   loading?: "eager" | "lazy";
+  targetWidth?: number;
 };
 
 export function ProductImagePreview({
@@ -17,13 +18,17 @@ export function ProductImagePreview({
   placeholderClassName,
   placeholderLabel = "Photo",
   loading = "lazy",
+  targetWidth,
 }: ProductImagePreviewProps) {
-  const imageCandidates = useMemo(() => buildImageCandidates(imageUrl), [imageUrl]);
+  const imageCandidates = useMemo(
+    () => buildImageCandidates(imageUrl, { targetWidth }),
+    [imageUrl, targetWidth],
+  );
   const [imageIndex, setImageIndex] = useState(0);
 
   useEffect(() => {
     setImageIndex(0);
-  }, [imageUrl]);
+  }, [imageUrl, targetWidth]);
 
   const imageSrc = imageCandidates[imageIndex] ?? null;
 
@@ -40,6 +45,7 @@ export function ProductImagePreview({
       src={imageSrc}
       alt={alt}
       loading={loading}
+      fetchPriority={loading === "eager" ? "high" : "auto"}
       decoding="async"
       referrerPolicy="no-referrer"
       className={className}

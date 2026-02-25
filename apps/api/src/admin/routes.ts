@@ -110,6 +110,9 @@ function inferMimeType(fileName: string): string | null {
   return null;
 }
 
+const VERSIONED_IMAGE_CACHE_CONTROL_SECONDS = "31536000";
+const DEFAULT_IMAGE_CACHE_CONTROL_SECONDS = "2592000";
+
 type ListedImageFile = { name: string; size: number; updatedAt: string };
 type StorageLocation = { bucket: string; prefix: string };
 
@@ -591,6 +594,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           .from("product-images")
           .upload(objectPath, buffer, {
             contentType: mimeType,
+            cacheControl: VERSIONED_IMAGE_CACHE_CONTROL_SECONDS,
             upsert: false,
           });
 
@@ -937,6 +941,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
                 .upload(objectPath, buffer, {
                   upsert: true,
                   contentType: mimeType,
+                  cacheControl: DEFAULT_IMAGE_CACHE_CONTROL_SECONDS,
                 });
 
               if (uploadError) {

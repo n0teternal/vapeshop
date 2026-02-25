@@ -193,11 +193,13 @@ function getSearchMatchScore(title: string, normalizedQuery: string): number {
 function ProductCard({
   item,
   isFavorite,
+  imageLoading,
   onAdd,
   onToggleFavorite,
 }: {
   item: CatalogItem;
   isFavorite: boolean;
+  imageLoading: "eager" | "lazy";
   onAdd: () => void;
   onToggleFavorite: () => void;
 }) {
@@ -207,7 +209,8 @@ function ProductCard({
         <ProductImagePreview
           imageUrl={item.imageUrl}
           alt={item.title}
-          loading="eager"
+          loading={imageLoading}
+          targetWidth={360}
           className="h-[224px] w-full rounded-[20px] object-cover"
           placeholderClassName="flex h-[224px] w-full items-center justify-center rounded-[20px] bg-muted text-xs font-semibold uppercase tracking-wide text-muted-foreground"
         />
@@ -727,11 +730,12 @@ export function CatalogPage() {
         </div>
       ) : (
         <div className="grid grid-cols-2 auto-rows-fr gap-3">
-          {visibleItems.map((item) => (
+          {visibleItems.map((item, index) => (
             <ProductCard
               key={item.id}
               item={item}
               isFavorite={favoriteIds.has(item.id)}
+              imageLoading={index < 2 ? "eager" : "lazy"}
               onAdd={() => {
                 dispatch({
                   type: "cart/add",

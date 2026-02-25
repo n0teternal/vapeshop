@@ -52,6 +52,7 @@ export function FavoritesPage() {
                   imageUrl={item.imageUrl}
                   alt={item.title}
                   loading="lazy"
+                  targetWidth={160}
                   className="h-20 w-20 rounded-lg object-cover"
                   placeholderClassName="flex h-20 w-20 items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
                 />
