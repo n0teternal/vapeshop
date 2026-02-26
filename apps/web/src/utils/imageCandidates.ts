@@ -27,7 +27,7 @@ function buildSupabaseRenderUrl(absoluteUrl: string, width: number): string | nu
     const query = rendered.searchParams;
     query.set("width", String(width));
     query.set("quality", "76");
-    query.set("format", "webp");
+    query.delete("format");
     rendered.search = query.toString();
     return rendered.toString();
   } catch {
