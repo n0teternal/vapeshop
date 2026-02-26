@@ -5,6 +5,11 @@ import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
 import { isSupabaseConfigured } from "../supabase/client";
 import { fetchCatalog, type CatalogItem, SupabaseQueryError } from "../supabase/catalog";
+import { buildImageCandidates } from "../utils/imageCandidates";
+
+const CATALOG_INITIAL_RENDER_COUNT = 24;
+const CATALOG_RENDER_STEP = 20;
+const CATALOG_IMAGE_PREFETCH_AHEAD = 12;
 
 function formatPriceRub(value: number): string {
   return new Intl.NumberFormat("ru-RU", {
@@ -353,6 +358,9 @@ export function CatalogPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [toast, setToast] = useState<CatalogToast | null>(null);
   const toastKeyRef = useRef(0);
+  const [renderedCount, setRenderedCount] = useState(CATALOG_INITIAL_RENDER_COUNT);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const prefetchedImageUrlsRef = useRef<Set<string>>(new Set());
 
   const mockItems = useMemo(() => mapMockCatalog(), []);
   const supabaseEnabled = isSupabaseConfigured();
@@ -492,6 +500,90 @@ export function CatalogPage() {
     selectedCategoriesSet,
     selectedCategoryIds.length,
   ]);
+
+  useEffect(() => {
+    setRenderedCount(Math.min(CATALOG_INITIAL_RENDER_COUNT, visibleItems.length));
+    prefetchedImageUrlsRef.current.clear();
+  }, [visibleItems]);
+
+  const renderedItems = useMemo(() => {
+    return visibleItems.slice(0, renderedCount);
+  }, [visibleItems, renderedCount]);
+
+  const hasMoreToRender = renderedItems.length < visibleItems.length;
+
+  useEffect(() => {
+    if (!hasMoreToRender) return;
+    if (typeof window === "undefined" || typeof window.IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const sentinel = loadMoreSentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        const shouldLoadMore = entries.some((entry) => entry.isIntersecting);
+        if (!shouldLoadMore) return;
+        setRenderedCount((prev) => Math.min(prev + CATALOG_RENDER_STEP, visibleItems.length));
+      },
+      {
+        root: null,
+        rootMargin: "900px 0px 900px 0px",
+        threshold: 0.01,
+      },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreToRender, visibleItems.length]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (renderedCount >= visibleItems.length) return;
+
+    const prefetched = prefetchedImageUrlsRef.current;
+    const queue: string[] = [];
+    const nextBatch = visibleItems.slice(
+      renderedCount,
+      Math.min(renderedCount + CATALOG_IMAGE_PREFETCH_AHEAD, visibleItems.length),
+    );
+
+    for (const item of nextBatch) {
+      const bestCandidate = buildImageCandidates(item.imageUrl, { targetWidth: 360 })[0] ?? null;
+      if (!bestCandidate) continue;
+      if (prefetched.has(bestCandidate)) continue;
+      prefetched.add(bestCandidate);
+      queue.push(bestCandidate);
+    }
+
+    if (queue.length === 0) return;
+
+    const preload = () => {
+      for (const url of queue) {
+        const img = new Image();
+        img.decoding = "async";
+        img.src = url;
+      }
+    };
+
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      const idleId = idleWindow.requestIdleCallback(preload, { timeout: 600 });
+      return () => {
+        if (typeof idleWindow.cancelIdleCallback === "function") {
+          idleWindow.cancelIdleCallback(idleId);
+        }
+      };
+    }
+
+    const timeoutId = window.setTimeout(preload, 120);
+    return () => window.clearTimeout(timeoutId);
+  }, [visibleItems, renderedCount]);
 
   const favoriteIds = useMemo(() => {
     return new Set(state.favorites.map((item) => item.productId));
@@ -729,46 +821,65 @@ export function CatalogPage() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-2 auto-rows-fr gap-3">
-          {visibleItems.map((item, index) => (
-            <ProductCard
-              key={item.id}
-              item={item}
-              isFavorite={favoriteIds.has(item.id)}
-              imageLoading={index < 2 ? "eager" : "lazy"}
-              onAdd={() => {
-                dispatch({
-                  type: "cart/add",
-                  item: {
-                    productId: item.id,
-                    title: item.title,
-                    price: item.price,
-                    imageUrl: item.imageUrl,
-                  },
-                });
-                showToast("\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u043a\u043e\u0440\u0437\u0438\u043d\u0443");
-              }}
-              onToggleFavorite={() => {
-                const wasFavorite = favoriteIds.has(item.id);
-                dispatch({
-                  type: "favorite/toggle",
-                  item: {
-                    productId: item.id,
-                    title: item.title,
-                    price: item.price,
-                    imageUrl: item.imageUrl,
-                    inStock: item.inStock,
-                  },
-                });
-                showToast(
-                  wasFavorite
-                    ? "\u0422\u043e\u0432\u0430\u0440 \u0443\u0434\u0430\u043b\u0435\u043d \u0438\u0437 \u0438\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0433\u043e"
-                    : "\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u0438\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0435",
-                );
-              }}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 auto-rows-fr gap-3">
+            {renderedItems.map((item, index) => (
+              <ProductCard
+                key={item.id}
+                item={item}
+                isFavorite={favoriteIds.has(item.id)}
+                imageLoading={index < 2 ? "eager" : "lazy"}
+                onAdd={() => {
+                  dispatch({
+                    type: "cart/add",
+                    item: {
+                      productId: item.id,
+                      title: item.title,
+                      price: item.price,
+                      imageUrl: item.imageUrl,
+                    },
+                  });
+                  showToast("\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u043a\u043e\u0440\u0437\u0438\u043d\u0443");
+                }}
+                onToggleFavorite={() => {
+                  const wasFavorite = favoriteIds.has(item.id);
+                  dispatch({
+                    type: "favorite/toggle",
+                    item: {
+                      productId: item.id,
+                      title: item.title,
+                      price: item.price,
+                      imageUrl: item.imageUrl,
+                      inStock: item.inStock,
+                    },
+                  });
+                  showToast(
+                    wasFavorite
+                      ? "\u0422\u043e\u0432\u0430\u0440 \u0443\u0434\u0430\u043b\u0435\u043d \u0438\u0437 \u0438\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0433\u043e"
+                      : "\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u0438\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0435",
+                  );
+                }}
+              />
+            ))}
+          </div>
+
+          {hasMoreToRender ? (
+            <div className="pt-2">
+              <div ref={loadMoreSentinelRef} className="h-4 w-full" />
+              <button
+                type="button"
+                className="mt-2 w-full rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+                onClick={() =>
+                  setRenderedCount((prev) =>
+                    Math.min(prev + CATALOG_RENDER_STEP, visibleItems.length),
+                  )
+                }
+              >
+                {`Показать ещё (${renderedItems.length} из ${visibleItems.length})`}
+              </button>
+            </div>
+          ) : null}
+        </>
       )}
 
       {sortOpen ? (

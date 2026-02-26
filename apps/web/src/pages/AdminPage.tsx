@@ -588,19 +588,19 @@ function AdminUploadImages() {
       </div>
 
       {filesOpen ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center px-4 py-10">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-4 sm:py-10">
           <button
             type="button"
             className="absolute inset-0 bg-slate-900/40"
             onClick={() => setFilesOpen(false)}
             aria-label="Закрыть"
           />
-          <div className="relative w-full max-w-3xl rounded-2xl bg-card/90 p-4 shadow-xl">
+          <div className="relative flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col rounded-2xl bg-card/90 p-4 shadow-xl">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-lg font-semibold">Файлы</div>
                 {baseUrl ? (
-                  <div className="mt-1 text-xs text-muted-foreground/80">Base URL: {baseUrl}</div>
+                  <div className="mt-1 break-all text-xs text-muted-foreground/80">Base URL: {baseUrl}</div>
                 ) : null}
               </div>
               <div className="flex items-center gap-2">
@@ -630,6 +630,7 @@ function AdminUploadImages() {
               </div>
             </div>
 
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
             {listError ? (
               <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {listError}
@@ -702,6 +703,7 @@ function AdminUploadImages() {
                 ))}
               </div>
             )}
+            </div>
           </div>
         </div>
       ) : null}
