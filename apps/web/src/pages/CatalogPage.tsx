@@ -195,30 +195,160 @@ function getSearchMatchScore(title: string, normalizedQuery: string): number {
   return totalScore;
 }
 
+const MANUFACTURER_STOP_WORDS = new Set([
+  "одноразка",
+  "одноразовый",
+  "одноразовая",
+  "одноразовые",
+  "disposable",
+  "pod",
+  "pods",
+  "salt",
+  "vape",
+  "вейп",
+  "жидкость",
+  "жидкости",
+  "liquid",
+  "cartridge",
+  "картридж",
+  "испаритель",
+]);
+
+function normalizeManufacturerId(value: string): string {
+  return normalizeSearchText(value).replaceAll(" ", "-");
+}
+
+function extractManufacturerLabel(title: string): string {
+  const tokens = title
+    .replaceAll("_", " ")
+    .replaceAll("/", " ")
+    .split(/\s+/g)
+    .map((token) => token.replaceAll(/[^0-9A-Za-zА-Яа-яЁё-]+/g, ""))
+    .filter((token) => token.length > 0);
+
+  for (const token of tokens) {
+    const normalized = normalizeSearchText(token);
+    if (normalized.length < 2) continue;
+    if (/^\d/.test(normalized)) continue;
+    if (MANUFACTURER_STOP_WORDS.has(normalized)) continue;
+    return token;
+  }
+
+  return "Other";
+}
+
+function normalizePuffCount(value: number): number | null {
+  const rounded = Math.round(value);
+  if (!Number.isFinite(rounded)) return null;
+  if (rounded < 200 || rounded > 60_000) return null;
+  return rounded;
+}
+
+function extractPuffCount(item: CatalogItem): number | null {
+  const source = `${item.title} ${item.description ?? ""}`
+    .toLowerCase()
+    .replaceAll(",", ".")
+    .replaceAll(/\s+/g, " ");
+
+  const explicitK = source.match(
+    /(\d{1,2}(?:\.\d+)?)\s*[kк]\s*(?:затяж(?:ек|ки|ка)?|puffs?|тяг)/iu,
+  );
+  if (explicitK) {
+    const value = Number.parseFloat(explicitK[1]);
+    const normalized = normalizePuffCount(value * 1000);
+    if (normalized !== null) return normalized;
+  }
+
+  const explicitNumeric = source.match(/(\d{3,5})\s*(?:затяж(?:ек|ки|ка)?|puffs?|тяг)/iu);
+  if (explicitNumeric) {
+    const value = Number.parseInt(explicitNumeric[1], 10);
+    const normalized = normalizePuffCount(value);
+    if (normalized !== null) return normalized;
+  }
+
+  const disposableHint =
+    item.categorySlug.trim().toLowerCase() === "disposable" ||
+    /однораз|disposable/.test(source);
+  if (!disposableHint) {
+    return null;
+  }
+
+  const fallbackK = source.match(/(?:^|\D)(\d{1,2}(?:\.\d+)?)\s*[kк](?:\D|$)/iu);
+  if (fallbackK) {
+    const value = Number.parseFloat(fallbackK[1]);
+    const normalized = normalizePuffCount(value * 1000);
+    if (normalized !== null) return normalized;
+  }
+
+  const fallbackNumeric = source.match(/(?:^|\D)(\d{3,5})(?:\D|$)/u);
+  if (fallbackNumeric) {
+    const value = Number.parseInt(fallbackNumeric[1], 10);
+    const normalized = normalizePuffCount(value);
+    if (normalized !== null) return normalized;
+  }
+
+  return null;
+}
+
+function parsePositiveIntInput(value: string): number | null {
+  const digitsOnly = value.replaceAll(/\D+/g, "");
+  if (digitsOnly.length === 0) return null;
+  const parsed = Number.parseInt(digitsOnly, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+type CatalogImagePreview = { src: string; alt: string };
+
 function ProductCard({
   item,
   isFavorite,
   imageLoading,
   onAdd,
   onToggleFavorite,
+  onOpenImage,
 }: {
   item: CatalogItem;
   isFavorite: boolean;
   imageLoading: "eager" | "lazy";
   onAdd: () => void;
   onToggleFavorite: () => void;
+  onOpenImage: (preview: CatalogImagePreview) => void;
 }) {
+  const previewImageSrc = useMemo(
+    () => buildImageCandidates(item.imageUrl, { targetWidth: 1280 })[0] ?? null,
+    [item.imageUrl],
+  );
+
   return (
     <article className="flex h-full flex-col gap-2">
       <div className="relative overflow-hidden rounded-[20px] border border-border/60">
-        <ProductImagePreview
-          imageUrl={item.imageUrl}
-          alt={item.title}
-          loading={imageLoading}
-          targetWidth={360}
-          className="h-[224px] w-full rounded-[20px] object-cover"
-          placeholderClassName="flex h-[224px] w-full items-center justify-center rounded-[20px] bg-muted text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-        />
+        {previewImageSrc ? (
+          <button
+            type="button"
+            className="block w-full cursor-zoom-in rounded-[20px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            aria-label={`Открыть фото товара ${item.title}`}
+            onClick={() => onOpenImage({ src: previewImageSrc, alt: item.title })}
+          >
+            <ProductImagePreview
+              imageUrl={item.imageUrl}
+              alt={item.title}
+              loading={imageLoading}
+              targetWidth={360}
+              className="h-[224px] w-full rounded-[20px] object-cover"
+              placeholderClassName="flex h-[224px] w-full items-center justify-center rounded-[20px] bg-muted text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+            />
+          </button>
+        ) : (
+          <ProductImagePreview
+            imageUrl={item.imageUrl}
+            alt={item.title}
+            loading={imageLoading}
+            targetWidth={360}
+            className="h-[224px] w-full rounded-[20px] object-cover"
+            placeholderClassName="flex h-[224px] w-full items-center justify-center rounded-[20px] bg-muted text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          />
+        )}
 
         <button
           type="button"
@@ -286,7 +416,20 @@ type CategoryStat = {
   count: number;
 };
 
-type PriceSortMode = "none" | "asc" | "desc";
+type CatalogRow = {
+  item: CatalogItem;
+  categoryId: string;
+  manufacturerId: string;
+  manufacturerLabel: string;
+  puffCount: number | null;
+};
+
+type CatalogSortMode =
+  | "none"
+  | "price_asc"
+  | "price_desc"
+  | "title_asc"
+  | "title_desc";
 type CatalogToast = { key: number; message: string };
 type CatalogLoadError = { message: string; devDetails?: string };
 
@@ -350,12 +493,16 @@ export function CatalogPage() {
   const { state, dispatch } = useAppState();
 
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
-  const [priceSortMode, setPriceSortMode] = useState<PriceSortMode>("none");
+  const [selectedManufacturerIds, setSelectedManufacturerIds] = useState<string[]>([]);
+  const [sortMode, setSortMode] = useState<CatalogSortMode>("none");
   const [onlyInStock, setOnlyInStock] = useState(false);
+  const [puffRangeMinInput, setPuffRangeMinInput] = useState("");
+  const [puffRangeMaxInput, setPuffRangeMaxInput] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [imagePreview, setImagePreview] = useState<CatalogImagePreview | null>(null);
   const [toast, setToast] = useState<CatalogToast | null>(null);
   const toastKeyRef = useRef(0);
   const [renderedCount, setRenderedCount] = useState(CATALOG_INITIAL_RENDER_COUNT);
@@ -389,26 +536,48 @@ export function CatalogPage() {
     return null;
   }, [state.city]);
 
-  const catalogWithCategory = useMemo(() => {
-    return items.map((item) => ({
-      item,
-      categoryId:
-        typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
-          ? item.categorySlug.trim().toLowerCase()
-          : "other",
-    }));
+  const catalogRows = useMemo<CatalogRow[]>(() => {
+    return items.map((item) => {
+      const manufacturerLabel = extractManufacturerLabel(item.title);
+      return {
+        item,
+        categoryId:
+          typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
+            ? item.categorySlug.trim().toLowerCase()
+            : "other",
+        manufacturerLabel,
+        manufacturerId: normalizeManufacturerId(manufacturerLabel),
+        puffCount: extractPuffCount(item),
+      };
+    });
   }, [items]);
 
   const categories = useMemo<CategoryStat[]>(() => {
     const counts = new Map<string, number>();
-    for (const row of catalogWithCategory) {
+    for (const row of catalogRows) {
       counts.set(row.categoryId, (counts.get(row.categoryId) ?? 0) + 1);
     }
 
     return Array.from(counts.entries())
       .map(([id, count]) => ({ id, count, label: formatCategoryLabel(id) }))
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"));
-  }, [catalogWithCategory]);
+  }, [catalogRows]);
+
+  const manufacturers = useMemo<CategoryStat[]>(() => {
+    const stats = new Map<string, { label: string; count: number }>();
+    for (const row of catalogRows) {
+      const prev = stats.get(row.manufacturerId);
+      if (prev) {
+        prev.count += 1;
+      } else {
+        stats.set(row.manufacturerId, { label: row.manufacturerLabel, count: 1 });
+      }
+    }
+
+    return Array.from(stats.entries())
+      .map(([id, value]) => ({ id, label: value.label, count: value.count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"));
+  }, [catalogRows]);
 
   useEffect(() => {
     const available = new Set(categories.map((x) => x.id));
@@ -418,15 +587,75 @@ export function CatalogPage() {
     });
   }, [categories]);
 
+  useEffect(() => {
+    const available = new Set(manufacturers.map((x) => x.id));
+    setSelectedManufacturerIds((prev) => {
+      const next = prev.filter((id) => available.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [manufacturers]);
+
   const quickCategories = useMemo(() => categories, [categories]);
 
   const selectedCategoriesSet = useMemo(() => {
     return new Set(selectedCategoryIds);
   }, [selectedCategoryIds]);
 
+  const selectedManufacturersSet = useMemo(() => {
+    return new Set(selectedManufacturerIds);
+  }, [selectedManufacturerIds]);
+
   const normalizedSearchQuery = useMemo(() => {
     return normalizeSearchText(searchQuery);
   }, [searchQuery]);
+
+  const puffRange = useMemo(() => {
+    const min = parsePositiveIntInput(puffRangeMinInput);
+    const max = parsePositiveIntInput(puffRangeMaxInput);
+    if (min === null && max === null) return null;
+    if (min !== null && max !== null && min > max) {
+      return { min: max, max: min };
+    }
+    return { min, max };
+  }, [puffRangeMaxInput, puffRangeMinInput]);
+
+  const puffBounds = useMemo(() => {
+    let min = Number.POSITIVE_INFINITY;
+    let max = 0;
+    let count = 0;
+    for (const row of catalogRows) {
+      if (row.puffCount === null) continue;
+      if (row.puffCount < min) min = row.puffCount;
+      if (row.puffCount > max) max = row.puffCount;
+      count += 1;
+    }
+    if (count === 0) return null;
+    return { min, max };
+  }, [catalogRows]);
+
+  const activeFilterCount = useMemo(() => {
+    return (
+      selectedCategoryIds.length +
+      selectedManufacturerIds.length +
+      (puffRange ? 1 : 0)
+    );
+  }, [puffRange, selectedCategoryIds.length, selectedManufacturerIds.length]);
+
+  const filtersSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedCategoryIds.length > 0) {
+      parts.push(`Категорий: ${selectedCategoryIds.length}`);
+    }
+    if (selectedManufacturerIds.length > 0) {
+      parts.push(`Производителей: ${selectedManufacturerIds.length}`);
+    }
+    if (puffRange) {
+      const minLabel = puffRange.min ?? "0";
+      const maxLabel = puffRange.max ?? "∞";
+      parts.push(`Затяжки: ${minLabel}-${maxLabel}`);
+    }
+    return parts.join(" • ");
+  }, [puffRange, selectedCategoryIds.length, selectedManufacturerIds.length]);
 
   useEffect(() => {
     if (!toast) return;
@@ -438,17 +667,47 @@ export function CatalogPage() {
     };
   }, [toast]);
 
+  useEffect(() => {
+    if (!imagePreview || typeof window === "undefined") return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setImagePreview(null);
+      }
+    };
+
+    const { body } = document;
+    const previousOverflow = body.style.overflow;
+    body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [imagePreview]);
+
   const visibleItems = useMemo(() => {
-    const preFilteredRows = catalogWithCategory
-      .filter((row) => {
-        if (selectedCategoryIds.length > 0 && !selectedCategoriesSet.has(row.categoryId)) {
-          return false;
-        }
-        if (onlyInStock && !row.item.inStock) {
-          return false;
-        }
-        return true;
-      });
+    const preFilteredRows = catalogRows.filter((row) => {
+      if (selectedCategoryIds.length > 0 && !selectedCategoriesSet.has(row.categoryId)) {
+        return false;
+      }
+      if (
+        selectedManufacturerIds.length > 0 &&
+        !selectedManufacturersSet.has(row.manufacturerId)
+      ) {
+        return false;
+      }
+      if (onlyInStock && !row.item.inStock) {
+        return false;
+      }
+      if (puffRange) {
+        if (row.puffCount === null) return false;
+        if (puffRange.min !== null && row.puffCount < puffRange.min) return false;
+        if (puffRange.max !== null && row.puffCount > puffRange.max) return false;
+      }
+      return true;
+    });
 
     const scoredItems =
       normalizedSearchQuery.length > 0
@@ -460,7 +719,7 @@ export function CatalogPage() {
             .filter((entry) => entry.score > 0)
         : preFilteredRows.map((row) => ({ item: row.item, score: 0 }));
 
-    if (priceSortMode === "asc") {
+    if (sortMode === "price_asc") {
       return [...scoredItems]
         .sort(
           (a, b) =>
@@ -471,7 +730,7 @@ export function CatalogPage() {
         .map((entry) => entry.item);
     }
 
-    if (priceSortMode === "desc") {
+    if (sortMode === "price_desc") {
       return [...scoredItems]
         .sort(
           (a, b) =>
@@ -482,23 +741,45 @@ export function CatalogPage() {
         .map((entry) => entry.item);
     }
 
-    if (normalizedSearchQuery.length > 0) {
+    if (sortMode === "title_asc") {
       return [...scoredItems]
         .sort(
           (a, b) =>
-            b.score - a.score || a.item.title.localeCompare(b.item.title, "ru"),
+            a.item.title.localeCompare(b.item.title, "ru") ||
+            b.score - a.score ||
+            a.item.price - b.item.price,
         )
+        .map((entry) => entry.item);
+    }
+
+    if (sortMode === "title_desc") {
+      return [...scoredItems]
+        .sort(
+          (a, b) =>
+            b.item.title.localeCompare(a.item.title, "ru") ||
+            b.score - a.score ||
+            a.item.price - b.item.price,
+        )
+        .map((entry) => entry.item);
+    }
+
+    if (normalizedSearchQuery.length > 0) {
+      return [...scoredItems]
+        .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title, "ru"))
         .map((entry) => entry.item);
     }
 
     return scoredItems.map((entry) => entry.item);
   }, [
-    catalogWithCategory,
+    catalogRows,
     normalizedSearchQuery,
     onlyInStock,
-    priceSortMode,
+    puffRange,
     selectedCategoriesSet,
     selectedCategoryIds.length,
+    selectedManufacturerIds.length,
+    selectedManufacturersSet,
+    sortMode,
   ]);
 
   useEffect(() => {
@@ -597,6 +878,14 @@ export function CatalogPage() {
     );
   }
 
+  function toggleManufacturer(manufacturerId: string): void {
+    setSelectedManufacturerIds((prev) =>
+      prev.includes(manufacturerId)
+        ? prev.filter((id) => id !== manufacturerId)
+        : [...prev, manufacturerId],
+    );
+  }
+
   function showToast(message: string): void {
     toastKeyRef.current += 1;
     setToast({ key: toastKeyRef.current, message });
@@ -654,7 +943,7 @@ export function CatalogPage() {
                 type="button"
                 className={[
                   "inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
-                  priceSortMode === "none" && !onlyInStock
+                  sortMode === "none" && !onlyInStock
                     ? "border-border/70 bg-background text-foreground/85 hover:bg-muted/55"
                     : "border-primary bg-primary text-white",
                 ].join(" ")}
@@ -674,7 +963,12 @@ export function CatalogPage() {
 
               <button
                 type="button"
-                className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-border/70 bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+                className={[
+                  "inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+                  activeFilterCount === 0
+                    ? "border-border/70 bg-background text-foreground hover:bg-muted/55"
+                    : "border-primary bg-primary text-white",
+                ].join(" ")}
                 onClick={() => setFiltersOpen(true)}
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
@@ -686,9 +980,9 @@ export function CatalogPage() {
                   />
                 </svg>
                 Фильтры
-                {selectedCategoryIds.length > 0 ? (
-                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-bold text-white">
-                    {selectedCategoryIds.length}
+                {activeFilterCount > 0 ? (
+                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    {activeFilterCount}
                   </span>
                 ) : null}
               </button>
@@ -859,6 +1153,7 @@ export function CatalogPage() {
                       : "\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u0438\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0435",
                   );
                 }}
+                onOpenImage={setImagePreview}
               />
             ))}
           </div>
@@ -881,6 +1176,42 @@ export function CatalogPage() {
           ) : null}
         </>
       )}
+
+      {imagePreview ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-3 sm:p-6">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-zoom-out"
+            aria-label="Закрыть превью изображения"
+            onClick={() => setImagePreview(null)}
+          />
+          <div className="relative z-10 flex max-h-full w-full max-w-6xl items-center justify-center">
+            <img
+              src={imagePreview.src}
+              alt={imagePreview.alt}
+              className="max-h-[92vh] w-full max-w-[94vw] rounded-xl object-contain"
+              loading="eager"
+              decoding="sync"
+              referrerPolicy="no-referrer"
+            />
+            <button
+              type="button"
+              className="absolute right-2 top-2 grid h-10 w-10 place-items-center rounded-full bg-black/55 text-white transition-colors hover:bg-black/75"
+              aria-label="Закрыть превью изображения"
+              onClick={() => setImagePreview(null)}
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                <path
+                  d="M6 6 18 18M18 6 6 18"
+                  className="fill-none stroke-current"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {sortOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-4 pt-16 sm:items-center">
@@ -913,34 +1244,68 @@ export function CatalogPage() {
                 type="button"
                 className={[
                   "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
-                  priceSortMode === "asc"
+                  sortMode === "price_asc"
                     ? "border-primary bg-primary/20 text-[#b9d4ff]"
                     : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
                 ].join(" ")}
                 onClick={() => {
-                  setPriceSortMode((prev) => (prev === "asc" ? "none" : "asc"));
+                  setSortMode((prev) => (prev === "price_asc" ? "none" : "price_asc"));
                   setSortOpen(false);
                 }}
               >
                 <span>По возрастанию цены</span>
-                {priceSortMode === "asc" ? <span aria-hidden="true">✓</span> : null}
+                {sortMode === "price_asc" ? <span aria-hidden="true">✓</span> : null}
               </button>
 
               <button
                 type="button"
                 className={[
                   "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
-                  priceSortMode === "desc"
+                  sortMode === "price_desc"
                     ? "border-primary bg-primary/20 text-[#b9d4ff]"
                     : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
                 ].join(" ")}
                 onClick={() => {
-                  setPriceSortMode((prev) => (prev === "desc" ? "none" : "desc"));
+                  setSortMode((prev) => (prev === "price_desc" ? "none" : "price_desc"));
                   setSortOpen(false);
                 }}
               >
                 <span>По убыванию цены</span>
-                {priceSortMode === "desc" ? <span aria-hidden="true">✓</span> : null}
+                {sortMode === "price_desc" ? <span aria-hidden="true">✓</span> : null}
+              </button>
+
+              <button
+                type="button"
+                className={[
+                  "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
+                  sortMode === "title_asc"
+                    ? "border-primary bg-primary/20 text-[#b9d4ff]"
+                    : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
+                ].join(" ")}
+                onClick={() => {
+                  setSortMode((prev) => (prev === "title_asc" ? "none" : "title_asc"));
+                  setSortOpen(false);
+                }}
+              >
+                <span>По названию (А-Я)</span>
+                {sortMode === "title_asc" ? <span aria-hidden="true">✓</span> : null}
+              </button>
+
+              <button
+                type="button"
+                className={[
+                  "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
+                  sortMode === "title_desc"
+                    ? "border-primary bg-primary/20 text-[#b9d4ff]"
+                    : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
+                ].join(" ")}
+                onClick={() => {
+                  setSortMode((prev) => (prev === "title_desc" ? "none" : "title_desc"));
+                  setSortOpen(false);
+                }}
+              >
+                <span>По названию (Я-А)</span>
+                {sortMode === "title_desc" ? <span aria-hidden="true">✓</span> : null}
               </button>
             </div>
           </div>
@@ -974,12 +1339,15 @@ export function CatalogPage() {
               </button>
             </div>
 
+            <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Категории
+            </div>
             {categories.length === 0 ? (
-              <div className="mt-4 text-sm text-muted-foreground">
+              <div className="mt-2 text-sm text-muted-foreground">
                 Категории пока не найдены в текущем каталоге.
               </div>
             ) : (
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 {categories.map((category) => {
                   const active = selectedCategoriesSet.has(category.id);
                   return (
@@ -1001,20 +1369,98 @@ export function CatalogPage() {
               </div>
             )}
 
+            <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Производитель
+            </div>
+            {manufacturers.length === 0 ? (
+              <div className="mt-2 text-sm text-muted-foreground">
+                Производители не определились автоматически.
+              </div>
+            ) : (
+              <div className="mt-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto pr-1">
+                {manufacturers.map((manufacturer) => {
+                  const active = selectedManufacturersSet.has(manufacturer.id);
+                  return (
+                    <button
+                      key={manufacturer.id}
+                      type="button"
+                      className={[
+                        "rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
+                        active
+                          ? "border-primary bg-primary text-white"
+                          : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
+                      ].join(" ")}
+                      onClick={() => toggleManufacturer(manufacturer.id)}
+                    >
+                      {manufacturer.label} ({manufacturer.count})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Затяжки (одноразки)
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                <span>От</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={puffRangeMinInput}
+                  onChange={(event) =>
+                    setPuffRangeMinInput(
+                      event.target.value.replaceAll(/\D+/g, "").slice(0, 5),
+                    )
+                  }
+                  placeholder={puffBounds ? String(puffBounds.min) : "1000"}
+                  className="h-10 rounded-xl border border-border/70 bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
+                />
+              </label>
+              <label className="grid gap-1 text-xs text-muted-foreground">
+                <span>До</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={puffRangeMaxInput}
+                  onChange={(event) =>
+                    setPuffRangeMaxInput(
+                      event.target.value.replaceAll(/\D+/g, "").slice(0, 5),
+                    )
+                  }
+                  placeholder={puffBounds ? String(puffBounds.max) : "4000"}
+                  className="h-10 rounded-xl border border-border/70 bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
+                />
+              </label>
+            </div>
+            {puffBounds ? (
+              <div className="mt-2 text-[11px] text-muted-foreground">
+                Доступный диапазон в каталоге: {puffBounds.min} - {puffBounds.max}
+              </div>
+            ) : (
+              <div className="mt-2 text-[11px] text-muted-foreground">
+                В каталоге нет товаров с распознанным числом затяжек.
+              </div>
+            )}
+
             <div className="mt-4 flex items-center justify-between gap-3">
               <button
                 type="button"
                 className="rounded-xl border border-border/70 bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={selectedCategoryIds.length === 0}
-                onClick={() => setSelectedCategoryIds([])}
+                disabled={activeFilterCount === 0}
+                onClick={() => {
+                  setSelectedCategoryIds([]);
+                  setSelectedManufacturerIds([]);
+                  setPuffRangeMinInput("");
+                  setPuffRangeMaxInput("");
+                }}
               >
                 Сбросить
               </button>
 
-              <div className="text-xs text-muted-foreground">
-                {selectedCategoryIds.length === 0
-                  ? "Показаны все категории"
-                  : `Выбрано категорий: ${selectedCategoryIds.length}`}
+              <div className="text-right text-xs text-muted-foreground">
+                {activeFilterCount === 0 ? "Показаны все товары" : filtersSummary}
               </div>
             </div>
           </div>
@@ -1044,4 +1490,3 @@ export function CatalogPage() {
     </div>
   );
 }
-
