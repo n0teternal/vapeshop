@@ -64,7 +64,21 @@ function CatalogSkeleton({ count }: { count: number }) {
 function formatCategoryLabel(categorySlug: string): string {
   const normalized = categorySlug.trim().toLowerCase();
   if (normalized.length === 0) return "Прочее";
-  if (normalized === "other") return "Прочее";
+
+  const ruLabelsBySlug: Record<string, string> = {
+    other: "Прочее",
+    liquid: "Жидкости",
+    liquids: "Жидкости",
+    "жидкости": "Жидкости",
+    disposable: "Одноразки",
+    disposables: "Одноразки",
+    "одноразки": "Одноразки",
+    cartridge: "Картриджи",
+    cartridges: "Картриджи",
+    "картриджи": "Картриджи",
+  };
+  const mapped = ruLabelsBySlug[normalized];
+  if (mapped) return mapped;
 
   const words = normalized.split(/[_-]+/g).filter((x) => x.length > 0);
   if (words.length === 0) return "Прочее";
