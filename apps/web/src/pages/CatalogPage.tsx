@@ -595,8 +595,6 @@ export function CatalogPage() {
     });
   }, [manufacturers]);
 
-  const quickCategories = useMemo(() => categories, [categories]);
-
   const selectedCategoriesSet = useMemo(() => {
     return new Set(selectedCategoryIds);
   }, [selectedCategoryIds]);
@@ -937,8 +935,7 @@ export function CatalogPage() {
 
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1 overflow-x-auto">
-            <div className="flex w-max min-w-full items-center gap-2 pr-1">
+          <div className="min-w-0 flex flex-1 items-center gap-2">
               <button
                 type="button"
                 className={[
@@ -986,28 +983,6 @@ export function CatalogPage() {
                   </span>
                 ) : null}
               </button>
-
-              
-
-              {quickCategories.map((category) => {
-                const active = selectedCategoriesSet.has(category.id);
-                return (
-                  <button
-                    key={category.id}
-                    type="button"
-                    className={[
-                      "shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
-                      active
-                        ? "border-primary bg-primary text-white"
-                        : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
-                    ].join(" ")}
-                    onClick={() => toggleCategory(category.id)}
-                  >
-                    {category.label}
-                  </button>
-                );
-              })}
-            </div>
           </div>
 
           <button
@@ -1402,8 +1377,8 @@ export function CatalogPage() {
             <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Затяжки (одноразки)
             </div>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <label className="grid gap-1 text-xs text-muted-foreground">
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
                 <span>От</span>
                 <input
                   type="text"
@@ -1415,10 +1390,10 @@ export function CatalogPage() {
                     )
                   }
                   placeholder={puffBounds ? String(puffBounds.min) : "1000"}
-                  className="h-10 rounded-xl border border-border/70 bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
+                  className="h-9 w-full min-w-0 rounded-lg border border-border/70 bg-background px-2.5 text-[13px] text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
                 />
               </label>
-              <label className="grid gap-1 text-xs text-muted-foreground">
+              <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
                 <span>До</span>
                 <input
                   type="text"
@@ -1430,12 +1405,12 @@ export function CatalogPage() {
                     )
                   }
                   placeholder={puffBounds ? String(puffBounds.max) : "4000"}
-                  className="h-10 rounded-xl border border-border/70 bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
+                  className="h-9 w-full min-w-0 rounded-lg border border-border/70 bg-background px-2.5 text-[13px] text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
                 />
               </label>
             </div>
             {puffBounds ? (
-              <div className="mt-2 text-[11px] text-muted-foreground">
+              <div className="mt-2 break-words text-[11px] leading-snug text-muted-foreground">
                 Доступный диапазон в каталоге: {puffBounds.min} - {puffBounds.max}
               </div>
             ) : (
