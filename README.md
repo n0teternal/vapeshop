@@ -64,9 +64,9 @@ copy .env.example .env.local
 - `TELEGRAM_BOT_TOKEN` — токен бота
 - `TELEGRAM_WEBHOOK_SECRET` — secret token для Telegram webhook (заголовок `x-telegram-bot-api-secret-token`)
 - `PUBLIC_WEBHOOK_URL` — публичный URL вебхука (например `https://your-domain.com/api/telegram/webhook`)
-- `TELEGRAM_CHAT_ID_OWNER` — чат по умолчанию (fallback)
-- `TELEGRAM_CHAT_ID_VVO` — чат для VVO
-- `TELEGRAM_CHAT_ID_BLG` — чат для BLG
+- `TELEGRAM_CHAT_ID_OWNER` — чат по умолчанию (fallback); можно указать несколько chat_id через `;` или `,`
+- `TELEGRAM_CHAT_ID_VVO` — чат для VVO; можно указать несколько chat_id через `;` или `,`
+- `TELEGRAM_CHAT_ID_BLG` — чат для BLG; можно указать несколько chat_id через `;` или `,`
 - `PRODUCT_IMAGES_BASE_URL` — базовый публичный URL для картинок товаров (рекомендуется Supabase Storage URL)
 - `CORS_ORIGINS` — **только для production**, список origin через запятую
 

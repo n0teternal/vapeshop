@@ -18,9 +18,9 @@ export type AppConfig = {
     botToken: string;
     webhookSecret: string;
     publicWebhookUrl: string | null;
-    chatIdOwner: string;
-    chatIdVvo: string | null;
-    chatIdBlg: string | null;
+    chatIdsOwner: string[];
+    chatIdsVvo: string[] | null;
+    chatIdsBlg: string[] | null;
   };
   productImagesBaseUrl: string | null;
   dev: {
@@ -94,6 +94,33 @@ function parseOptionalAdminUserId(): number | null {
   return n;
 }
 
+function parseTelegramChatIds(raw: string, envName: string): string[] {
+  const ids = Array.from(
+    new Set(
+      raw
+        .split(/[;,\s]+/)
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  );
+
+  if (ids.length === 0) {
+    throw new Error(`Invalid env ${envName}: expected at least one chat id`);
+  }
+
+  return ids;
+}
+
+function parseRequiredTelegramChatIds(key: string): string[] {
+  return parseTelegramChatIds(requireEnv(key), key);
+}
+
+function parseOptionalTelegramChatIds(key: string): string[] | null {
+  const raw = readEnv(key);
+  if (!raw) return null;
+  return parseTelegramChatIds(raw, key);
+}
+
 function parseNodeEnv(): NodeEnv {
   const raw = readEnv("NODE_ENV");
   if (!raw) return "development";
@@ -124,9 +151,9 @@ export const config: AppConfig = (() => {
       botToken: requireEnv("TELEGRAM_BOT_TOKEN"),
       webhookSecret: requireEnv("TELEGRAM_WEBHOOK_SECRET"),
       publicWebhookUrl: readEnv("PUBLIC_WEBHOOK_URL"),
-      chatIdOwner: requireEnv("TELEGRAM_CHAT_ID_OWNER"),
-      chatIdVvo: readEnv("TELEGRAM_CHAT_ID_VVO"),
-      chatIdBlg: readEnv("TELEGRAM_CHAT_ID_BLG"),
+      chatIdsOwner: parseRequiredTelegramChatIds("TELEGRAM_CHAT_ID_OWNER"),
+      chatIdsVvo: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_VVO"),
+      chatIdsBlg: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_BLG"),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {

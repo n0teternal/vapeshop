@@ -109,14 +109,14 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   return base;
 }
 
-function pickTelegramChatId(citySlug: CitySlug): string {
+function pickTelegramChatIds(citySlug: CitySlug): string[] {
   if (citySlug === "vvo") {
-    return config.telegram.chatIdVvo ?? config.telegram.chatIdOwner;
+    return config.telegram.chatIdsVvo ?? config.telegram.chatIdsOwner;
   }
   if (citySlug === "blg") {
-    return config.telegram.chatIdBlg ?? config.telegram.chatIdOwner;
+    return config.telegram.chatIdsBlg ?? config.telegram.chatIdsOwner;
   }
-  return config.telegram.chatIdOwner;
+  return config.telegram.chatIdsOwner;
 }
 
 function parseUrlHost(rawUrl: string | null | undefined): string | null {
@@ -333,25 +333,38 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
         },
       });
 
-      const chatId = pickTelegramChatId(body.citySlug);
-
+      const chatIds = pickTelegramChatIds(body.citySlug);
       let notified = false;
-      try {
-        const result = await sendMessage({
-          botToken: config.telegram.botToken,
-          chatId,
-          text: order.telegramMessage.text,
-          replyMarkup: order.telegramMessage.reply_markup,
-        });
-        notified = true;
+      let firstSent:
+        | {
+            chat: { id: number };
+            message_id: number;
+          }
+        | null = null;
 
+      for (const chatId of chatIds) {
+        try {
+          const result = await sendMessage({
+            botToken: config.telegram.botToken,
+            chatId,
+            text: order.telegramMessage.text,
+            replyMarkup: order.telegramMessage.reply_markup,
+          });
+          notified = true;
+          if (!firstSent) firstSent = result;
+        } catch (e) {
+          request.log.error({ err: e, chatId }, "Failed to notify Telegram chat");
+        }
+      }
+
+      if (firstSent) {
         try {
           const supabase = createServiceSupabaseClient();
           const { error } = await supabase
             .from("orders")
             .update({
-              notify_chat_id: result.chat.id,
-              notify_message_id: result.message_id,
+              notify_chat_id: firstSent.chat.id,
+              notify_message_id: firstSent.message_id,
               notify_sent_at: new Date().toISOString(),
             })
             .eq("id", order.orderId);
@@ -362,8 +375,6 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
         } catch (e) {
           request.log.error({ err: e }, "Failed to update orders.notify_*");
         }
-      } catch (e) {
-        request.log.error({ err: e }, "Failed to notify Telegram");
       }
 
       return reply.code(200).send({ ok: true, orderId: order.orderId, notified });
