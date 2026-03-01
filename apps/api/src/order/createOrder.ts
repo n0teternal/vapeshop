@@ -30,6 +30,27 @@ type CreateOrderResult = {
   telegramMessage: TelegramOrderMessage;
 };
 
+type InventoryRow = {
+  product_id: string;
+  in_stock: boolean;
+  stock_qty: number | null;
+  price_override: unknown;
+};
+
+type ProductRow = {
+  id: string;
+  title: string;
+  base_price: unknown;
+  is_active: boolean;
+};
+
+type ReservedInventory = {
+  productId: string;
+  previousStockQty: number;
+  previousInStock: boolean;
+  reservedQty: number;
+};
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
@@ -55,15 +76,70 @@ function normalizeItems(items: CreateOrderPayload["items"]): Map<string, number>
 
   for (const item of items) {
     if (!isUuid(item.productId)) {
-      throw new HttpError(400, "BAD_REQUEST", `Неверный productId: ${item.productId}`);
+      throw new HttpError(400, "BAD_REQUEST", `Invalid productId: ${item.productId}`);
     }
     if (!Number.isInteger(item.qty) || item.qty <= 0 || item.qty > 99) {
-      throw new HttpError(400, "BAD_REQUEST", "qty должен быть в диапазоне 1..99");
+      throw new HttpError(400, "BAD_REQUEST", "qty must be in range 1..99");
     }
     byId.set(item.productId, (byId.get(item.productId) ?? 0) + item.qty);
   }
 
   return byId;
+}
+
+function isInventoryRow(value: unknown): value is InventoryRow {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as InventoryRow;
+
+  const stockQtyValid =
+    row.stock_qty === null ||
+    (typeof row.stock_qty === "number" &&
+      Number.isFinite(row.stock_qty) &&
+      Number.isInteger(row.stock_qty) &&
+      row.stock_qty >= 0);
+
+  return (
+    typeof row.product_id === "string" &&
+    typeof row.in_stock === "boolean" &&
+    stockQtyValid
+  );
+}
+
+function isProductRow(value: unknown): value is ProductRow {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as ProductRow).id === "string" &&
+    typeof (value as ProductRow).title === "string" &&
+    typeof (value as ProductRow).is_active === "boolean"
+  );
+}
+
+async function rollbackReservedInventory(params: {
+  supabase: ReturnType<typeof createServiceSupabaseClient>;
+  cityId: number;
+  reservations: ReservedInventory[];
+}): Promise<void> {
+  for (let i = params.reservations.length - 1; i >= 0; i -= 1) {
+    const row = params.reservations[i];
+    if (!row) continue;
+    const expectedQtyAfterReserve = row.previousStockQty - row.reservedQty;
+
+    try {
+      // Revert only when the row still has the reserved value from this flow.
+      await params.supabase
+        .from("inventory")
+        .update({
+          stock_qty: row.previousStockQty,
+          in_stock: row.previousInStock,
+        })
+        .eq("city_id", params.cityId)
+        .eq("product_id", row.productId)
+        .eq("stock_qty", expectedQtyAfterReserve);
+    } catch {
+      // Best-effort rollback; keep original error context.
+    }
+  }
 }
 
 export async function createOrder(params: {
@@ -84,12 +160,12 @@ export async function createOrder(params: {
     throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
   }
   if (!city) {
-    throw new HttpError(400, "CITY_NOT_FOUND", "Город не найден");
+    throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
   }
 
   const { data: inventoryRows, error: invError } = await supabase
     .from("inventory")
-    .select("product_id,in_stock,price_override")
+    .select("product_id,in_stock,stock_qty,price_override")
     .eq("city_id", city.id)
     .in("product_id", productIds);
 
@@ -104,37 +180,6 @@ export async function createOrder(params: {
 
   if (prodError) {
     throw new HttpError(500, "DB", `Failed to load products: ${prodError.message}`);
-  }
-
-  type InventoryRow = {
-    product_id: string;
-    in_stock: boolean;
-    price_override: unknown;
-  };
-  type ProductRow = {
-    id: string;
-    title: string;
-    base_price: unknown;
-    is_active: boolean;
-  };
-
-  function isInventoryRow(value: unknown): value is InventoryRow {
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      typeof (value as InventoryRow).product_id === "string" &&
-      typeof (value as InventoryRow).in_stock === "boolean"
-    );
-  }
-
-  function isProductRow(value: unknown): value is ProductRow {
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      typeof (value as ProductRow).id === "string" &&
-      typeof (value as ProductRow).title === "string" &&
-      typeof (value as ProductRow).is_active === "boolean"
-    );
   }
 
   const inventoryList = ((inventoryRows ?? []) as unknown[]).filter(isInventoryRow);
@@ -154,19 +199,22 @@ export async function createOrder(params: {
       throw new HttpError(
         400,
         "NOT_AVAILABLE",
-        `Товар недоступен в выбранном городе: ${productId}`,
+        `Product is unavailable in selected city: ${productId}`,
       );
     }
 
     const product = productById.get(productId);
     if (!product) {
-      throw new HttpError(400, "NOT_FOUND", `Товар не найден: ${productId}`);
+      throw new HttpError(400, "NOT_FOUND", `Product not found: ${productId}`);
     }
     if (!product.is_active) {
-      throw new HttpError(400, "NOT_ACTIVE", `Товар отключён: ${product.title}`);
+      throw new HttpError(400, "NOT_ACTIVE", `Product is disabled: ${product.title}`);
     }
     if (!inv.in_stock) {
-      throw new HttpError(400, "OUT_OF_STOCK", `Нет в наличии: ${product.title}`);
+      throw new HttpError(400, "OUT_OF_STOCK", `Out of stock: ${product.title}`);
+    }
+    if (inv.stock_qty !== null && inv.stock_qty < qty) {
+      throw new HttpError(400, "OUT_OF_STOCK", `Insufficient stock: ${product.title}`);
     }
 
     const basePrice = numberFromUnknown(product.base_price);
@@ -180,6 +228,48 @@ export async function createOrder(params: {
     totalPrice += unitPrice * qty;
   }
 
+  const reservations: ReservedInventory[] = [];
+
+  for (const line of lines) {
+    const inv = inventoryByProductId.get(line.productId);
+    if (!inv || inv.stock_qty === null) continue;
+
+    const nextStockQty = inv.stock_qty - line.qty;
+    const nextInStock = nextStockQty > 0;
+
+    const { data: reservedRow, error: reserveError } = await supabase
+      .from("inventory")
+      .update({
+        stock_qty: nextStockQty,
+        in_stock: nextInStock,
+      })
+      .eq("city_id", city.id)
+      .eq("product_id", line.productId)
+      .eq("in_stock", true)
+      .eq("stock_qty", inv.stock_qty)
+      .select("product_id")
+      .maybeSingle();
+
+    if (reserveError || !reservedRow) {
+      await rollbackReservedInventory({
+        supabase,
+        cityId: city.id,
+        reservations,
+      });
+      throw new HttpError(400, "OUT_OF_STOCK", `Insufficient stock: ${line.title}`);
+    }
+
+    reservations.push({
+      productId: line.productId,
+      previousStockQty: inv.stock_qty,
+      previousInStock: inv.in_stock,
+      reservedQty: line.qty,
+    });
+
+    inv.stock_qty = nextStockQty;
+    inv.in_stock = nextInStock;
+  }
+
   const orderRow = {
     tg_user_id: params.tgUser.id,
     tg_username: params.tgUser.username ?? null,
@@ -187,7 +277,7 @@ export async function createOrder(params: {
     delivery_method: params.payload.deliveryMethod,
     comment: params.payload.comment ?? null,
     total_price: totalPrice,
-    // статус не отправляем — пусть БД проставит default
+    // Let DB assign default status.
   };
 
   const { data: createdOrder, error: orderError } = await supabase
@@ -197,9 +287,19 @@ export async function createOrder(params: {
     .single();
 
   if (orderError) {
+    await rollbackReservedInventory({
+      supabase,
+      cityId: city.id,
+      reservations,
+    });
     throw new HttpError(500, "DB", `Failed to create order: ${orderError.message}`);
   }
   if (!createdOrder) {
+    await rollbackReservedInventory({
+      supabase,
+      cityId: city.id,
+      reservations,
+    });
     throw new HttpError(500, "DB", "Failed to create order (empty response)");
   }
 
@@ -215,6 +315,11 @@ export async function createOrder(params: {
   if (orderItemsError) {
     // Best-effort cleanup to avoid dangling order without items.
     await supabase.from("orders").delete().eq("id", createdOrder.id);
+    await rollbackReservedInventory({
+      supabase,
+      cityId: city.id,
+      reservations,
+    });
     throw new HttpError(500, "DB", `Failed to create order items: ${orderItemsError.message}`);
   }
 
