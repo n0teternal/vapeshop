@@ -18,6 +18,10 @@ export type TelegramMessage = {
 type TelegramApiOk<T> = { ok: true; result: T };
 type TelegramApiErr = { ok: false; description?: string; error_code?: number };
 
+type TelegramGetMeResult = {
+  username?: string;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -129,4 +133,19 @@ export async function answerCallbackQuery(params: {
       show_alert: params.showAlert ?? false,
     },
   });
+}
+
+export async function getBotUsername(params: {
+  botToken: string;
+}): Promise<string | null> {
+  const result = await callTelegram<TelegramGetMeResult>({
+    botToken: params.botToken,
+    method: "getMe",
+    body: {},
+  });
+
+  const username = result.username;
+  if (typeof username !== "string") return null;
+  const trimmed = username.trim().replace(/^@+/, "");
+  return trimmed.length > 0 ? trimmed : null;
 }

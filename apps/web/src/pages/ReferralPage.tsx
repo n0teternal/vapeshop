@@ -1,11 +1,13 @@
-import { useMemo, useState } from "react";
+import { UserPlus } from "lucide-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet } from "../api/client";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { useTelegram } from "../telegram/TelegramProvider";
 
 type ReferralStatus =
   | "joined_no_order"
@@ -42,6 +44,10 @@ type ReferralOverview = {
   };
 };
 
+type ShareCapableWebApp = {
+  openTelegramLink?: (url: string) => void;
+};
+
 const PAGE_SIZE = 20;
 
 function formatDate(value: string): string {
@@ -71,7 +77,17 @@ function statusVariant(status: ReferralStatus): "secondary" | "warning" | "succe
 function pointsKindLabel(kind: string): string {
   if (kind === "referral_inviter_bonus") return "Бонус за приглашенного";
   if (kind === "referral_invitee_bonus") return "Бонус за первый заказ";
+  if (kind === "order_points_spend") return "Списание баллов";
   return kind;
+}
+
+function isAbsoluteHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function buildTelegramShareUrl(referralLink: string): string {
+  const text = "Присоединяйся к Mini Market по моей ссылке";
+  return `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(text)}`;
 }
 
 async function copyToClipboard(value: string): Promise<void> {
@@ -91,15 +107,14 @@ async function copyToClipboard(value: string): Promise<void> {
 }
 
 export function ReferralPage() {
+  const { webApp } = useTelegram();
   const [copyState, setCopyState] = useState<"idle" | "ok" | "error">("idle");
 
   const overviewQuery = useInfiniteQuery({
     queryKey: ["referrals-overview"],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
-      apiGet<ReferralOverview>(
-        `/api/referrals/overview?limit=${PAGE_SIZE}&offset=${pageParam}`,
-      ),
+      apiGet<ReferralOverview>(`/api/referrals/overview?limit=${PAGE_SIZE}&offset=${pageParam}`),
     getNextPageParam: (lastPage) =>
       lastPage.pagination.hasMore
         ? lastPage.pagination.offset + lastPage.pagination.limit
@@ -115,8 +130,13 @@ export function ReferralPage() {
   const errorMessage = useMemo(() => {
     if (!overviewQuery.error) return null;
     const err = overviewQuery.error;
-    if (err instanceof ApiError && err.code === "TG_INIT_DATA_REQUIRED") {
-      return "Откройте рефералку внутри Telegram Mini App.";
+    if (err instanceof ApiError) {
+      if (err.code === "TG_INIT_DATA_REQUIRED") {
+        return "Откройте рефералку внутри Telegram Mini App.";
+      }
+      if (err.code === "NOT_FOUND") {
+        return "Раздел недоступен.";
+      }
     }
     return err instanceof Error ? err.message : "Не удалось загрузить рефералку";
   }, [overviewQuery.error]);
@@ -130,6 +150,18 @@ export function ReferralPage() {
       setCopyState("error");
       window.setTimeout(() => setCopyState("idle"), 2200);
     }
+  }
+
+  function handleInvite(link: string): void {
+    const shareUrl = buildTelegramShareUrl(link);
+    const maybeShareWebApp = webApp as ShareCapableWebApp;
+
+    if (typeof maybeShareWebApp.openTelegramLink === "function") {
+      maybeShareWebApp.openTelegramLink(shareUrl);
+      return;
+    }
+
+    window.open(shareUrl, "_blank", "noopener,noreferrer");
   }
 
   if (overviewQuery.isPending && !firstPage) {
@@ -157,6 +189,8 @@ export function ReferralPage() {
     return null;
   }
 
+  const hasPublicReferralLink = isAbsoluteHttpUrl(firstPage.referralLink);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -178,18 +212,35 @@ export function ReferralPage() {
           <div className="rounded-xl border border-border/70 bg-background p-3 text-xs">
             <div className="mb-2 font-semibold text-foreground">Реферальная ссылка</div>
             <div className="break-all text-muted-foreground">{firstPage.referralLink}</div>
-            <Button
-              type="button"
-              size="sm"
-              className="mt-3"
-              onClick={() => void handleCopy(firstPage.referralLink)}
-            >
-              {copyState === "ok"
-                ? "Скопировано"
-                : copyState === "error"
-                  ? "Ошибка копирования"
-                  : "Скопировать ссылку"}
-            </Button>
+            {!hasPublicReferralLink ? (
+              <div className="mt-2 text-xs text-destructive">
+                В Railway нужно заполнить `TELEGRAM_BOT_USERNAME`, чтобы формировалась полная ссылка.
+              </div>
+            ) : null}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void handleCopy(firstPage.referralLink)}
+              >
+                {copyState === "ok"
+                  ? "Скопировано"
+                  : copyState === "error"
+                    ? "Ошибка копирования"
+                    : "Скопировать ссылку"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="inline-flex items-center gap-2"
+                disabled={!hasPublicReferralLink}
+                onClick={() => handleInvite(firstPage.referralLink)}
+              >
+                <UserPlus className="h-4 w-4" />
+                Пригласить реферала
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

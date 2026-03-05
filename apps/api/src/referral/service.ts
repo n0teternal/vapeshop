@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { config } from "../config.js";
 import { HttpError } from "../httpError.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import { getBotUsername } from "../telegram/api.js";
 
 const REFERRAL_CODE_PREFIX = "ref_";
 const REFERRAL_CODE_LENGTH = 8;
@@ -11,6 +12,8 @@ const POINTS_HISTORY_LIMIT = 30;
 const REFERRAL_INVITER_BONUS_KIND = "referral_inviter_bonus";
 const REFERRAL_INVITEE_BONUS_KIND = "referral_invitee_bonus";
 const ORDER_POINTS_SPEND_KIND = "order_points_spend";
+
+let cachedBotUsername: string | null | undefined;
 
 type CustomerProfileRow = {
   tg_user_id: number;
@@ -115,8 +118,29 @@ function sanitizeBotUsername(value: string | null): string | null {
   return cleaned;
 }
 
-function buildReferralLink(referralCode: string): string {
-  const botUsername = sanitizeBotUsername(config.telegram.botUsername);
+async function resolveBotUsername(): Promise<string | null> {
+  const envValue = sanitizeBotUsername(config.telegram.botUsername);
+  if (envValue) {
+    cachedBotUsername = envValue;
+    return envValue;
+  }
+
+  if (cachedBotUsername !== undefined) {
+    return cachedBotUsername;
+  }
+
+  try {
+    const fromTelegram = await getBotUsername({ botToken: config.telegram.botToken });
+    cachedBotUsername = sanitizeBotUsername(fromTelegram);
+  } catch {
+    cachedBotUsername = null;
+  }
+
+  return cachedBotUsername;
+}
+
+async function buildReferralLink(referralCode: string): Promise<string> {
+  const botUsername = await resolveBotUsername();
   const payload = `${REFERRAL_CODE_PREFIX}${referralCode}`;
   if (!botUsername) return payload;
   return `https://t.me/${botUsername}?startapp=${encodeURIComponent(payload)}`;
@@ -299,7 +323,7 @@ export async function bootstrapReferralProfile(params: {
 
   return {
     referralCode: profile.referral_code,
-    referralLink: buildReferralLink(profile.referral_code),
+    referralLink: await buildReferralLink(profile.referral_code),
     referralBound,
   };
 }
