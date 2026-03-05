@@ -63,6 +63,7 @@ copy .env.example .env.local
 - `SUPABASE_SERVICE_ROLE_KEY` — service role key (только на сервере!)
 - `TELEGRAM_BOT_TOKEN` — токен бота
 - `TELEGRAM_BOT_USERNAME` — username бота без `@` (для генерации реферальной ссылки)
+- `TELEGRAM_MINI_APP_SHORT_NAME` — short name Mini App из BotFather `/myapps` (чтобы ссылка открывала mini app сразу: `https://t.me/<bot>/<app>?startapp=...`)
 - `TELEGRAM_WEBHOOK_SECRET` — secret token для Telegram webhook (заголовок `x-telegram-bot-api-secret-token`)
 - `PUBLIC_WEBHOOK_URL` — публичный URL вебхука (например `https://your-domain.com/api/telegram/webhook`)
 - `TELEGRAM_CHAT_ID_OWNER` — чат по умолчанию (fallback); можно указать несколько chat_id через `;` или `,`

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { buildOrderTelegramMessage, type CitySlug, type OrderStatus } from "../order/telegramMessage.js";
-import { processReferralRewardForOrderDone } from "../referral/service.js";
+import { bootstrapReferralProfile, processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { answerCallbackQuery, deleteMessage, editMessageText } from "./api.js";
 
@@ -14,6 +14,12 @@ type ParsedCallbackQuery = {
   fromId: number;
   data: string;
   message?: { chatId: number; messageId: number };
+};
+
+type ParsedStartCommand = {
+  fromId: number;
+  fromUsername: string | null;
+  startParam: string | null;
 };
 
 type ParsedCallbackAction =
@@ -68,6 +74,34 @@ function parseCallbackQuery(update: unknown): ParsedCallbackQuery | null {
 
   const base: ParsedCallbackQuery = { callbackQueryId, fromId, data };
   return message ? { ...base, message } : base;
+}
+
+function parseStartCommand(update: unknown): ParsedStartCommand | null {
+  if (!isRecord(update)) return null;
+
+  const message = update.message;
+  if (!isRecord(message)) return null;
+
+  const text = typeof message.text === "string" ? message.text : null;
+  if (!text) return null;
+
+  const match = text.match(/^\/start(?:@\w+)?(?:\s+(.+))?$/i);
+  if (!match) return null;
+
+  const from = message.from;
+  const fromId =
+    isRecord(from) && typeof from.id === "number" && Number.isInteger(from.id) ? from.id : null;
+  if (fromId === null) return null;
+
+  const usernameRaw =
+    isRecord(from) && typeof from.username === "string" ? from.username.trim() : "";
+  const startParamRaw = typeof match[1] === "string" ? match[1].trim() : "";
+
+  return {
+    fromId,
+    fromUsername: usernameRaw.length > 0 ? usernameRaw : null,
+    startParam: startParamRaw.length > 0 ? startParamRaw : null,
+  };
 }
 
 function parseCallbackData(data: string): ParsedCallbackAction | null {
@@ -138,6 +172,20 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         { got: secretHeader, expected: config.telegram.webhookSecret },
         "Telegram webhook secret token mismatch; continuing anyway",
       );
+    }
+
+    const startCommand = parseStartCommand(request.body);
+    if (startCommand) {
+      try {
+        await bootstrapReferralProfile({
+          tgUserId: startCommand.fromId,
+          tgUsername: startCommand.fromUsername,
+          startParam: startCommand.startParam,
+        });
+      } catch (e) {
+        request.log.error({ err: e, tgUserId: startCommand.fromId }, "Failed to bootstrap referral from /start");
+      }
+      return reply.code(200).send({ ok: true });
     }
 
     const parsed = parseCallbackQuery(request.body);

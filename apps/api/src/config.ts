@@ -17,6 +17,7 @@ export type AppConfig = {
   telegram: {
     botToken: string;
     botUsername: string | null;
+    miniAppShortName: string | null;
     webhookSecret: string;
     publicWebhookUrl: string | null;
     chatIdsOwner: string[];
@@ -166,6 +167,7 @@ export const config: AppConfig = (() => {
     telegram: {
       botToken: requireEnv("TELEGRAM_BOT_TOKEN"),
       botUsername: readEnv("TELEGRAM_BOT_USERNAME"),
+      miniAppShortName: readEnv("TELEGRAM_MINI_APP_SHORT_NAME"),
       webhookSecret: requireEnv("TELEGRAM_WEBHOOK_SECRET"),
       publicWebhookUrl: readEnv("PUBLIC_WEBHOOK_URL"),
       chatIdsOwner: parseRequiredTelegramChatIds("TELEGRAM_CHAT_ID_OWNER"),

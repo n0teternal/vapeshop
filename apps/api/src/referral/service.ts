@@ -118,6 +118,13 @@ function sanitizeBotUsername(value: string | null): string | null {
   return cleaned;
 }
 
+function sanitizeMiniAppShortName(value: string | null): string | null {
+  if (!value) return null;
+  const cleaned = value.trim().replace(/^\/+|\/+$/g, "");
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(cleaned)) return null;
+  return cleaned;
+}
+
 function numberFromUnknown(value: unknown): number {
   const parsed =
     typeof value === "number"
@@ -158,7 +165,15 @@ async function buildReferralLink(referralCode: string): Promise<string> {
   const botUsername = await resolveBotUsername();
   const payload = `${REFERRAL_CODE_PREFIX}${referralCode}`;
   if (!botUsername) return payload;
-  return `https://t.me/${botUsername}?startapp=${encodeURIComponent(payload)}`;
+
+  const miniAppShortName = sanitizeMiniAppShortName(config.telegram.miniAppShortName);
+  if (miniAppShortName) {
+    // Direct Mini App link: opens mini app immediately and keeps startapp payload.
+    return `https://t.me/${botUsername}/${miniAppShortName}?startapp=${encodeURIComponent(payload)}`;
+  }
+
+  // Fallback deep link to bot chat when mini app short name isn't configured.
+  return `https://t.me/${botUsername}?start=${encodeURIComponent(payload)}`;
 }
 
 async function loadCustomerProfile(tgUserId: number): Promise<CustomerProfileRow | null> {
