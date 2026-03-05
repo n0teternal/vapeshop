@@ -39,6 +39,8 @@ type SuccessResponse = {
 
 type CitySlug = "vvo" | "blg";
 
+const REFERRAL_OWNER_TG_USER_ID = 1208488286;
+
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
 };
@@ -79,6 +81,12 @@ function requireVerifiedTelegramRequest(params: {
   }
 
   return verified;
+}
+
+function assertReferralOverviewAccess(tgUserId: number): void {
+  if (tgUserId !== REFERRAL_OWNER_TG_USER_ID) {
+    throw new HttpError(404, "NOT_FOUND", "Not found");
+  }
 }
 
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
@@ -398,6 +406,7 @@ app.get<{
     const verified = requireVerifiedTelegramRequest({
       headers: request.headers as Record<string, unknown>,
     });
+    assertReferralOverviewAccess(verified.user.id);
 
     const limitRaw = Number(request.query.limit ?? 20);
     const offsetRaw = Number(request.query.offset ?? 0);

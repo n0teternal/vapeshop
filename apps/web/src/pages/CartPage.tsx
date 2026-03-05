@@ -36,6 +36,8 @@ type ReferralOverviewBalance = {
   pointsBalance: number;
 };
 
+const REFERRAL_OWNER_TG_USER_ID = 1208488286;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -87,6 +89,7 @@ export function CartPage() {
   const [pointsEnabled, setPointsEnabled] = useState(false);
   const [pointsLoading, setPointsLoading] = useState(false);
   const [pointsError, setPointsError] = useState<string | null>(null);
+  const isReferralOwner = webApp.initDataUnsafe?.user?.id === REFERRAL_OWNER_TG_USER_ID;
 
   const total = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
@@ -101,6 +104,16 @@ export function CartPage() {
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!isReferralOwner) {
+      setPointsBalance(0);
+      setPointsEnabled(false);
+      setPointsLoading(false);
+      setPointsError(null);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     async function loadPointsBalance(): Promise<void> {
       setPointsLoading(true);
@@ -142,7 +155,7 @@ export function CartPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isReferralOwner]);
 
   useEffect(() => {
     if (maxPointsToSpend > 0) return;
@@ -396,29 +409,31 @@ export function CartPage() {
             />
           </label>
 
-          <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-input"
-                checked={pointsEnabled}
-                disabled={submitting || pointsLoading || maxPointsToSpend <= 0}
-                onChange={(e) => setPointsEnabled(e.target.checked)}
-              />
-              <span>
-                Использовать баллы ({pointsBalance})
-                {maxPointsToSpend > 0 ? `, спишется до ${pointsToSpend || maxPointsToSpend}` : ""}
-              </span>
-            </label>
-            {pointsToSpend > 0 ? (
-              <div className="text-xs text-muted-foreground">
-                Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате: {formatPriceRub(totalToPay)}.
-              </div>
-            ) : null}
-            {pointsError ? (
-              <div className="text-xs text-destructive">Баллы временно недоступны: {pointsError}</div>
-            ) : null}
-          </div>
+          {isReferralOwner ? (
+            <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-input"
+                  checked={pointsEnabled}
+                  disabled={submitting || pointsLoading || maxPointsToSpend <= 0}
+                  onChange={(e) => setPointsEnabled(e.target.checked)}
+                />
+                <span>
+                  Использовать баллы ({pointsBalance})
+                  {maxPointsToSpend > 0 ? `, спишется до ${pointsToSpend || maxPointsToSpend}` : ""}
+                </span>
+              </label>
+              {pointsToSpend > 0 ? (
+                <div className="text-xs text-muted-foreground">
+                  Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате: {formatPriceRub(totalToPay)}.
+                </div>
+              ) : null}
+              {pointsError ? (
+                <div className="text-xs text-destructive">Баллы временно недоступны: {pointsError}</div>
+              ) : null}
+            </div>
+          ) : null}
 
           {submitError ? (
             <Alert variant="destructive">

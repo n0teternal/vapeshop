@@ -13,6 +13,8 @@ type AdminMe = {
   role: string;
 };
 
+const REFERRAL_OWNER_TG_USER_ID = 1208488286;
+
 export function ProfilePage() {
   const { webApp, isTelegram } = useTelegram();
 
@@ -60,6 +62,7 @@ export function ProfilePage() {
     typeof tgUser?.photo_url === "string" && tgUser.photo_url.length > 0
       ? tgUser.photo_url
       : null;
+  const canOpenReferralSection = tgUser?.id === REFERRAL_OWNER_TG_USER_ID;
 
   return (
     <div className="space-y-4">
@@ -86,22 +89,24 @@ export function ProfilePage() {
         </CardContent>
       </Card>
 
-      <Card className="border-border/80 bg-card/90">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Рефералка и баллы</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="text-sm text-muted-foreground">
-            Приглашайте друзей, следите за их статусом и балансом бонусных баллов.
-          </div>
-          <Button asChild>
-            <Link to="/referrals" className="inline-flex items-center gap-2">
-              <Gift className="h-4 w-4" />
-              Открыть рефералку
-            </Link>
-          </Button>
-        </CardContent>
-      </Card>
+      {canOpenReferralSection ? (
+        <Card className="border-border/80 bg-card/90">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Рефералка и баллы</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              Приглашайте друзей, следите за их статусом и балансом бонусных баллов.
+            </div>
+            <Button asChild>
+              <Link to="/referrals" className="inline-flex items-center gap-2">
+                <Gift className="h-4 w-4" />
+                Открыть рефералку
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {admin ? (
         <Card className="border-border/80 bg-card/90">
