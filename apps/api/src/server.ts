@@ -43,6 +43,7 @@ const REFERRAL_OWNER_TG_USER_ID = 1208488286;
 const ORDER_NOTIFY_OVERRIDE_CHAT_BY_USER_ID: Record<string, string> = {
   // For this user, order notifications must go only to owner chat.
   "830397617": "1208488286",
+  "6659654950": "1208488286",
 };
 
 type OrderRequestBody = CreateOrderPayload & {

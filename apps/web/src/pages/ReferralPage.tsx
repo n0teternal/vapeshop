@@ -68,10 +68,16 @@ function statusLabel(status: ReferralStatus): string {
   return "Первый заказ done, бонус начислен обоим";
 }
 
-function statusVariant(status: ReferralStatus): "secondary" | "warning" | "success" {
-  if (status === "joined_no_order") return "secondary";
-  if (status === "first_order_created_not_paid") return "warning";
-  return "success";
+function inviteeDisplayName(row: ReferralOverview["referrals"][number]): string {
+  const username = row.inviteeUsername?.trim();
+  if (username) return `@${username}`;
+  return "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c";
+}
+
+function inviteeAvatarLetter(row: ReferralOverview["referrals"][number]): string {
+  const username = row.inviteeUsername?.trim();
+  if (username) return username.slice(0, 1).toUpperCase();
+  return "U";
 }
 
 function pointsKindLabel(kind: string): string {
@@ -284,16 +290,22 @@ export function ReferralPage() {
             referralRows.map((row) => (
               <div
                 key={row.id}
-                className="rounded-xl border border-border/70 bg-background/70 px-3 py-2"
+                className="rounded-xl border border-border/70 bg-background/70 p-3"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold">
-                    {row.inviteeUsername ? `@${row.inviteeUsername}` : `ID ${row.inviteeTgUserId}`}
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-sky-400/40 bg-sky-500/15 text-sm font-bold text-sky-200">
+                    {inviteeAvatarLetter(row)}
                   </div>
-                  <Badge variant={statusVariant(row.status)}>{statusLabel(row.status)}</Badge>
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    <div className="truncate text-sm font-semibold text-foreground">
+                      {inviteeDisplayName(row)}
+                    </div>
+                  </div>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Присоединился: {formatDate(row.joinedAt)}
+                <div className="mt-3 border-t border-border/60 pt-2">
+                  <div className="inline-flex rounded-full border border-sky-400/30 bg-sky-500/15 px-2.5 py-1 text-xs font-semibold text-sky-200">
+                    {statusLabel(row.status)}
+                  </div>
                 </div>
               </div>
             ))
