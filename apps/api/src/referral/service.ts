@@ -629,12 +629,14 @@ export async function processReferralRewardForOrderDone(params: {
     },
   ];
 
-  const { error: txError } = await supabase
-    .from("loyalty_transactions")
-    .upsert(txRows, { onConflict: "tg_user_id,kind,referral_id", ignoreDuplicates: true });
+  const { error: txError } = await supabase.from("loyalty_transactions").insert(txRows);
 
   if (txError) {
-    throw new HttpError(500, "DB", `Failed to insert loyalty transactions: ${txError.message}`);
+    const duplicateCode = (txError as { code?: string } | null)?.code ?? "";
+    // Idempotency: if bonus rows already exist, keep going and just sync referral status below.
+    if (duplicateCode !== "23505") {
+      throw new HttpError(500, "DB", `Failed to insert loyalty transactions: ${txError.message}`);
+    }
   }
 
   const { error: referralUpdateError } = await supabase
