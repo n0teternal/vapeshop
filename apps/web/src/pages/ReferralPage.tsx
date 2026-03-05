@@ -86,7 +86,7 @@ function isAbsoluteHttpUrl(value: string): boolean {
 }
 
 function buildTelegramShareUrl(referralLink: string): string {
-  const text = "\n\nРады видеть тебя в магазине SDFG!";
+  const text = "\nРады видеть тебя в магазине SDFG!";
   return `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(text)}`;
 }
 
