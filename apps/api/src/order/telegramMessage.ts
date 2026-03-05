@@ -54,6 +54,7 @@ export function buildOrderTelegramMessage(params: {
   comment: string | null;
   lines: OrderLine[];
   totalPrice: number;
+  discountApplied?: boolean;
   orderId: string;
 }): TelegramOrderMessage {
   const actionsView: TelegramOrderActionsView = params.actionsView ?? "main";
@@ -69,6 +70,7 @@ export function buildOrderTelegramMessage(params: {
   const commentPart = params.comment
     ? `\nКомментарий: ${escapeHtml(params.comment)}`
     : "";
+  const totalSuffix = params.discountApplied ? " - \u0421\u041a\u0418\u0414\u041a\u0410!" : "";
 
   const text =
     statusPrefix(params.status) +
@@ -78,7 +80,7 @@ export function buildOrderTelegramMessage(params: {
     `Заказ: <b>#${escapeHtml(shortOrderId(params.orderId))}</b>\n\n` +
     `<b>Позиции</b>\n` +
     `${itemsLines}\n\n` +
-    `<b>Итого:</b> ${formatRub(params.totalPrice)}\n` +
+    `<b>Итого:</b> ${formatRub(params.totalPrice)}${totalSuffix}\n` +
     `Получение: ${escapeHtml(params.deliveryMethod)}` +
     commentPart +
     `\n\nUUID: <code>${escapeHtml(params.orderId)}</code>`;

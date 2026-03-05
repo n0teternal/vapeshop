@@ -364,6 +364,7 @@ export async function createOrder(params: {
       comment: params.payload.comment,
       lines,
       totalPrice: totalAfterDiscount,
+      discountApplied: discountAmount > 0,
       orderId: createdOrder.id,
     }),
   };

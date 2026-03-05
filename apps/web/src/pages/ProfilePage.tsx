@@ -13,8 +13,6 @@ type AdminMe = {
   role: string;
 };
 
-const REFERRAL_OWNER_TG_USER_ID = 1208488286;
-
 export function ProfilePage() {
   const { webApp, isTelegram } = useTelegram();
 
@@ -62,7 +60,6 @@ export function ProfilePage() {
     typeof tgUser?.photo_url === "string" && tgUser.photo_url.length > 0
       ? tgUser.photo_url
       : null;
-  const canOpenReferralSection = tgUser?.id === REFERRAL_OWNER_TG_USER_ID;
 
   return (
     <div className="space-y-4">
@@ -89,8 +86,7 @@ export function ProfilePage() {
         </CardContent>
       </Card>
 
-      {canOpenReferralSection ? (
-        <Card className="border-border/80 bg-card/90">
+      <Card className="border-border/80 bg-card/90">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Рефералка и баллы</CardTitle>
           </CardHeader>
@@ -105,8 +101,7 @@ export function ProfilePage() {
               </Link>
             </Button>
           </CardContent>
-        </Card>
-      ) : null}
+      </Card>
 
       {admin ? (
         <Card className="border-border/80 bg-card/90">
@@ -136,3 +131,4 @@ export function ProfilePage() {
     </div>
   );
 }
+

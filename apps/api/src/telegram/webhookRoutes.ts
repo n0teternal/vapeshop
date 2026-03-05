@@ -221,12 +221,13 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       delivery_method: string;
       comment: string | null;
       total_price: unknown;
+      discount_amount: unknown;
       notify_chat_id: number | null;
       notify_message_id: number | null;
     };
 
     const selectCols =
-      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,notify_chat_id,notify_message_id";
+      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id";
 
     let order: OrderRow | null = null;
 
@@ -347,6 +348,10 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     }));
 
     const totalPrice = numberFromUnknown(order.total_price);
+    const discountAmount =
+      order.discount_amount === null || order.discount_amount === undefined
+        ? 0
+        : numberFromUnknown(order.discount_amount);
     const orderStatus = parseOrderStatus(order.status);
 
     const telegramMessage = buildOrderTelegramMessage({
@@ -362,6 +367,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       comment: order.comment,
       lines,
       totalPrice,
+      discountApplied: discountAmount > 0,
       orderId: order.id,
     });
 
