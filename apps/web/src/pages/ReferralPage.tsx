@@ -86,7 +86,7 @@ function isAbsoluteHttpUrl(value: string): boolean {
 }
 
 function buildTelegramShareUrl(referralLink: string): string {
-  const text = "Рады видеть тебя в магазине SDFG!\n\n";
+  const text = "\n\nРады видеть тебя в магазине SDFG!";
   return `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(text)}`;
 }
 
@@ -216,21 +216,9 @@ export function ReferralPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="text-2xl font-bold">{firstPage.pointsBalance} баллов</div>
-          <div className="text-xs text-muted-foreground">
-            За done первого заказа от {firstPage.rewardPoints.minFirstOrderTotalRub} ₽: +
-            {firstPage.rewardPoints.inviter} пригласившему, +
-            {firstPage.rewardPoints.invitee} приглашенному.
-          </div>
 
           <div className="rounded-xl border border-border/70 bg-background p-3 text-xs">
-            <div className="mb-2 font-semibold text-foreground">Реферальная ссылка</div>
-            <div className="break-all text-muted-foreground">{firstPage.referralLink}</div>
-            {!hasPublicReferralLink ? (
-              <div className="mt-2 text-xs text-destructive">
-                В Railway нужно заполнить `TELEGRAM_BOT_USERNAME`, чтобы формировалась полная ссылка.
-              </div>
-            ) : null}
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 size="sm"
