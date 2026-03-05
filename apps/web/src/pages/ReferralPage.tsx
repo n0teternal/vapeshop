@@ -208,8 +208,7 @@ export function ReferralPage() {
         <CardContent className="p-4">
           <div className="text-sm font-semibold leading-6 text-foreground">
             Если приглашенный оформит заказ от{" "}
-            <span className="text-primary">1200 ₽</span> и оплатит его (статус{" "}
-            <span className="text-primary">done</span>):{" "}
+            <span className="text-primary">1200 ₽</span> и оплатит его:{" "}
             <span className="text-primary">+100</span> пригласившему,{" "}
             <span className="text-primary">+100</span> приглашенному.
           </div>
