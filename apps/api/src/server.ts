@@ -15,6 +15,7 @@ import {
   type CatalogItem,
 } from "./catalog/getCatalog.js";
 import { config } from "./config.js";
+import { bootstrapReferralProfile, getReferralOverview } from "./referral/service.js";
 import { createServiceSupabaseClient } from "./supabase/serviceClient.js";
 import { sendMessage } from "./telegram/api.js";
 import { registerTelegramWebhookRoutes } from "./telegram/webhookRoutes.js";
@@ -48,6 +49,36 @@ function ok<T>(data: T): ApiSuccess<T> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function getHeaderString(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return undefined;
+}
+
+function requireVerifiedTelegramRequest(params: {
+  headers: Record<string, unknown>;
+  initDataFallback?: string | undefined;
+}) {
+  const initData = (
+    getHeaderString(params.headers["x-telegram-init-data"]) ??
+    params.initDataFallback ??
+    ""
+  ).trim();
+
+  if (!initData) {
+    throw new HttpError(401, "TG_INIT_DATA_REQUIRED", "Open the mini app inside Telegram");
+  }
+
+  const verified = verifyTelegramInitData(initData, config.telegram.botToken);
+  const maxAgeSeconds = 24 * 60 * 60;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (nowSeconds - verified.authDate > maxAgeSeconds) {
+    throw new HttpError(401, "TG_INIT_DATA_EXPIRED", "initData auth_date is too old");
+  }
+
+  return verified;
 }
 
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
@@ -93,12 +124,24 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     return { productId, qty };
   });
 
+  const pointsToSpendRaw = value.pointsToSpend;
+  const pointsToSpend =
+    pointsToSpendRaw === undefined || pointsToSpendRaw === null ? 0 : pointsToSpendRaw;
+  if (
+    typeof pointsToSpend !== "number" ||
+    !Number.isInteger(pointsToSpend) ||
+    pointsToSpend < 0
+  ) {
+    throw new HttpError(400, "BAD_REQUEST", "pointsToSpend must be a non-negative integer");
+  }
+
   const initData = typeof value.initData === "string" ? value.initData : undefined;
 
   const base: CreateOrderPayload = {
     citySlug: citySlug as CitySlug,
     deliveryMethod: deliveryMethod.trim(),
     comment: comment?.trim() ? comment.trim() : null,
+    pointsToSpend,
     items,
   };
 
@@ -117,6 +160,26 @@ function pickTelegramChatIds(citySlug: CitySlug): string[] {
     return config.telegram.chatIdsBlg ?? config.telegram.chatIdsOwner;
   }
   return config.telegram.chatIdsOwner;
+}
+
+const adminNotifyChatIds = new Set<string>([
+  ...config.telegram.chatIdsOwner,
+  ...(config.telegram.chatIdsVvo ?? []),
+  ...(config.telegram.chatIdsBlg ?? []),
+]);
+
+function pickTelegramChatIdsForOrder(params: {
+  citySlug: CitySlug;
+  tgUserId: number;
+}): string[] {
+  const selfChatId = String(params.tgUserId);
+
+  // If an admin account places a test order, notify only that same account.
+  if (adminNotifyChatIds.has(selfChatId)) {
+    return [selfChatId];
+  }
+
+  return pickTelegramChatIds(params.citySlug);
 }
 
 function parseUrlHost(rawUrl: string | null | undefined): string | null {
@@ -294,30 +357,99 @@ app.get<{
   }
 });
 
+app.post<{
+  Reply:
+    | ApiSuccess<{ referralCode: string; referralLink: string; referralBound: boolean }>
+    | ErrorResponse;
+}>("/api/referrals/bootstrap", async (request, reply) => {
+  try {
+    const verified = requireVerifiedTelegramRequest({
+      headers: request.headers as Record<string, unknown>,
+    });
+
+    const startParam =
+      typeof verified.params.start_param === "string" ? verified.params.start_param : null;
+    const result = await bootstrapReferralProfile({
+      tgUserId: verified.user.id,
+      tgUsername: verified.user.username,
+      startParam,
+    });
+
+    return reply.code(200).send(ok(result));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Referral bootstrap failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.get<{
+  Querystring: { limit?: string; offset?: string };
+  Reply: ApiSuccess<Awaited<ReturnType<typeof getReferralOverview>>> | ErrorResponse;
+}>("/api/referrals/overview", async (request, reply) => {
+  try {
+    const verified = requireVerifiedTelegramRequest({
+      headers: request.headers as Record<string, unknown>,
+    });
+
+    const limitRaw = Number(request.query.limit ?? 20);
+    const offsetRaw = Number(request.query.offset ?? 0);
+    const limit = Number.isFinite(limitRaw) && Number.isInteger(limitRaw) ? limitRaw : 20;
+    const offset = Number.isFinite(offsetRaw) && Number.isInteger(offsetRaw) ? offsetRaw : 0;
+
+    const startParam =
+      typeof verified.params.start_param === "string" ? verified.params.start_param : null;
+
+    const overview = await getReferralOverview({
+      tgUserId: verified.user.id,
+      tgUsername: verified.user.username,
+      startParam,
+      limit,
+      offset,
+    });
+
+    return reply.code(200).send(ok(overview));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Referral overview failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
 app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
   "/api/order",
   async (request, reply) => {
     try {
       const body = parseOrderRequestBody(request.body);
+      const verified = requireVerifiedTelegramRequest({
+        headers: request.headers as Record<string, unknown>,
+        initDataFallback: body.initData,
+      });
 
-      const headerInitData = request.headers["x-telegram-init-data"];
-      const initDataFromHeader =
-        typeof headerInitData === "string"
-          ? headerInitData
-          : Array.isArray(headerInitData)
-            ? headerInitData[0]
-            : undefined;
-      const initData = (initDataFromHeader ?? body.initData ?? "").trim();
-
-      if (!initData) {
-        throw new HttpError(401, "TG_INIT_DATA_REQUIRED", "Open the mini app inside Telegram");
-      }
-
-      const verified = verifyTelegramInitData(initData, config.telegram.botToken);
-      const maxAgeSeconds = 24 * 60 * 60;
-      const nowSeconds = Math.floor(Date.now() / 1000);
-      if (nowSeconds - verified.authDate > maxAgeSeconds) {
-        throw new HttpError(401, "TG_INIT_DATA_EXPIRED", "initData auth_date is too old");
+      try {
+        const startParam =
+          typeof verified.params.start_param === "string" ? verified.params.start_param : null;
+        await bootstrapReferralProfile({
+          tgUserId: verified.user.id,
+          tgUsername: verified.user.username,
+          startParam,
+        });
+      } catch (bootstrapError) {
+        request.log.error({ err: bootstrapError }, "Referral bootstrap failed during order flow");
       }
 
       const order = await createOrder({
@@ -325,6 +457,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           citySlug: body.citySlug,
           deliveryMethod: body.deliveryMethod,
           comment: body.comment,
+          pointsToSpend: body.pointsToSpend,
           items: body.items,
         },
         tgUser: {
@@ -333,7 +466,10 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
         },
       });
 
-      const chatIds = pickTelegramChatIds(body.citySlug);
+      const chatIds = pickTelegramChatIdsForOrder({
+        citySlug: body.citySlug,
+        tgUserId: verified.user.id,
+      });
       let notified = false;
       let firstSent:
         | {

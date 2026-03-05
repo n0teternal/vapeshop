@@ -70,6 +70,147 @@ export type Database = {
         };
         Relationships: [];
       };
+      customer_profiles: {
+        Row: {
+          tg_user_id: number;
+          referral_code: string;
+          referred_by_tg_user_id: number | null;
+          referral_bound_at: string | null;
+          tg_username: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          tg_user_id: number;
+          referral_code: string;
+          referred_by_tg_user_id?: number | null;
+          referral_bound_at?: string | null;
+          tg_username?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          tg_user_id?: number;
+          referral_code?: string;
+          referred_by_tg_user_id?: number | null;
+          referral_bound_at?: string | null;
+          tg_username?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      referrals: {
+        Row: {
+          id: number;
+          inviter_tg_user_id: number;
+          invitee_tg_user_id: number;
+          status: string;
+          qualified_order_id: string | null;
+          qualified_at: string | null;
+          rewarded_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          inviter_tg_user_id: number;
+          invitee_tg_user_id: number;
+          status?: string;
+          qualified_order_id?: string | null;
+          qualified_at?: string | null;
+          rewarded_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          inviter_tg_user_id?: number;
+          invitee_tg_user_id?: number;
+          status?: string;
+          qualified_order_id?: string | null;
+          qualified_at?: string | null;
+          rewarded_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      coupons: {
+        Row: {
+          id: string;
+          tg_user_id: number;
+          kind: string;
+          value: number;
+          min_order_sum: number;
+          max_discount: number | null;
+          source: string;
+          referral_id: number | null;
+          is_used: boolean;
+          used_order_id: string | null;
+          expires_at: string | null;
+          created_at: string;
+          used_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          tg_user_id: number;
+          kind?: string;
+          value?: number;
+          min_order_sum?: number;
+          max_discount?: number | null;
+          source?: string;
+          referral_id?: number | null;
+          is_used?: boolean;
+          used_order_id?: string | null;
+          expires_at?: string | null;
+          created_at?: string;
+          used_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          tg_user_id?: number;
+          kind?: string;
+          value?: number;
+          min_order_sum?: number;
+          max_discount?: number | null;
+          source?: string;
+          referral_id?: number | null;
+          is_used?: boolean;
+          used_order_id?: string | null;
+          expires_at?: string | null;
+          created_at?: string;
+          used_at?: string | null;
+        };
+        Relationships: [];
+      };
+      loyalty_transactions: {
+        Row: {
+          id: number;
+          tg_user_id: number;
+          delta_points: number;
+          kind: string;
+          referral_id: number | null;
+          order_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          tg_user_id: number;
+          delta_points: number;
+          kind: string;
+          referral_id?: number | null;
+          order_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          tg_user_id?: number;
+          delta_points?: number;
+          kind?: string;
+          referral_id?: number | null;
+          order_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       orders: {
         Row: {
           id: string;
@@ -83,6 +224,10 @@ export type Database = {
           notify_chat_id: number | null;
           notify_message_id: number | null;
           notify_sent_at: string | null;
+          coupon_id: string | null;
+          total_before_discount: number | null;
+          discount_amount: number;
+          total_after_discount: number | null;
           created_at: string;
         };
         Insert: {
@@ -97,6 +242,10 @@ export type Database = {
           notify_chat_id?: number | null;
           notify_message_id?: number | null;
           notify_sent_at?: string | null;
+          coupon_id?: string | null;
+          total_before_discount?: number | null;
+          discount_amount?: number;
+          total_after_discount?: number | null;
           created_at?: string;
         };
         Update: {
@@ -111,6 +260,10 @@ export type Database = {
           notify_chat_id?: number | null;
           notify_message_id?: number | null;
           notify_sent_at?: string | null;
+          coupon_id?: string | null;
+          total_before_discount?: number | null;
+          discount_amount?: number;
+          total_after_discount?: number | null;
           created_at?: string;
         };
         Relationships: [];

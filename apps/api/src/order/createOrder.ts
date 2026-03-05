@@ -1,4 +1,5 @@
 import { HttpError } from "../httpError.js";
+import { spendPointsForOrder } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
   buildOrderTelegramMessage,
@@ -11,6 +12,7 @@ export type CreateOrderPayload = {
   citySlug: CitySlug;
   deliveryMethod: string;
   comment: string | null;
+  pointsToSpend: number;
   items: Array<{ productId: string; qty: number }>;
 };
 
@@ -191,7 +193,7 @@ export async function createOrder(params: {
   const productById = new Map<string, ProductRow>(productList.map((p) => [p.id, p]));
 
   const lines: OrderLine[] = [];
-  let totalPrice = 0;
+  let totalBeforeDiscount = 0;
 
   for (const [productId, qty] of requested.entries()) {
     const inv = inventoryByProductId.get(productId);
@@ -225,8 +227,13 @@ export async function createOrder(params: {
     const unitPrice = overridePrice ?? basePrice;
 
     lines.push({ productId, title: product.title, qty, unitPrice });
-    totalPrice += unitPrice * qty;
+    totalBeforeDiscount += unitPrice * qty;
   }
+
+  const requestedPointsToSpend = Math.max(0, Math.trunc(params.payload.pointsToSpend));
+  const maxPointsByOrderTotal = Math.max(0, Math.floor(totalBeforeDiscount));
+  const discountAmount = Math.min(requestedPointsToSpend, maxPointsByOrderTotal);
+  const totalAfterDiscount = Math.max(0, totalBeforeDiscount - discountAmount);
 
   const reservations: ReservedInventory[] = [];
 
@@ -276,7 +283,10 @@ export async function createOrder(params: {
     city_id: city.id ?? null,
     delivery_method: params.payload.deliveryMethod,
     comment: params.payload.comment ?? null,
-    total_price: totalPrice,
+    total_price: totalAfterDiscount,
+    total_before_discount: totalBeforeDiscount,
+    discount_amount: discountAmount,
+    total_after_discount: totalAfterDiscount,
     // Let DB assign default status.
   };
 
@@ -323,9 +333,27 @@ export async function createOrder(params: {
     throw new HttpError(500, "DB", `Failed to create order items: ${orderItemsError.message}`);
   }
 
+  if (discountAmount > 0) {
+    try {
+      await spendPointsForOrder({
+        tgUserId: params.tgUser.id,
+        orderId: createdOrder.id,
+        pointsToSpend: discountAmount,
+      });
+    } catch (e) {
+      await supabase.from("orders").delete().eq("id", createdOrder.id);
+      await rollbackReservedInventory({
+        supabase,
+        cityId: city.id,
+        reservations,
+      });
+      throw e;
+    }
+  }
+
   return {
     orderId: createdOrder.id,
-    totalPrice,
+    totalPrice: totalAfterDiscount,
     lines,
     telegramMessage: buildOrderTelegramMessage({
       status: "new",
@@ -335,7 +363,7 @@ export async function createOrder(params: {
       deliveryMethod: params.payload.deliveryMethod,
       comment: params.payload.comment,
       lines,
-      totalPrice,
+      totalPrice: totalAfterDiscount,
       orderId: createdOrder.id,
     }),
   };

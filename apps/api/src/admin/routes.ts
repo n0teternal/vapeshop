@@ -7,6 +7,7 @@ import { config } from "../config.js";
 import { HttpError, isHttpError } from "../httpError.js";
 import { decodeCsvBuffer } from "../import/decodeCsvBuffer.js";
 import { importProductsCsv } from "../import/productsCsv.js";
+import { processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { deleteMessage } from "../telegram/api.js";
 import { requireAdmin } from "./requireAdmin.js";
@@ -1325,6 +1326,14 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           } catch (e) {
             // Best-effort: status is already updated in DB, so we don't fail the admin action.
             request.log.error({ err: e }, "Failed to delete Telegram message for done order");
+          }
+        }
+
+        if (parsed.data.status === "done") {
+          try {
+            await processReferralRewardForOrderDone({ orderId: data.id });
+          } catch (e) {
+            request.log.error({ err: e, orderId: data.id }, "Failed to process referral reward");
           }
         }
 

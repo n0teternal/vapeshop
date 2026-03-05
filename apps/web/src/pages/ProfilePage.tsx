@@ -1,4 +1,4 @@
-import { ShieldCheck, UserRound } from "lucide-react";
+import { Gift, ShieldCheck, UserRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet } from "../api/client";
@@ -83,6 +83,23 @@ export function ProfilePage() {
               </div>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/80 bg-card/90">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Рефералка и баллы</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="text-sm text-muted-foreground">
+            Приглашайте друзей, следите за их статусом и балансом бонусных баллов.
+          </div>
+          <Button asChild>
+            <Link to="/referrals" className="inline-flex items-center gap-2">
+              <Gift className="h-4 w-4" />
+              Открыть рефералку
+            </Link>
+          </Button>
         </CardContent>
       </Card>
 

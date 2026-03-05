@@ -1,10 +1,12 @@
-﻿import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./app/Layout";
+import { ReferralBootstrap } from "./components/ReferralBootstrap";
 import { AdminPage } from "./pages/AdminPage";
 import { CartPage } from "./pages/CartPage";
 import { CatalogPage } from "./pages/CatalogPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { ReferralPage } from "./pages/ReferralPage";
 import { AppStateProvider } from "./state/AppStateProvider";
 import { TelegramProvider } from "./telegram/TelegramProvider";
 
@@ -12,12 +14,14 @@ export default function App() {
   return (
     <TelegramProvider>
       <AppStateProvider>
+        <ReferralBootstrap />
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<CatalogPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
             <Route path="/cart" element={<CartPage />} />
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/referrals" element={<ReferralPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

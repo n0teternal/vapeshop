@@ -1,6 +1,7 @@
 import { Minus, Plus, ShoppingBag } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { ApiError, apiGet } from "../api/client";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
@@ -29,6 +30,10 @@ type OrderApiSuccess = {
 type OrderApiError = {
   ok: false;
   error: { code: string; message: string };
+};
+
+type ReferralOverviewBalance = {
+  pointsBalance: number;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -78,10 +83,71 @@ export function CartPage() {
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [pointsBalance, setPointsBalance] = useState(0);
+  const [pointsEnabled, setPointsEnabled] = useState(false);
+  const [pointsLoading, setPointsLoading] = useState(false);
+  const [pointsError, setPointsError] = useState<string | null>(null);
 
   const total = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   }, [state.cart]);
+
+  const maxPointsToSpend = useMemo(() => {
+    return Math.max(0, Math.min(pointsBalance, Math.floor(total)));
+  }, [pointsBalance, total]);
+
+  const pointsToSpend = pointsEnabled ? maxPointsToSpend : 0;
+  const totalToPay = Math.max(0, total - pointsToSpend);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPointsBalance(): Promise<void> {
+      setPointsLoading(true);
+      setPointsError(null);
+      try {
+        const data = await apiGet<ReferralOverviewBalance>(
+          "/api/referrals/overview?limit=1&offset=0",
+        );
+        if (!cancelled) {
+          setPointsBalance(Math.max(0, Math.trunc(data.pointsBalance)));
+        }
+      } catch (e: unknown) {
+        if (cancelled) return;
+
+        if (e instanceof ApiError) {
+          if (
+            e.code === "TG_INIT_DATA_REQUIRED" ||
+            e.code === "TG_INIT_DATA_INVALID" ||
+            e.code === "TG_INIT_DATA_EXPIRED"
+          ) {
+            setPointsBalance(0);
+            setPointsEnabled(false);
+            return;
+          }
+          setPointsError(e.message);
+          return;
+        }
+
+        setPointsError(e instanceof Error ? e.message : "Failed to load points balance");
+      } finally {
+        if (!cancelled) {
+          setPointsLoading(false);
+        }
+      }
+    }
+
+    void loadPointsBalance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (maxPointsToSpend > 0) return;
+    setPointsEnabled(false);
+  }, [maxPointsToSpend]);
 
   const canSubmit =
     state.cart.length > 0 &&
@@ -125,6 +191,7 @@ export function CartPage() {
             ? trimmedComment
             : null;
 
+      const pointsToSpendForOrder = pointsEnabled ? maxPointsToSpend : 0;
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
 
       const res = await fetch(buildApiUrl("/api/order"), {
@@ -137,6 +204,7 @@ export function CartPage() {
           citySlug: state.city,
           deliveryMethod,
           comment: fullComment,
+          pointsToSpend: pointsToSpendForOrder,
           items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
         }),
       });
@@ -159,6 +227,10 @@ export function CartPage() {
       dispatch({ type: "cart/clear" });
       setAddress("");
       setComment("");
+      if (pointsToSpendForOrder > 0) {
+        setPointsBalance((prev) => Math.max(0, prev - pointsToSpendForOrder));
+      }
+      setPointsEnabled(false);
 
       await notify("Заказ создан.\nПередаём админу...");
     } catch (e: unknown) {
@@ -273,7 +345,14 @@ export function CartPage() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Оформление</CardTitle>
-            <div className="text-lg font-semibold">{formatPriceRub(total)}</div>
+            <div className="text-right">
+              {pointsToSpend > 0 ? (
+                <div className="text-xs text-muted-foreground line-through">
+                  {formatPriceRub(total)}
+                </div>
+              ) : null}
+              <div className="text-lg font-semibold">{formatPriceRub(totalToPay)}</div>
+            </div>
           </div>
         </CardHeader>
 
@@ -316,6 +395,30 @@ export function CartPage() {
               placeholder="Опционально"
             />
           </label>
+
+          <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-input"
+                checked={pointsEnabled}
+                disabled={submitting || pointsLoading || maxPointsToSpend <= 0}
+                onChange={(e) => setPointsEnabled(e.target.checked)}
+              />
+              <span>
+                Использовать баллы ({pointsBalance})
+                {maxPointsToSpend > 0 ? `, спишется до ${pointsToSpend || maxPointsToSpend}` : ""}
+              </span>
+            </label>
+            {pointsToSpend > 0 ? (
+              <div className="text-xs text-muted-foreground">
+                Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате: {formatPriceRub(totalToPay)}.
+              </div>
+            ) : null}
+            {pointsError ? (
+              <div className="text-xs text-destructive">Баллы временно недоступны: {pointsError}</div>
+            ) : null}
+          </div>
 
           {submitError ? (
             <Alert variant="destructive">

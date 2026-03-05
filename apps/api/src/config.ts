@@ -16,11 +16,16 @@ export type AppConfig = {
   };
   telegram: {
     botToken: string;
+    botUsername: string | null;
     webhookSecret: string;
     publicWebhookUrl: string | null;
     chatIdsOwner: string[];
     chatIdsVvo: string[] | null;
     chatIdsBlg: string[] | null;
+  };
+  referrals: {
+    pointsInviter: number;
+    pointsInvitee: number;
   };
   productImagesBaseUrl: string | null;
   dev: {
@@ -94,6 +99,16 @@ function parseOptionalAdminUserId(): number | null {
   return n;
 }
 
+function parsePositiveIntEnv(key: string, defaultValue: number): number {
+  const raw = readEnv(key);
+  if (!raw) return defaultValue;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    throw new Error(`Invalid env ${key}: expected positive integer`);
+  }
+  return n;
+}
+
 function parseTelegramChatIds(raw: string, envName: string): string[] {
   const ids = Array.from(
     new Set(
@@ -149,11 +164,16 @@ export const config: AppConfig = (() => {
     },
     telegram: {
       botToken: requireEnv("TELEGRAM_BOT_TOKEN"),
+      botUsername: readEnv("TELEGRAM_BOT_USERNAME"),
       webhookSecret: requireEnv("TELEGRAM_WEBHOOK_SECRET"),
       publicWebhookUrl: readEnv("PUBLIC_WEBHOOK_URL"),
       chatIdsOwner: parseRequiredTelegramChatIds("TELEGRAM_CHAT_ID_OWNER"),
       chatIdsVvo: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_VVO"),
       chatIdsBlg: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_BLG"),
+    },
+    referrals: {
+      pointsInviter: parsePositiveIntEnv("REFERRAL_POINTS_INVITER", 100),
+      pointsInvitee: parsePositiveIntEnv("REFERRAL_POINTS_INVITEE", 100),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {

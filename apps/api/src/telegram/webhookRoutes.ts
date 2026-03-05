@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { buildOrderTelegramMessage, type CitySlug, type OrderStatus } from "../order/telegramMessage.js";
+import { processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { answerCallbackQuery, deleteMessage, editMessageText } from "./api.js";
 
@@ -215,6 +216,14 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     if (!order) {
       await answerSafe(parsed.callbackQueryId, "Заказ не найден");
       return reply.code(200).send({ ok: true });
+    }
+
+    if (action.kind === "status" && action.status === "done") {
+      try {
+        await processReferralRewardForOrderDone({ orderId: order.id });
+      } catch (e) {
+        request.log.error({ err: e, orderId: order.id }, "Failed to process referral reward");
+      }
     }
 
     const cityId = order.city_id;

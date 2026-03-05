@@ -62,11 +62,14 @@ copy .env.example .env.local
 - `SUPABASE_URL` — Project URL (для сервера)
 - `SUPABASE_SERVICE_ROLE_KEY` — service role key (только на сервере!)
 - `TELEGRAM_BOT_TOKEN` — токен бота
+- `TELEGRAM_BOT_USERNAME` — username бота без `@` (для генерации реферальной ссылки)
 - `TELEGRAM_WEBHOOK_SECRET` — secret token для Telegram webhook (заголовок `x-telegram-bot-api-secret-token`)
 - `PUBLIC_WEBHOOK_URL` — публичный URL вебхука (например `https://your-domain.com/api/telegram/webhook`)
 - `TELEGRAM_CHAT_ID_OWNER` — чат по умолчанию (fallback); можно указать несколько chat_id через `;` или `,`
 - `TELEGRAM_CHAT_ID_VVO` — чат для VVO; можно указать несколько chat_id через `;` или `,`
 - `TELEGRAM_CHAT_ID_BLG` — чат для BLG; можно указать несколько chat_id через `;` или `,`
+- `REFERRAL_POINTS_INVITER` — баллы пригласившему при `done` первого заказа реферала (default `100`)
+- `REFERRAL_POINTS_INVITEE` — баллы приглашенному при `done` первого заказа (default `100`)
 - `PRODUCT_IMAGES_BASE_URL` — базовый публичный URL для картинок товаров (рекомендуется Supabase Storage URL)
 - `CORS_ORIGINS` — **только для production**, список origin через запятую
 
@@ -101,6 +104,12 @@ notify pgrst, 'reload schema';
 
 Dashboard → **SQL Editor** → выполните:
 - `supabase/alter_orders_notify.sql`
+
+## Supabase: ALTER для рефералки и баллов
+
+Dashboard → **SQL Editor** → выполните:
+- SQL рефералок (profiles/referrals/coupons + поля в orders)
+- `supabase/alter_referrals_loyalty.sql` (ledger баллов + индексы + `tg_username`)
 
 ## Storage (product images)
 
