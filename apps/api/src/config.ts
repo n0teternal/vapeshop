@@ -26,6 +26,7 @@ export type AppConfig = {
   referrals: {
     pointsInviter: number;
     pointsInvitee: number;
+    minFirstOrderTotalRub: number;
   };
   productImagesBaseUrl: string | null;
   dev: {
@@ -174,6 +175,7 @@ export const config: AppConfig = (() => {
     referrals: {
       pointsInviter: parsePositiveIntEnv("REFERRAL_POINTS_INVITER", 100),
       pointsInvitee: parsePositiveIntEnv("REFERRAL_POINTS_INVITEE", 100),
+      minFirstOrderTotalRub: parsePositiveIntEnv("REFERRAL_MIN_FIRST_ORDER_TOTAL", 1200),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {

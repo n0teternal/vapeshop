@@ -54,7 +54,7 @@ export type ReferralInviteeStatus =
 export type ReferralOverview = {
   referralCode: string;
   referralLink: string;
-  rewardPoints: { inviter: number; invitee: number };
+  rewardPoints: { inviter: number; invitee: number; minFirstOrderTotalRub: number };
   pointsBalance: number;
   pointsHistory: Array<{
     id: number;
@@ -116,6 +116,21 @@ function sanitizeBotUsername(value: string | null): string | null {
   const cleaned = value.trim().replace(/^@+/, "");
   if (cleaned.length === 0) return null;
   return cleaned;
+}
+
+function numberFromUnknown(value: unknown): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+
+  if (!Number.isFinite(parsed)) {
+    throw new HttpError(500, "DB", `Invalid numeric value: ${String(value)}`);
+  }
+
+  return parsed;
 }
 
 async function resolveBotUsername(): Promise<string | null> {
@@ -495,6 +510,7 @@ export async function getReferralOverview(params: {
     rewardPoints: {
       inviter: config.referrals.pointsInviter,
       invitee: config.referrals.pointsInvitee,
+      minFirstOrderTotalRub: config.referrals.minFirstOrderTotalRub,
     },
     pointsBalance,
     pointsHistory: (historyRows ?? []).map((row) => ({
@@ -535,7 +551,7 @@ export async function processReferralRewardForOrderDone(params: {
   const supabase = createServiceSupabaseClient();
   const { data: order, error: orderError } = await supabase
     .from("orders")
-    .select("id,status,tg_user_id,created_at")
+    .select("id,status,tg_user_id,created_at,total_price,total_after_discount")
     .eq("id", params.orderId)
     .maybeSingle();
 
@@ -544,6 +560,11 @@ export async function processReferralRewardForOrderDone(params: {
   }
   if (!order) return { awarded: false };
   if (order.status !== "done") return { awarded: false };
+
+  const effectiveTotal = numberFromUnknown(order.total_after_discount ?? order.total_price);
+  if (effectiveTotal < config.referrals.minFirstOrderTotalRub) {
+    return { awarded: false };
+  }
 
   const { data: referral, error: referralError } = await supabase
     .from("referrals")

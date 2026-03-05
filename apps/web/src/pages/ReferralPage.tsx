@@ -17,7 +17,7 @@ type ReferralStatus =
 type ReferralOverview = {
   referralCode: string;
   referralLink: string;
-  rewardPoints: { inviter: number; invitee: number };
+  rewardPoints: { inviter: number; invitee: number; minFirstOrderTotalRub: number };
   pointsBalance: number;
   pointsHistory: Array<{
     id: number;
@@ -86,7 +86,7 @@ function isAbsoluteHttpUrl(value: string): boolean {
 }
 
 function buildTelegramShareUrl(referralLink: string): string {
-  const text = "Присоединяйся к Mini Market по моей ссылке";
+  const text = "Рады видеть тебя в магазине SDFG!\n\n";
   return `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(text)}`;
 }
 
@@ -198,6 +198,18 @@ export function ReferralPage() {
         <Badge variant="secondary">Код: {firstPage.referralCode}</Badge>
       </div>
 
+      <Card className="border-primary/60 bg-primary/10">
+        <CardContent className="p-4">
+          <div className="text-sm font-semibold leading-6 text-foreground">
+            Если приглашенный оформит заказ от{" "}
+            <span className="text-primary">1200 ₽</span> и оплатит его (статус{" "}
+            <span className="text-primary">done</span>):{" "}
+            <span className="text-primary">+100</span> пригласившему,{" "}
+            <span className="text-primary">+100</span> приглашенному.
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="border-border/80 bg-card/90">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Ваш баланс</CardTitle>
@@ -205,7 +217,8 @@ export function ReferralPage() {
         <CardContent className="space-y-3">
           <div className="text-2xl font-bold">{firstPage.pointsBalance} баллов</div>
           <div className="text-xs text-muted-foreground">
-            За done первого заказа: +{firstPage.rewardPoints.inviter} пригласившему, +
+            За done первого заказа от {firstPage.rewardPoints.minFirstOrderTotalRub} ₽: +
+            {firstPage.rewardPoints.inviter} пригласившему, +
             {firstPage.rewardPoints.invitee} приглашенному.
           </div>
 
