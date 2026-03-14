@@ -62,20 +62,14 @@ function CatalogSkeleton({ count }: { count: number }) {
 }
 
 function formatCategoryLabel(categorySlug: string): string {
-  const normalized = categorySlug.trim().toLowerCase();
-  if (normalized.length === 0) return "Прочее";
+  const normalized = normalizeCatalogCategoryId(categorySlug) ?? categorySlug.trim().toLowerCase();
 
   const ruLabelsBySlug: Record<string, string> = {
     other: "Прочее",
     liquid: "Жидкости",
-    liquids: "Жидкости",
-    "жидкости": "Жидкости",
     disposable: "Одноразки",
-    disposables: "Одноразки",
-    "одноразки": "Одноразки",
+    pod: "Pod",
     cartridge: "Картриджи",
-    cartridges: "Картриджи",
-    "картриджи": "Картриджи",
   };
   const mapped = ruLabelsBySlug[normalized];
   if (mapped) return mapped;
@@ -86,6 +80,60 @@ function formatCategoryLabel(categorySlug: string): string {
   return words
     .map((word) => word.slice(0, 1).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+type CatalogFilterCategoryId = "liquid" | "disposable" | "pod" | "cartridge";
+
+const CATALOG_FILTER_CATEGORIES: Array<{ id: CatalogFilterCategoryId; label: string }> = [
+  { id: "liquid", label: "Жидкости" },
+  { id: "disposable", label: "Одноразки" },
+  { id: "pod", label: "Pod" },
+  { id: "cartridge", label: "Картриджи" },
+];
+
+function normalizeCatalogCategoryId(value: string): CatalogFilterCategoryId | null {
+  const normalized = value.trim().toLowerCase();
+
+  if (
+    normalized === "liquid" ||
+    normalized === "liquids" ||
+    normalized === "жидкость" ||
+    normalized === "жидкости"
+  ) {
+    return "liquid";
+  }
+
+  if (
+    normalized === "disposable" ||
+    normalized === "disposables" ||
+    normalized === "одноразка" ||
+    normalized === "одноразки"
+  ) {
+    return "disposable";
+  }
+
+  if (
+    normalized === "pod" ||
+    normalized === "pods" ||
+    normalized === "pod-system" ||
+    normalized === "pod_system" ||
+    normalized === "podsystem"
+  ) {
+    return "pod";
+  }
+
+  if (
+    normalized === "cartridge" ||
+    normalized === "cartridges" ||
+    normalized === "картридж" ||
+    normalized === "картриджи" ||
+    normalized === "испаритель" ||
+    normalized === "испарители"
+  ) {
+    return "cartridge";
+  }
+
+  return null;
 }
 
 function normalizeSearchText(value: string): string {
@@ -262,66 +310,6 @@ function extractManufacturerLabel(title: string): string {
   return "Other";
 }
 
-function normalizePuffCount(value: number): number | null {
-  const rounded = Math.round(value);
-  if (!Number.isFinite(rounded)) return null;
-  if (rounded < 200 || rounded > 60_000) return null;
-  return rounded;
-}
-
-function extractPuffCount(item: CatalogItem): number | null {
-  const source = `${item.title} ${item.description ?? ""}`
-    .toLowerCase()
-    .replaceAll(",", ".")
-    .replaceAll(/\s+/g, " ");
-
-  const explicitK = source.match(
-    /(\d{1,2}(?:\.\d+)?)\s*[kк]\s*(?:затяж(?:ек|ки|ка)?|puffs?|тяг)/iu,
-  );
-  if (explicitK) {
-    const value = Number.parseFloat(explicitK[1]);
-    const normalized = normalizePuffCount(value * 1000);
-    if (normalized !== null) return normalized;
-  }
-
-  const explicitNumeric = source.match(/(\d{3,5})\s*(?:затяж(?:ек|ки|ка)?|puffs?|тяг)/iu);
-  if (explicitNumeric) {
-    const value = Number.parseInt(explicitNumeric[1], 10);
-    const normalized = normalizePuffCount(value);
-    if (normalized !== null) return normalized;
-  }
-
-  const disposableHint =
-    item.categorySlug.trim().toLowerCase() === "disposable" ||
-    /однораз|disposable/.test(source);
-  if (!disposableHint) {
-    return null;
-  }
-
-  const fallbackK = source.match(/(?:^|\D)(\d{1,2}(?:\.\d+)?)\s*[kк](?:\D|$)/iu);
-  if (fallbackK) {
-    const value = Number.parseFloat(fallbackK[1]);
-    const normalized = normalizePuffCount(value * 1000);
-    if (normalized !== null) return normalized;
-  }
-
-  const fallbackNumeric = source.match(/(?:^|\D)(\d{3,5})(?:\D|$)/u);
-  if (fallbackNumeric) {
-    const value = Number.parseInt(fallbackNumeric[1], 10);
-    const normalized = normalizePuffCount(value);
-    if (normalized !== null) return normalized;
-  }
-
-  return null;
-}
-
-function parsePositiveIntInput(value: string): number | null {
-  const digitsOnly = value.replaceAll(/\D+/g, "");
-  if (digitsOnly.length === 0) return null;
-  const parsed = Number.parseInt(digitsOnly, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return null;
-  return parsed;
-}
 
 type CatalogImagePreview = { src: string; alt: string };
 
@@ -446,7 +434,6 @@ type CatalogRow = {
   categoryId: string;
   manufacturerId: string;
   manufacturerLabel: string;
-  puffCount: number | null;
 };
 
 type CatalogSortMode =
@@ -517,11 +504,11 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
 export function CatalogPage() {
   const { state, dispatch } = useAppState();
 
-  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<CatalogFilterCategoryId | null>(
+    null,
+  );
   const [selectedManufacturerIds, setSelectedManufacturerIds] = useState<string[]>([]);
   const [sortMode, setSortMode] = useState<CatalogSortMode>("none");
-  const [puffRangeMinInput, setPuffRangeMinInput] = useState("");
-  const [puffRangeMaxInput, setPuffRangeMaxInput] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -567,11 +554,10 @@ export function CatalogPage() {
         item,
         categoryId:
           typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
-            ? item.categorySlug.trim().toLowerCase()
+            ? normalizeCatalogCategoryId(item.categorySlug) ?? item.categorySlug.trim().toLowerCase()
             : "other",
         manufacturerLabel,
         manufacturerId: normalizeManufacturerId(manufacturerLabel),
-        puffCount: extractPuffCount(item),
       };
     });
   }, [items]);
@@ -582,14 +568,17 @@ export function CatalogPage() {
       counts.set(row.categoryId, (counts.get(row.categoryId) ?? 0) + 1);
     }
 
-    return Array.from(counts.entries())
-      .map(([id, count]) => ({ id, count, label: formatCategoryLabel(id) }))
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"));
+    return CATALOG_FILTER_CATEGORIES.map((category) => ({
+      id: category.id,
+      label: category.label,
+      count: counts.get(category.id) ?? 0,
+    }));
   }, [catalogRows]);
 
   const manufacturers = useMemo<CategoryStat[]>(() => {
     const stats = new Map<string, { label: string; count: number }>();
     for (const row of catalogRows) {
+      if (selectedCategoryId && row.categoryId !== selectedCategoryId) continue;
       const prev = stats.get(row.manufacturerId);
       if (prev) {
         prev.count += 1;
@@ -601,15 +590,7 @@ export function CatalogPage() {
     return Array.from(stats.entries())
       .map(([id, value]) => ({ id, label: value.label, count: value.count }))
       .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "ru"));
-  }, [catalogRows]);
-
-  useEffect(() => {
-    const available = new Set(categories.map((x) => x.id));
-    setSelectedCategoryIds((prev) => {
-      const next = prev.filter((id) => available.has(id));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [categories]);
+  }, [catalogRows, selectedCategoryId]);
 
   useEffect(() => {
     const available = new Set(manufacturers.map((x) => x.id));
@@ -619,10 +600,6 @@ export function CatalogPage() {
     });
   }, [manufacturers]);
 
-  const selectedCategoriesSet = useMemo(() => {
-    return new Set(selectedCategoryIds);
-  }, [selectedCategoryIds]);
-
   const selectedManufacturersSet = useMemo(() => {
     return new Set(selectedManufacturerIds);
   }, [selectedManufacturerIds]);
@@ -631,53 +608,20 @@ export function CatalogPage() {
     return normalizeSearchText(searchQuery);
   }, [searchQuery]);
 
-  const puffRange = useMemo(() => {
-    const min = parsePositiveIntInput(puffRangeMinInput);
-    const max = parsePositiveIntInput(puffRangeMaxInput);
-    if (min === null && max === null) return null;
-    if (min !== null && max !== null && min > max) {
-      return { min: max, max: min };
-    }
-    return { min, max };
-  }, [puffRangeMaxInput, puffRangeMinInput]);
-
-  const puffBounds = useMemo(() => {
-    let min = Number.POSITIVE_INFINITY;
-    let max = 0;
-    let count = 0;
-    for (const row of catalogRows) {
-      if (row.puffCount === null) continue;
-      if (row.puffCount < min) min = row.puffCount;
-      if (row.puffCount > max) max = row.puffCount;
-      count += 1;
-    }
-    if (count === 0) return null;
-    return { min, max };
-  }, [catalogRows]);
-
   const activeFilterCount = useMemo(() => {
-    return (
-      selectedCategoryIds.length +
-      selectedManufacturerIds.length +
-      (puffRange ? 1 : 0)
-    );
-  }, [puffRange, selectedCategoryIds.length, selectedManufacturerIds.length]);
+    return (selectedCategoryId ? 1 : 0) + selectedManufacturerIds.length;
+  }, [selectedCategoryId, selectedManufacturerIds.length]);
 
   const filtersSummary = useMemo(() => {
     const parts: string[] = [];
-    if (selectedCategoryIds.length > 0) {
-      parts.push(`Категорий: ${selectedCategoryIds.length}`);
+    if (selectedCategoryId) {
+      parts.push(formatCategoryLabel(selectedCategoryId));
     }
     if (selectedManufacturerIds.length > 0) {
       parts.push(`Производителей: ${selectedManufacturerIds.length}`);
     }
-    if (puffRange) {
-      const minLabel = puffRange.min ?? "0";
-      const maxLabel = puffRange.max ?? "∞";
-      parts.push(`Затяжки: ${minLabel}-${maxLabel}`);
-    }
     return parts.join(" • ");
-  }, [puffRange, selectedCategoryIds.length, selectedManufacturerIds.length]);
+  }, [selectedCategoryId, selectedManufacturerIds.length]);
 
   useEffect(() => {
     if (!toast) return;
@@ -711,7 +655,7 @@ export function CatalogPage() {
 
   const visibleItems = useMemo(() => {
     const preFilteredRows = catalogRows.filter((row) => {
-      if (selectedCategoryIds.length > 0 && !selectedCategoriesSet.has(row.categoryId)) {
+      if (selectedCategoryId && row.categoryId !== selectedCategoryId) {
         return false;
       }
       if (
@@ -719,11 +663,6 @@ export function CatalogPage() {
         !selectedManufacturersSet.has(row.manufacturerId)
       ) {
         return false;
-      }
-      if (puffRange) {
-        if (row.puffCount === null) return false;
-        if (puffRange.min !== null && row.puffCount < puffRange.min) return false;
-        if (puffRange.max !== null && row.puffCount > puffRange.max) return false;
       }
       return true;
     });
@@ -792,9 +731,7 @@ export function CatalogPage() {
   }, [
     catalogRows,
     normalizedSearchQuery,
-    puffRange,
-    selectedCategoriesSet,
-    selectedCategoryIds.length,
+    selectedCategoryId,
     selectedManufacturerIds.length,
     selectedManufacturersSet,
     sortMode,
@@ -888,12 +825,9 @@ export function CatalogPage() {
     return new Set(state.favorites.map((item) => item.productId));
   }, [state.favorites]);
 
-  function toggleCategory(categoryId: string): void {
-    setSelectedCategoryIds((prev) =>
-      prev.includes(categoryId)
-        ? prev.filter((id) => id !== categoryId)
-        : [...prev, categoryId],
-    );
+  function toggleCategory(categoryId: CatalogFilterCategoryId | null): void {
+    setSelectedCategoryId((prev) => (prev === categoryId ? null : categoryId));
+    setSelectedManufacturerIds([]);
   }
 
   function toggleManufacturer(manufacturerId: string): void {
@@ -1324,42 +1258,69 @@ export function CatalogPage() {
             <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Категории
             </div>
-            {categories.length === 0 ? (
-              <div className="mt-2 text-sm text-muted-foreground">
-                Категории пока не найдены в текущем каталоге.
-              </div>
-            ) : (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {categories.map((category) => {
-                  const active = selectedCategoriesSet.has(category.id);
-                  return (
-                    <button
-                      key={category.id}
-                      type="button"
-                      className={[
-                        "rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
-                        active
-                          ? "border-primary bg-primary text-white"
-                          : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
-                      ].join(" ")}
-                      onClick={() => toggleCategory(category.id)}
-                    >
-                      {category.label} ({category.count})
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <div className="mt-2 overflow-hidden rounded-2xl border border-border/70 bg-background/40">
+              <button
+                type="button"
+                className={[
+                  "flex w-full items-center justify-between px-4 py-3.5 text-left text-sm font-medium transition-colors",
+                  selectedCategoryId === null
+                    ? "bg-primary/14 text-[#8fbeff]"
+                    : "text-foreground/90 hover:bg-muted/45",
+                ].join(" ")}
+                onClick={() => toggleCategory(null)}
+              >
+                <span>Весь магазин</span>
+                {selectedCategoryId === null ? (
+                  <span aria-hidden="true" className="text-base leading-none">
+                    ✓
+                  </span>
+                ) : null}
+              </button>
+
+              {categories.map((category, index) => {
+                const active = selectedCategoryId === category.id;
+                const disabled = category.count === 0;
+
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    disabled={disabled}
+                    className={[
+                      "flex w-full items-center justify-between px-4 py-3.5 text-left text-sm font-medium transition-colors",
+                      index === 0 ? "border-t border-border/70" : "border-t border-border/70",
+                      disabled
+                        ? "cursor-not-allowed text-muted-foreground/45"
+                        : active
+                          ? "bg-primary/14 text-[#8fbeff]"
+                          : "text-foreground/90 hover:bg-muted/45",
+                    ].join(" ")}
+                    onClick={() => toggleCategory(category.id as CatalogFilterCategoryId)}
+                  >
+                    <span>{category.label}</span>
+                    {active ? (
+                      <span aria-hidden="true" className="text-base leading-none">
+                        ✓
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
 
             <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Производитель
             </div>
-            {manufacturers.length === 0 ? (
+            {!selectedCategoryId ? (
               <div className="mt-2 text-sm text-muted-foreground">
-                Производители не определились автоматически.
+                Выберите категорию, чтобы увидеть связанные бренды.
+              </div>
+            ) : manufacturers.length === 0 ? (
+              <div className="mt-2 text-sm text-muted-foreground">
+                Для этой категории бренды пока не определились.
               </div>
             ) : (
-              <div className="mt-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto pr-1">
+              <div className="mt-2 flex max-h-48 flex-wrap gap-2 overflow-y-auto pr-1">
                 {manufacturers.map((manufacturer) => {
                   const active = selectedManufacturersSet.has(manufacturer.id);
                   return (
@@ -1381,61 +1342,14 @@ export function CatalogPage() {
               </div>
             )}
 
-            <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Затяжки (одноразки)
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-                <span>От</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={puffRangeMinInput}
-                  onChange={(event) =>
-                    setPuffRangeMinInput(
-                      event.target.value.replaceAll(/\D+/g, "").slice(0, 5),
-                    )
-                  }
-                  placeholder={puffBounds ? String(puffBounds.min) : "1000"}
-                  className="h-9 w-full min-w-0 rounded-lg border border-border/70 bg-background px-2.5 text-[13px] text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
-                />
-              </label>
-              <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-                <span>До</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={puffRangeMaxInput}
-                  onChange={(event) =>
-                    setPuffRangeMaxInput(
-                      event.target.value.replaceAll(/\D+/g, "").slice(0, 5),
-                    )
-                  }
-                  placeholder={puffBounds ? String(puffBounds.max) : "4000"}
-                  className="h-9 w-full min-w-0 rounded-lg border border-border/70 bg-background px-2.5 text-[13px] text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
-                />
-              </label>
-            </div>
-            {puffBounds ? (
-              <div className="mt-2 break-words text-[11px] leading-snug text-muted-foreground">
-                Доступный диапазон в каталоге: {puffBounds.min} - {puffBounds.max}
-              </div>
-            ) : (
-              <div className="mt-2 text-[11px] text-muted-foreground">
-                В каталоге нет товаров с распознанным числом затяжек.
-              </div>
-            )}
-
             <div className="mt-4 flex items-center justify-between gap-3">
               <button
                 type="button"
                 className="rounded-xl border border-border/70 bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={activeFilterCount === 0}
                 onClick={() => {
-                  setSelectedCategoryIds([]);
+                  setSelectedCategoryId(null);
                   setSelectedManufacturerIds([]);
-                  setPuffRangeMinInput("");
-                  setPuffRangeMaxInput("");
                 }}
               >
                 Сбросить
