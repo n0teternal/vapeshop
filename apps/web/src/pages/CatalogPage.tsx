@@ -230,6 +230,7 @@ const MANUFACTURER_STOP_WORDS = new Set([
 
 const MANUFACTURER_LABEL_ALIASES = new Map<string, string>([
   ["aegis", "Geekvape"],
+  ["geek", "Geekvape"],
   ["geekvape", "Geekvape"],
 ]);
 

@@ -23,6 +23,7 @@ export type AppConfig = {
     chatIdsOwner: string[];
     chatIdsVvo: string[] | null;
     chatIdsBlg: string[] | null;
+    chatIdsOrderStatus: string[] | null;
   };
   referrals: {
     pointsInviter: number;
@@ -173,6 +174,7 @@ export const config: AppConfig = (() => {
       chatIdsOwner: parseRequiredTelegramChatIds("TELEGRAM_CHAT_ID_OWNER"),
       chatIdsVvo: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_VVO"),
       chatIdsBlg: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_BLG"),
+      chatIdsOrderStatus: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_ORDER_STATUS"),
     },
     referrals: {
       pointsInviter: parsePositiveIntEnv("REFERRAL_POINTS_INVITER", 100),

@@ -1,13 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
-import { buildOrderTelegramMessage, type CitySlug, type OrderStatus } from "../order/telegramMessage.js";
+import {
+  buildOrderStatusTelegramText,
+  buildOrderTelegramMessage,
+  type CitySlug,
+  type OrderStatus,
+} from "../order/telegramMessage.js";
 import { bootstrapReferralProfile, processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
-import { answerCallbackQuery, deleteMessage, editMessageText } from "./api.js";
+import { answerCallbackQuery, deleteMessage, editMessageText, sendMessage } from "./api.js";
 
 type CallbackStatus = Exclude<OrderStatus, "new">;
 
-type CallbackUiView = "main" | "done_confirm";
+type CallbackUiView = "main" | "done_confirm" | "cancel_confirm";
 
 type ParsedCallbackQuery = {
   callbackQueryId: string;
@@ -119,12 +124,16 @@ function parseCallbackData(data: string): ParsedCallbackAction | null {
   if (!uuidV4ish) return null;
 
   if (type === "status") {
-    if (actionRaw !== "processing" && actionRaw !== "done") return null;
+    if (actionRaw !== "processing" && actionRaw !== "done" && actionRaw !== "cancelled") {
+      return null;
+    }
     return { kind: "status", status: actionRaw, orderId };
   }
 
   if (type === "ui") {
-    if (actionRaw !== "main" && actionRaw !== "done_confirm") return null;
+    if (actionRaw !== "main" && actionRaw !== "done_confirm" && actionRaw !== "cancel_confirm") {
+      return null;
+    }
     return { kind: "ui", view: actionRaw, orderId };
   }
 
@@ -141,7 +150,9 @@ function numberFromUnknown(value: unknown): number {
 }
 
 function parseOrderStatus(value: unknown): OrderStatus {
-  if (value === "new" || value === "processing" || value === "done") return value;
+  if (value === "new" || value === "processing" || value === "done" || value === "cancelled") {
+    return value;
+  }
   return "new";
 }
 
@@ -357,9 +368,17 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     const telegramMessage = buildOrderTelegramMessage({
       status: orderStatus,
       actionsView:
-        action.kind === "ui" && action.view === "done_confirm" && orderStatus !== "done"
+        action.kind === "ui" &&
+        action.view === "done_confirm" &&
+        orderStatus !== "done" &&
+        orderStatus !== "cancelled"
           ? "done_confirm"
-          : "main",
+          : action.kind === "ui" &&
+              action.view === "cancel_confirm" &&
+              orderStatus !== "done" &&
+              orderStatus !== "cancelled"
+            ? "cancel_confirm"
+            : "main",
       cityName: city.name,
       citySlug,
       tgUser: { id: order.tg_user_id, username: order.tg_username },
@@ -371,6 +390,37 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       orderId: order.id,
     });
 
+    if (
+      action.kind === "status" &&
+      (action.status === "done" || action.status === "cancelled") &&
+      config.telegram.chatIdsOrderStatus
+    ) {
+      const statusMessage = buildOrderStatusTelegramText({
+        status: action.status,
+        cityName: city.name,
+        citySlug,
+        tgUser: { id: order.tg_user_id, username: order.tg_username },
+        deliveryMethod: order.delivery_method,
+        comment: order.comment,
+        lines,
+        totalPrice,
+        discountApplied: discountAmount > 0,
+        orderId: order.id,
+      });
+
+      for (const chatId of config.telegram.chatIdsOrderStatus) {
+        try {
+          await sendMessage({
+            botToken: config.telegram.botToken,
+            chatId,
+            text: statusMessage,
+          });
+        } catch (e) {
+          request.log.error({ err: e, chatId, orderId: order.id }, "Failed to notify order status chat");
+        }
+      }
+    }
+
     const notifyChatId = order.notify_chat_id;
     const notifyMessageId = order.notify_message_id;
     const editTarget =
@@ -379,9 +429,12 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         : parsed.message;
 
     if (editTarget) {
-      // When order is confirmed as done, remove the message completely from the admin chat.
+      // Final statuses are removed from the admin chat queue.
       // If deletion fails (e.g. missing rights), fall back to editing the message as before.
-      if (action.kind === "status" && action.status === "done") {
+      if (
+        action.kind === "status" &&
+        (action.status === "done" || action.status === "cancelled")
+      ) {
         try {
           await deleteMessage({
             botToken: config.telegram.botToken,
@@ -420,10 +473,12 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     await answerSafe(
       parsed.callbackQueryId,
       action.kind === "ui"
-        ? "Ок"
+        ? "??"
         : action.kind === "status" && action.status === "done"
-          ? "Статус: Готово"
-          : "Статус обновлен",
+          ? "??????: ??????"
+          : action.kind === "status" && action.status === "cancelled"
+            ? "??????: ???????"
+            : "?????? ????????",
     );
     return reply.code(200).send({ ok: true });
   });
