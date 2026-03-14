@@ -1,6 +1,7 @@
 export type TelegramInlineKeyboardButton =
   | { text: string; url: string }
-  | { text: string; callback_data: string };
+  | { text: string; callback_data: string }
+  | { text: string; copy_text: { text: string } };
 
 export type TelegramReplyMarkup = {
   inline_keyboard: TelegramInlineKeyboardButton[][];

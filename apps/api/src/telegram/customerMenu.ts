@@ -118,6 +118,7 @@ export function buildCustomerReferralMenuMessage(params: {
   const shopUrl = getMiniAppEntryUrl();
 
   const inlineKeyboard: TelegramReplyMarkup["inline_keyboard"] = [
+    [{ text: "📋 Скопировать ссылку", copy_text: { text: params.referralLink } }],
     [{ text: "👥 Поделиться", url: shareUrl }],
   ];
 
