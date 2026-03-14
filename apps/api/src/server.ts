@@ -38,12 +38,7 @@ type SuccessResponse = {
 };
 
 type CitySlug = "vvo" | "blg";
-
-const ORDER_NOTIFY_OVERRIDE_CHAT_BY_USER_ID: Record<string, string> = {
-  // For this user, order notifications must go only to owner chat.
-  "830397617": "1208488286",
-  "6659654950": "1208488286",
-};
+const TEST_ORDER_SELF_CHAT_ID = "1208488286";
 
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
@@ -168,25 +163,13 @@ function pickTelegramChatIds(citySlug: CitySlug): string[] {
   return config.telegram.chatIdsOwner;
 }
 
-const adminNotifyChatIds = new Set<string>([
-  ...config.telegram.chatIdsOwner,
-  ...(config.telegram.chatIdsVvo ?? []),
-  ...(config.telegram.chatIdsBlg ?? []),
-]);
-
 function pickTelegramChatIdsForOrder(params: {
   citySlug: CitySlug;
   tgUserId: number;
 }): string[] {
   const selfChatId = String(params.tgUserId);
-  const forcedChatId = ORDER_NOTIFY_OVERRIDE_CHAT_BY_USER_ID[selfChatId];
-
-  if (forcedChatId) {
-    return [forcedChatId];
-  }
-
-  // If an admin account places a test order, notify only that same account.
-  if (adminNotifyChatIds.has(selfChatId)) {
+  // Only the main owner account gets self-notifications for test orders.
+  if (selfChatId === TEST_ORDER_SELF_CHAT_ID) {
     return [selfChatId];
   }
 
