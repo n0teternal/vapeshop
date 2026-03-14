@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { PRODUCTS } from "../data/products";
@@ -63,25 +63,25 @@ function CatalogSkeleton({ count }: { count: number }) {
 
 function formatCategoryLabel(categorySlug: string): string {
   const normalized = categorySlug.trim().toLowerCase();
-  if (normalized.length === 0) return "Прочее";
+  if (normalized.length === 0) return "РџСЂРѕС‡РµРµ";
 
   const ruLabelsBySlug: Record<string, string> = {
-    other: "Прочее",
-    liquid: "Жидкости",
-    liquids: "Жидкости",
-    "жидкости": "Жидкости",
-    disposable: "Одноразки",
-    disposables: "Одноразки",
-    "одноразки": "Одноразки",
-    cartridge: "Картриджи",
-    cartridges: "Картриджи",
-    "картриджи": "Картриджи",
+    other: "РџСЂРѕС‡РµРµ",
+    liquid: "Р–РёРґРєРѕСЃС‚Рё",
+    liquids: "Р–РёРґРєРѕСЃС‚Рё",
+    "Р¶РёРґРєРѕСЃС‚Рё": "Р–РёРґРєРѕСЃС‚Рё",
+    disposable: "РћРґРЅРѕСЂР°Р·РєРё",
+    disposables: "РћРґРЅРѕСЂР°Р·РєРё",
+    "РѕРґРЅРѕСЂР°Р·РєРё": "РћРґРЅРѕСЂР°Р·РєРё",
+    cartridge: "РљР°СЂС‚СЂРёРґР¶Рё",
+    cartridges: "РљР°СЂС‚СЂРёРґР¶Рё",
+    "РєР°СЂС‚СЂРёРґР¶Рё": "РљР°СЂС‚СЂРёРґР¶Рё",
   };
   const mapped = ruLabelsBySlug[normalized];
   if (mapped) return mapped;
 
   const words = normalized.split(/[_-]+/g).filter((x) => x.length > 0);
-  if (words.length === 0) return "Прочее";
+  if (words.length === 0) return "РџСЂРѕС‡РµРµ";
 
   return words
     .map((word) => word.slice(0, 1).toUpperCase() + word.slice(1))
@@ -91,8 +91,8 @@ function formatCategoryLabel(categorySlug: string): string {
 function normalizeSearchText(value: string): string {
   return value
     .toLowerCase()
-    .replaceAll("ё", "е")
-    .replaceAll(/[^a-z0-9а-я\s]+/g, " ")
+    .replaceAll("С‘", "Рµ")
+    .replaceAll(/[^a-z0-9Р°-СЏ\s]+/g, " ")
     .replaceAll(/\s+/g, " ")
     .trim();
 }
@@ -210,26 +210,36 @@ function getSearchMatchScore(title: string, normalizedQuery: string): number {
 }
 
 const MANUFACTURER_STOP_WORDS = new Set([
-  "одноразка",
-  "одноразовый",
-  "одноразовая",
-  "одноразовые",
+  "РѕРґРЅРѕСЂР°Р·РєР°",
+  "РѕРґРЅРѕСЂР°Р·РѕРІС‹Р№",
+  "РѕРґРЅРѕСЂР°Р·РѕРІР°СЏ",
+  "РѕРґРЅРѕСЂР°Р·РѕРІС‹Рµ",
   "disposable",
   "pod",
   "pods",
   "salt",
   "vape",
-  "вейп",
-  "жидкость",
-  "жидкости",
+  "РІРµР№Рї",
+  "Р¶РёРґРєРѕСЃС‚СЊ",
+  "Р¶РёРґРєРѕСЃС‚Рё",
   "liquid",
   "cartridge",
-  "картридж",
-  "испаритель",
+  "РєР°СЂС‚СЂРёРґР¶",
+  "РёСЃРїР°СЂРёС‚РµР»СЊ",
 ]);
 
+const MANUFACTURER_LABEL_ALIASES = new Map<string, string>([
+  ["aegis", "Geekvape"],
+  ["geekvape", "Geekvape"],
+]);
+
+function normalizeManufacturerLabel(value: string): string {
+  const normalized = normalizeSearchText(value);
+  return MANUFACTURER_LABEL_ALIASES.get(normalized) ?? value;
+}
+
 function normalizeManufacturerId(value: string): string {
-  return normalizeSearchText(value).replaceAll(" ", "-");
+  return normalizeSearchText(normalizeManufacturerLabel(value)).replaceAll(" ", "-");
 }
 
 function extractManufacturerLabel(title: string): string {
@@ -237,7 +247,7 @@ function extractManufacturerLabel(title: string): string {
     .replaceAll("_", " ")
     .replaceAll("/", " ")
     .split(/\s+/g)
-    .map((token) => token.replaceAll(/[^0-9A-Za-zА-Яа-яЁё-]+/g, ""))
+    .map((token) => token.replaceAll(/[^\p{L}\p{N}-]+/gu, ""))
     .filter((token) => token.length > 0);
 
   for (const token of tokens) {
@@ -245,7 +255,7 @@ function extractManufacturerLabel(title: string): string {
     if (normalized.length < 2) continue;
     if (/^\d/.test(normalized)) continue;
     if (MANUFACTURER_STOP_WORDS.has(normalized)) continue;
-    return token;
+    return normalizeManufacturerLabel(token);
   }
 
   return "Other";
@@ -265,7 +275,7 @@ function extractPuffCount(item: CatalogItem): number | null {
     .replaceAll(/\s+/g, " ");
 
   const explicitK = source.match(
-    /(\d{1,2}(?:\.\d+)?)\s*[kк]\s*(?:затяж(?:ек|ки|ка)?|puffs?|тяг)/iu,
+    /(\d{1,2}(?:\.\d+)?)\s*[kРє]\s*(?:Р·Р°С‚СЏР¶(?:РµРє|РєРё|РєР°)?|puffs?|С‚СЏРі)/iu,
   );
   if (explicitK) {
     const value = Number.parseFloat(explicitK[1]);
@@ -273,7 +283,7 @@ function extractPuffCount(item: CatalogItem): number | null {
     if (normalized !== null) return normalized;
   }
 
-  const explicitNumeric = source.match(/(\d{3,5})\s*(?:затяж(?:ек|ки|ка)?|puffs?|тяг)/iu);
+  const explicitNumeric = source.match(/(\d{3,5})\s*(?:Р·Р°С‚СЏР¶(?:РµРє|РєРё|РєР°)?|puffs?|С‚СЏРі)/iu);
   if (explicitNumeric) {
     const value = Number.parseInt(explicitNumeric[1], 10);
     const normalized = normalizePuffCount(value);
@@ -282,12 +292,12 @@ function extractPuffCount(item: CatalogItem): number | null {
 
   const disposableHint =
     item.categorySlug.trim().toLowerCase() === "disposable" ||
-    /однораз|disposable/.test(source);
+    /РѕРґРЅРѕСЂР°Р·|disposable/.test(source);
   if (!disposableHint) {
     return null;
   }
 
-  const fallbackK = source.match(/(?:^|\D)(\d{1,2}(?:\.\d+)?)\s*[kк](?:\D|$)/iu);
+  const fallbackK = source.match(/(?:^|\D)(\d{1,2}(?:\.\d+)?)\s*[kРє](?:\D|$)/iu);
   if (fallbackK) {
     const value = Number.parseFloat(fallbackK[1]);
     const normalized = normalizePuffCount(value * 1000);
@@ -341,7 +351,7 @@ function ProductCard({
           <button
             type="button"
             className="block w-full cursor-zoom-in rounded-[20px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            aria-label={`Открыть фото товара ${item.title}`}
+            aria-label={`РћС‚РєСЂС‹С‚СЊ С„РѕС‚Рѕ С‚РѕРІР°СЂР° ${item.title}`}
             onClick={() => onOpenImage({ src: previewImageSrc, alt: item.title })}
           >
             <ProductImagePreview
@@ -454,7 +464,7 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
     if (error.code === "BAD_RESPONSE") {
       return {
         message:
-          "API вернул неожиданный ответ. Проверьте, что `/api/catalog` доступен и возвращает JSON.",
+          "API РІРµСЂРЅСѓР» РЅРµРѕР¶РёРґР°РЅРЅС‹Р№ РѕС‚РІРµС‚. РџСЂРѕРІРµСЂСЊС‚Рµ, С‡С‚Рѕ `/api/catalog` РґРѕСЃС‚СѓРїРµРЅ Рё РІРѕР·РІСЂР°С‰Р°РµС‚ JSON.",
         devDetails: details,
       };
     }
@@ -467,7 +477,7 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
         (msgLower.includes("apikey") && msgLower.includes("invalid")));
     if (isInvalidKey) {
       return {
-        message: "Supabase env не задан или ключ относится к другому проекту.",
+        message: "Supabase env РЅРµ Р·Р°РґР°РЅ РёР»Рё РєР»СЋС‡ РѕС‚РЅРѕСЃРёС‚СЃСЏ Рє РґСЂСѓРіРѕРјСѓ РїСЂРѕРµРєС‚Сѓ.",
         devDetails: details,
       };
     }
@@ -476,7 +486,7 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
       error.status === 404 || error.code === "PGRST205" || msgLower.includes("schema cache");
     if (isSchemaCache) {
       return {
-        message: `В базе нет таблицы ${error.table} или не обновился API-кэш.`,
+        message: `Р’ Р±Р°Р·Рµ РЅРµС‚ С‚Р°Р±Р»РёС†С‹ ${error.table} РёР»Рё РЅРµ РѕР±РЅРѕРІРёР»СЃСЏ API-РєСЌС€.`,
         devDetails: details,
       };
     }
@@ -487,7 +497,7 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
       error.code === "42501" ||
       msgLower.includes("permission");
     if (isPermission) {
-      return { message: "Нет прав доступа (RLS).", devDetails: details };
+      return { message: "РќРµС‚ РїСЂР°РІ РґРѕСЃС‚СѓРїР° (RLS).", devDetails: details };
     }
 
     return { message: `Supabase error: ${error.message}`, devDetails: details };
@@ -496,7 +506,7 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
   const message =
     error instanceof Error
       ? error.message.includes("Supabase is not configured")
-        ? "Supabase env не задан или ключ относится к другому проекту."
+        ? "Supabase env РЅРµ Р·Р°РґР°РЅ РёР»Рё РєР»СЋС‡ РѕС‚РЅРѕСЃРёС‚СЃСЏ Рє РґСЂСѓРіРѕРјСѓ РїСЂРѕРµРєС‚Сѓ."
         : error.message
       : "Unknown error";
 
@@ -509,7 +519,6 @@ export function CatalogPage() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [selectedManufacturerIds, setSelectedManufacturerIds] = useState<string[]>([]);
   const [sortMode, setSortMode] = useState<CatalogSortMode>("none");
-  const [onlyInStock, setOnlyInStock] = useState(false);
   const [puffRangeMinInput, setPuffRangeMinInput] = useState("");
   const [puffRangeMaxInput, setPuffRangeMaxInput] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
@@ -545,13 +554,13 @@ export function CatalogPage() {
   const items = supabaseEnabled ? supabaseItems : mockItems;
 
   const cityLabel = useMemo(() => {
-    if (state.city === "vvo") return "Владивосток (VVO)";
-    if (state.city === "blg") return "Благовещенск (BLG)";
+    if (state.city === "vvo") return "Р’Р»Р°РґРёРІРѕСЃС‚РѕРє (VVO)";
+    if (state.city === "blg") return "Р‘Р»Р°РіРѕРІРµС‰РµРЅСЃРє (BLG)";
     return null;
   }, [state.city]);
 
   const catalogRows = useMemo<CatalogRow[]>(() => {
-    return items.map((item) => {
+    return items.filter((item) => item.inStock).map((item) => {
       const manufacturerLabel = extractManufacturerLabel(item.title);
       return {
         item,
@@ -656,17 +665,17 @@ export function CatalogPage() {
   const filtersSummary = useMemo(() => {
     const parts: string[] = [];
     if (selectedCategoryIds.length > 0) {
-      parts.push(`Категорий: ${selectedCategoryIds.length}`);
+      parts.push(`РљР°С‚РµРіРѕСЂРёР№: ${selectedCategoryIds.length}`);
     }
     if (selectedManufacturerIds.length > 0) {
-      parts.push(`Производителей: ${selectedManufacturerIds.length}`);
+      parts.push(`РџСЂРѕРёР·РІРѕРґРёС‚РµР»РµР№: ${selectedManufacturerIds.length}`);
     }
     if (puffRange) {
       const minLabel = puffRange.min ?? "0";
-      const maxLabel = puffRange.max ?? "∞";
-      parts.push(`Затяжки: ${minLabel}-${maxLabel}`);
+      const maxLabel = puffRange.max ?? "в€ћ";
+      parts.push(`Р—Р°С‚СЏР¶РєРё: ${minLabel}-${maxLabel}`);
     }
-    return parts.join(" • ");
+    return parts.join(" вЂў ");
   }, [puffRange, selectedCategoryIds.length, selectedManufacturerIds.length]);
 
   useEffect(() => {
@@ -708,9 +717,6 @@ export function CatalogPage() {
         selectedManufacturerIds.length > 0 &&
         !selectedManufacturersSet.has(row.manufacturerId)
       ) {
-        return false;
-      }
-      if (onlyInStock && !row.item.inStock) {
         return false;
       }
       if (puffRange) {
@@ -785,7 +791,6 @@ export function CatalogPage() {
   }, [
     catalogRows,
     normalizedSearchQuery,
-    onlyInStock,
     puffRange,
     selectedCategoriesSet,
     selectedCategoryIds.length,
@@ -905,21 +910,21 @@ export function CatalogPage() {
 
   if (!state.city) {
     return (
-      <FullscreenGate title="Выберите город">
+      <FullscreenGate title="Р’С‹Р±РµСЂРёС‚Рµ РіРѕСЂРѕРґ">
         <div className="grid gap-3">
           <button
             type="button"
             className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
             onClick={() => dispatch({ type: "city/set", city: "vvo" })}
           >
-            Владивосток (VVO)
+            Р’Р»Р°РґРёРІРѕСЃС‚РѕРє (VVO)
           </button>
           <button
             type="button"
             className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
             onClick={() => dispatch({ type: "city/set", city: "blg" })}
           >
-            Благовещенск (BLG)
+            Р‘Р»Р°РіРѕРІРµС‰РµРЅСЃРє (BLG)
           </button>
         </div>
       </FullscreenGate>
@@ -931,10 +936,10 @@ export function CatalogPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/80">
-            Город
+            Р“РѕСЂРѕРґ
           </div>
           <div className="mt-1 text-lg font-semibold text-foreground">
-            {cityLabel ?? "Не выбран"}
+            {cityLabel ?? "РќРµ РІС‹Р±СЂР°РЅ"}
           </div>
         </div>
 
@@ -943,7 +948,7 @@ export function CatalogPage() {
           className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-background"
           onClick={() => dispatch({ type: "city/clear" })}
         >
-          Сменить город
+          РЎРјРµРЅРёС‚СЊ РіРѕСЂРѕРґ
         </button>
       </div>
 
@@ -954,7 +959,7 @@ export function CatalogPage() {
                 type="button"
                 className={[
                   "inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
-                  sortMode === "none" && !onlyInStock
+                  sortMode === "none"
                     ? "border-border/70 bg-background text-foreground/85 hover:bg-muted/55"
                     : "border-primary bg-primary text-white",
                 ].join(" ")}
@@ -969,7 +974,7 @@ export function CatalogPage() {
                     strokeLinejoin="round"
                   />
                 </svg>
-                Сортировка
+                РЎРѕСЂС‚РёСЂРѕРІРєР°
               </button>
 
               <button
@@ -990,7 +995,7 @@ export function CatalogPage() {
                     strokeLinecap="round"
                   />
                 </svg>
-                Фильтры
+                Р¤РёР»СЊС‚СЂС‹
                 {activeFilterCount > 0 ? (
                   <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold text-white">
                     {activeFilterCount}
@@ -1001,7 +1006,7 @@ export function CatalogPage() {
 
           <button
             type="button"
-            aria-label={searchOpen ? "Закрыть поиск" : "Открыть поиск"}
+            aria-label={searchOpen ? "Р—Р°РєСЂС‹С‚СЊ РїРѕРёСЃРє" : "РћС‚РєСЂС‹С‚СЊ РїРѕРёСЃРє"}
             className={[
               "grid h-10 w-10 shrink-0 place-items-center rounded-full border transition-colors",
               searchOpen
@@ -1028,7 +1033,7 @@ export function CatalogPage() {
 
         {searchOpen ? (
           <label className="relative block">
-            <span className="sr-only">Поиск по названию</span>
+            <span className="sr-only">РџРѕРёСЃРє РїРѕ РЅР°Р·РІР°РЅРёСЋ</span>
             <svg
               viewBox="0 0 24 24"
               className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/80"
@@ -1043,7 +1048,7 @@ export function CatalogPage() {
               type="text"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Поиск по названию"
+              placeholder="РџРѕРёСЃРє РїРѕ РЅР°Р·РІР°РЅРёСЋ"
               className="h-10 w-full rounded-xl border border-border/70 bg-background pl-9 pr-3 text-xs font-medium text-foreground placeholder:text-muted-foreground/80 focus:border-primary focus:outline-none"
               autoFocus
             />
@@ -1053,30 +1058,30 @@ export function CatalogPage() {
 
       {!supabaseEnabled ? (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200">
-          Supabase env не задан: используется мок-каталог (DEV).
+          Supabase env РЅРµ Р·Р°РґР°РЅ: РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РјРѕРє-РєР°С‚Р°Р»РѕРі (DEV).
           <div className="mt-1 text-xs text-amber-300">
-            Заполните `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY` в `.env.local`.
+            Р—Р°РїРѕР»РЅРёС‚Рµ `VITE_SUPABASE_URL` Рё `VITE_SUPABASE_ANON_KEY` РІ `.env.local`.
           </div>
         </div>
       ) : null}
 
       {supabaseEnabled && error ? (
         <div className="rounded-2xl border border-destructive/35 bg-destructive/10 p-4">
-          <div className="text-sm font-semibold text-destructive">Ошибка загрузки каталога</div>
+          <div className="text-sm font-semibold text-destructive">РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё РєР°С‚Р°Р»РѕРіР°</div>
           <div className="mt-1 text-xs text-destructive/90">{error.message}</div>
           {import.meta.env.DEV && error.devDetails ? (
             <div className="mt-2 rounded-xl border border-destructive/35 bg-background px-3 py-2 font-mono text-[11px] text-destructive">
               <div>{error.devDetails}</div>
               {error.devDetails.includes("code=BAD_RESPONSE") ? (
                 <div className="mt-1 text-destructive/90">
-                  DEV: проверьте, что API доступен (`/api/catalog?citySlug=vvo`), и что
-                  dev-proxy направлен на рабочий backend (`VITE_DEV_API_TARGET`) или локальный
-                  API запущен.
+                  DEV: РїСЂРѕРІРµСЂСЊС‚Рµ, С‡С‚Рѕ API РґРѕСЃС‚СѓРїРµРЅ (`/api/catalog?citySlug=vvo`), Рё С‡С‚Рѕ
+                  dev-proxy РЅР°РїСЂР°РІР»РµРЅ РЅР° СЂР°Р±РѕС‡РёР№ backend (`VITE_DEV_API_TARGET`) РёР»Рё Р»РѕРєР°Р»СЊРЅС‹Р№
+                  API Р·Р°РїСѓС‰РµРЅ.
                 </div>
               ) : (
                 <div className="mt-1 text-destructive/90">
-                  DEV: выполните `supabase/schema.sql`, затем `supabase/seed.sql` в Supabase
-                  SQL Editor. Если ошибка "schema cache" не исчезает, выполните `notify pgrst,
+                  DEV: РІС‹РїРѕР»РЅРёС‚Рµ `supabase/schema.sql`, Р·Р°С‚РµРј `supabase/seed.sql` РІ Supabase
+                  SQL Editor. Р•СЃР»Рё РѕС€РёР±РєР° "schema cache" РЅРµ РёСЃС‡РµР·Р°РµС‚, РІС‹РїРѕР»РЅРёС‚Рµ `notify pgrst,
                   'reload schema';`.
                 </div>
               )}
@@ -1089,7 +1094,7 @@ export function CatalogPage() {
               void catalogQuery.refetch();
             }}
           >
-            Повторить
+            РџРѕРІС‚РѕСЂРёС‚СЊ
           </button>
         </div>
       ) : null}
@@ -1098,9 +1103,9 @@ export function CatalogPage() {
         <CatalogSkeleton count={6} />
       ) : visibleItems.length === 0 ? (
         <div className="rounded-2xl border border-border/70 bg-card/90 p-6 text-center">
-          <div className="text-lg font-semibold">Нет товаров</div>
+          <div className="text-lg font-semibold">РќРµС‚ С‚РѕРІР°СЂРѕРІ</div>
           <div className="mt-2 text-sm text-muted-foreground">
-            Попробуйте снять часть фильтров или выбрать другой город.
+            РџРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅСЏС‚СЊ С‡Р°СЃС‚СЊ С„РёР»СЊС‚СЂРѕРІ РёР»Рё РІС‹Р±СЂР°С‚СЊ РґСЂСѓРіРѕР№ РіРѕСЂРѕРґ.
           </div>
         </div>
       ) : (
@@ -1159,7 +1164,7 @@ export function CatalogPage() {
                   )
                 }
               >
-                {`Показать ещё (${renderedItems.length} из ${visibleItems.length})`}
+                {`РџРѕРєР°Р·Р°С‚СЊ РµС‰С‘ (${renderedItems.length} РёР· ${visibleItems.length})`}
               </button>
             </div>
           ) : null}
@@ -1171,7 +1176,7 @@ export function CatalogPage() {
           <button
             type="button"
             className="absolute inset-0 cursor-zoom-out"
-            aria-label="Закрыть превью изображения"
+            aria-label="Р—Р°РєСЂС‹С‚СЊ РїСЂРµРІСЊСЋ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ"
             onClick={() => setImagePreview(null)}
           />
           <div className="relative z-10 flex max-h-full w-full max-w-6xl items-center justify-center">
@@ -1186,7 +1191,7 @@ export function CatalogPage() {
             <button
               type="button"
               className="absolute right-2 top-2 grid h-10 w-10 place-items-center rounded-full bg-black/55 text-white transition-colors hover:bg-black/75"
-              aria-label="Закрыть превью изображения"
+              aria-label="Р—Р°РєСЂС‹С‚СЊ РїСЂРµРІСЊСЋ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ"
               onClick={() => setImagePreview(null)}
             >
               <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
@@ -1207,27 +1212,14 @@ export function CatalogPage() {
           <button
             type="button"
             className="absolute inset-0 bg-background/70"
-            aria-label="Закрыть сортировку"
+            aria-label="Р—Р°РєСЂС‹С‚СЊ СЃРѕСЂС‚РёСЂРѕРІРєСѓ"
             onClick={() => setSortOpen(false)}
           />
 
           <div className="relative w-full max-w-sm rounded-2xl border border-border/70 bg-card/90 p-4 shadow-xl">
-            <div className="text-base font-semibold text-foreground">Сортировать по</div>
+            <div className="text-base font-semibold text-foreground">РЎРѕСЂС‚РёСЂРѕРІР°С‚СЊ РїРѕ</div>
 
             <div className="mt-4 grid gap-2">
-              <button
-                type="button"
-                className={[
-                  "flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm font-medium transition-colors",
-                  onlyInStock
-                    ? "border-primary bg-primary/20 text-[#b9d4ff]"
-                    : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
-                ].join(" ")}
-                onClick={() => setOnlyInStock((prev) => !prev)}
-              >
-                <span>Только в наличии</span>
-                {onlyInStock ? <span aria-hidden="true">✓</span> : null}
-              </button>
 
               <button
                 type="button"
@@ -1242,8 +1234,8 @@ export function CatalogPage() {
                   setSortOpen(false);
                 }}
               >
-                <span>По возрастанию цены</span>
-                {sortMode === "price_asc" ? <span aria-hidden="true">✓</span> : null}
+                <span>РџРѕ РІРѕР·СЂР°СЃС‚Р°РЅРёСЋ С†РµРЅС‹</span>
+                {sortMode === "price_asc" ? <span aria-hidden="true">вњ“</span> : null}
               </button>
 
               <button
@@ -1259,8 +1251,8 @@ export function CatalogPage() {
                   setSortOpen(false);
                 }}
               >
-                <span>По убыванию цены</span>
-                {sortMode === "price_desc" ? <span aria-hidden="true">✓</span> : null}
+                <span>РџРѕ СѓР±С‹РІР°РЅРёСЋ С†РµРЅС‹</span>
+                {sortMode === "price_desc" ? <span aria-hidden="true">вњ“</span> : null}
               </button>
 
               <button
@@ -1276,8 +1268,8 @@ export function CatalogPage() {
                   setSortOpen(false);
                 }}
               >
-                <span>По названию (А-Я)</span>
-                {sortMode === "title_asc" ? <span aria-hidden="true">✓</span> : null}
+                <span>РџРѕ РЅР°Р·РІР°РЅРёСЋ (Рђ-РЇ)</span>
+                {sortMode === "title_asc" ? <span aria-hidden="true">вњ“</span> : null}
               </button>
 
               <button
@@ -1293,8 +1285,8 @@ export function CatalogPage() {
                   setSortOpen(false);
                 }}
               >
-                <span>По названию (Я-А)</span>
-                {sortMode === "title_desc" ? <span aria-hidden="true">✓</span> : null}
+                <span>РџРѕ РЅР°Р·РІР°РЅРёСЋ (РЇ-Рђ)</span>
+                {sortMode === "title_desc" ? <span aria-hidden="true">вњ“</span> : null}
               </button>
             </div>
           </div>
@@ -1306,16 +1298,16 @@ export function CatalogPage() {
           <button
             type="button"
             className="absolute inset-0 bg-background/70"
-            aria-label="Закрыть фильтры"
+            aria-label="Р—Р°РєСЂС‹С‚СЊ С„РёР»СЊС‚СЂС‹"
             onClick={() => setFiltersOpen(false)}
           />
 
           <div className="relative w-full max-w-md rounded-2xl border border-border/70 bg-card/90 p-4 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-base font-semibold text-foreground">Фильтры каталога</div>
+                <div className="text-base font-semibold text-foreground">Р¤РёР»СЊС‚СЂС‹ РєР°С‚Р°Р»РѕРіР°</div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Здесь настраиваются все категории.
+                  Р—РґРµСЃСЊ РЅР°СЃС‚СЂР°РёРІР°СЋС‚СЃСЏ РІСЃРµ РєР°С‚РµРіРѕСЂРёРё.
                 </div>
               </div>
 
@@ -1324,16 +1316,16 @@ export function CatalogPage() {
                 className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
                 onClick={() => setFiltersOpen(false)}
               >
-                Готово
+                Р“РѕС‚РѕРІРѕ
               </button>
             </div>
 
             <div className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Категории
+              РљР°С‚РµРіРѕСЂРёРё
             </div>
             {categories.length === 0 ? (
               <div className="mt-2 text-sm text-muted-foreground">
-                Категории пока не найдены в текущем каталоге.
+                РљР°С‚РµРіРѕСЂРёРё РїРѕРєР° РЅРµ РЅР°Р№РґРµРЅС‹ РІ С‚РµРєСѓС‰РµРј РєР°С‚Р°Р»РѕРіРµ.
               </div>
             ) : (
               <div className="mt-2 flex flex-wrap gap-2">
@@ -1359,11 +1351,11 @@ export function CatalogPage() {
             )}
 
             <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Производитель
+              РџСЂРѕРёР·РІРѕРґРёС‚РµР»СЊ
             </div>
             {manufacturers.length === 0 ? (
               <div className="mt-2 text-sm text-muted-foreground">
-                Производители не определились автоматически.
+                РџСЂРѕРёР·РІРѕРґРёС‚РµР»Рё РЅРµ РѕРїСЂРµРґРµР»РёР»РёСЃСЊ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.
               </div>
             ) : (
               <div className="mt-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto pr-1">
@@ -1389,11 +1381,11 @@ export function CatalogPage() {
             )}
 
             <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Затяжки (одноразки)
+              Р—Р°С‚СЏР¶РєРё (РѕРґРЅРѕСЂР°Р·РєРё)
             </div>
             <div className="mt-2 grid grid-cols-2 gap-1.5">
               <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-                <span>От</span>
+                <span>РћС‚</span>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -1408,7 +1400,7 @@ export function CatalogPage() {
                 />
               </label>
               <label className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-                <span>До</span>
+                <span>Р”Рѕ</span>
                 <input
                   type="text"
                   inputMode="numeric"
@@ -1425,11 +1417,11 @@ export function CatalogPage() {
             </div>
             {puffBounds ? (
               <div className="mt-2 break-words text-[11px] leading-snug text-muted-foreground">
-                Доступный диапазон в каталоге: {puffBounds.min} - {puffBounds.max}
+                Р”РѕСЃС‚СѓРїРЅС‹Р№ РґРёР°РїР°Р·РѕРЅ РІ РєР°С‚Р°Р»РѕРіРµ: {puffBounds.min} - {puffBounds.max}
               </div>
             ) : (
               <div className="mt-2 text-[11px] text-muted-foreground">
-                В каталоге нет товаров с распознанным числом затяжек.
+                Р’ РєР°С‚Р°Р»РѕРіРµ РЅРµС‚ С‚РѕРІР°СЂРѕРІ СЃ СЂР°СЃРїРѕР·РЅР°РЅРЅС‹Рј С‡РёСЃР»РѕРј Р·Р°С‚СЏР¶РµРє.
               </div>
             )}
 
@@ -1445,11 +1437,11 @@ export function CatalogPage() {
                   setPuffRangeMaxInput("");
                 }}
               >
-                Сбросить
+                РЎР±СЂРѕСЃРёС‚СЊ
               </button>
 
               <div className="text-right text-xs text-muted-foreground">
-                {activeFilterCount === 0 ? "Показаны все товары" : filtersSummary}
+                {activeFilterCount === 0 ? "РџРѕРєР°Р·Р°РЅС‹ РІСЃРµ С‚РѕРІР°СЂС‹" : filtersSummary}
               </div>
             </div>
           </div>
