@@ -358,6 +358,23 @@ export async function bootstrapReferralProfile(params: {
   };
 }
 
+export async function getCustomerReferralShare(params: {
+  tgUserId: number;
+  tgUsername: string | null;
+  startParam?: string | null | undefined;
+}): Promise<{ referralCode: string; referralLink: string }> {
+  const bootstrap = await bootstrapReferralProfile({
+    tgUserId: params.tgUserId,
+    tgUsername: params.tgUsername,
+    startParam: params.startParam ?? null,
+  });
+
+  return {
+    referralCode: bootstrap.referralCode,
+    referralLink: bootstrap.referralLink,
+  };
+}
+
 export async function getPointsBalance(tgUserId: number): Promise<number> {
   const supabase = createServiceSupabaseClient();
   const pageSize = 1000;

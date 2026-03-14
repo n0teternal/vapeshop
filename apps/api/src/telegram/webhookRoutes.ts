@@ -6,9 +6,18 @@ import {
   type CitySlug,
   type OrderStatus,
 } from "../order/telegramMessage.js";
-import { bootstrapReferralProfile, processReferralRewardForOrderDone } from "../referral/service.js";
+import {
+  bootstrapReferralProfile,
+  getCustomerReferralShare,
+  processReferralRewardForOrderDone,
+} from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { answerCallbackQuery, deleteMessage, editMessageText, sendMessage } from "./api.js";
+import {
+  buildCustomerMainMenuMessage,
+  buildCustomerOrdersMenuMessage,
+  buildCustomerReferralMenuMessage,
+} from "./customerMenu.js";
 
 type CallbackStatus = Exclude<OrderStatus, "new">;
 
@@ -22,14 +31,16 @@ type ParsedCallbackQuery = {
 };
 
 type ParsedStartCommand = {
+  chatId: number;
   fromId: number;
   fromUsername: string | null;
   startParam: string | null;
 };
 
 type ParsedCallbackAction =
-  | { kind: "status"; status: CallbackStatus; orderId: string }
-  | { kind: "ui"; view: CallbackUiView; orderId: string };
+  | { kind: "order_status"; status: CallbackStatus; orderId: string }
+  | { kind: "order_ui"; view: CallbackUiView; orderId: string }
+  | { kind: "menu"; view: "main" | "orders" | "referral" };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -97,12 +108,19 @@ function parseStartCommand(update: unknown): ParsedStartCommand | null {
   const fromId =
     isRecord(from) && typeof from.id === "number" && Number.isInteger(from.id) ? from.id : null;
   if (fromId === null) return null;
+  const chatRaw = message.chat;
+  const chatId =
+    isRecord(chatRaw) && typeof chatRaw.id === "number" && Number.isInteger(chatRaw.id)
+      ? chatRaw.id
+      : null;
+  if (chatId === null) return null;
 
   const usernameRaw =
     isRecord(from) && typeof from.username === "string" ? from.username.trim() : "";
   const startParamRaw = typeof match[1] === "string" ? match[1].trim() : "";
 
   return {
+    chatId,
     fromId,
     fromUsername: usernameRaw.length > 0 ? usernameRaw : null,
     startParam: startParamRaw.length > 0 ? startParamRaw : null,
@@ -111,13 +129,22 @@ function parseStartCommand(update: unknown): ParsedStartCommand | null {
 
 function parseCallbackData(data: string): ParsedCallbackAction | null {
   const parts = data.split(":");
+  const type = parts[0];
+  const actionRaw = parts[1];
+  if (!type || !actionRaw) return null;
+
+  if (type === "menu" && parts.length === 2) {
+    if (actionRaw === "main" || actionRaw === "orders" || actionRaw === "referral") {
+      return { kind: "menu", view: actionRaw };
+    }
+    return null;
+  }
+
   // Keep this tolerant: Telegram callback_data is just a string and older/newer clients may add segments.
   if (parts.length < 3) return null;
 
-  const type = parts[0];
-  const actionRaw = parts[1];
   const orderId = parts.slice(2).join(":");
-  if (!type || !actionRaw || !orderId) return null;
+  if (!orderId) return null;
 
   const uuidV4ish =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
@@ -127,14 +154,14 @@ function parseCallbackData(data: string): ParsedCallbackAction | null {
     if (actionRaw !== "processing" && actionRaw !== "done" && actionRaw !== "cancelled") {
       return null;
     }
-    return { kind: "status", status: actionRaw, orderId };
+    return { kind: "order_status", status: actionRaw, orderId };
   }
 
   if (type === "ui") {
     if (actionRaw !== "main" && actionRaw !== "done_confirm" && actionRaw !== "cancel_confirm") {
       return null;
     }
-    return { kind: "ui", view: actionRaw, orderId };
+    return { kind: "order_ui", view: actionRaw, orderId };
   }
 
   return null;
@@ -168,6 +195,80 @@ async function answerSafe(callbackQueryId: string, text: string): Promise<void> 
   }
 }
 
+type CustomerOrderRow = {
+  id: string;
+  status: string;
+  city_id: number | null;
+  total_price: unknown;
+  total_after_discount: unknown;
+  created_at: string;
+};
+
+async function loadCustomerOrderSummaries(tgUserId: number) {
+  const supabase = createServiceSupabaseClient();
+  const { data: orders, error: ordersError } = await supabase
+    .from("orders")
+    .select("id,status,city_id,total_price,total_after_discount,created_at")
+    .eq("tg_user_id", tgUserId)
+    .order("created_at", { ascending: false })
+    .limit(7);
+
+  if (ordersError) {
+    throw new Error(`Failed to load customer orders: ${ordersError.message}`);
+  }
+
+  const rows = (orders ?? []) as CustomerOrderRow[];
+  const cityIds = Array.from(
+    new Set(rows.map((row) => row.city_id).filter((id): id is number => typeof id === "number")),
+  );
+
+  const cityLabelById = new Map<number, string>();
+  if (cityIds.length > 0) {
+    const { data: cities, error: citiesError } = await supabase
+      .from("cities")
+      .select("id,name,slug")
+      .in("id", cityIds);
+
+    if (citiesError) {
+      throw new Error(`Failed to load cities for customer orders: ${citiesError.message}`);
+    }
+
+    for (const city of cities ?? []) {
+      cityLabelById.set(city.id, `${city.name} (${city.slug.toUpperCase()})`);
+    }
+  }
+
+  return rows.map((row) => ({
+    id: row.id,
+    status: parseOrderStatus(row.status),
+    cityLabel: row.city_id !== null ? cityLabelById.get(row.city_id) ?? "Неизвестный город" : "Без города",
+    totalPrice: numberFromUnknown(row.total_after_discount ?? row.total_price),
+    createdAt: row.created_at,
+  }));
+}
+
+async function buildCustomerMenuView(params: {
+  view: "main" | "orders" | "referral";
+  tgUserId: number;
+}): Promise<ReturnType<typeof buildCustomerMainMenuMessage>> {
+  if (params.view === "orders") {
+    const orders = await loadCustomerOrderSummaries(params.tgUserId);
+    return buildCustomerOrdersMenuMessage(orders);
+  }
+
+  if (params.view === "referral") {
+    const referral = await getCustomerReferralShare({
+      tgUserId: params.tgUserId,
+      tgUsername: null,
+    });
+    return buildCustomerReferralMenuMessage({
+      referralLink: referral.referralLink,
+    });
+  }
+
+  return buildCustomerMainMenuMessage();
+}
+
 export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>("/api/telegram/webhook", async (request, reply) => {
     const secretHeader = getHeaderValue(request.headers["x-telegram-bot-api-secret-token"]);
@@ -196,6 +297,18 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       } catch (e) {
         request.log.error({ err: e, tgUserId: startCommand.fromId }, "Failed to bootstrap referral from /start");
       }
+
+      try {
+        const menuMessage = buildCustomerMainMenuMessage();
+        await sendMessage({
+          botToken: config.telegram.botToken,
+          chatId: String(startCommand.chatId),
+          text: menuMessage.text,
+          replyMarkup: menuMessage.reply_markup,
+        });
+      } catch (e) {
+        request.log.error({ err: e, tgUserId: startCommand.fromId }, "Failed to send customer main menu");
+      }
       return reply.code(200).send({ ok: true });
     }
 
@@ -207,6 +320,38 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     const action = parseCallbackData(parsed.data);
     if (!action) {
       await answerSafe(parsed.callbackQueryId, "Неизвестная кнопка");
+      return reply.code(200).send({ ok: true });
+    }
+
+    if (action.kind === "menu") {
+      if (!parsed.message) {
+        await answerSafe(parsed.callbackQueryId, "Откройте меню через /start");
+        return reply.code(200).send({ ok: true });
+      }
+
+      try {
+        const menuMessage = await buildCustomerMenuView({
+          view: action.view,
+          tgUserId: parsed.fromId,
+        });
+
+        await editMessageText({
+          botToken: config.telegram.botToken,
+          chatId: parsed.message.chatId,
+          messageId: parsed.message.messageId,
+          text: menuMessage.text,
+          replyMarkup: menuMessage.reply_markup,
+        });
+
+        await answerSafe(parsed.callbackQueryId, "Ок");
+      } catch (e) {
+        request.log.error(
+          { err: e, tgUserId: parsed.fromId, view: action.view },
+          "Failed to handle customer menu callback",
+        );
+        await answerSafe(parsed.callbackQueryId, "Не удалось открыть раздел");
+      }
+
       return reply.code(200).send({ ok: true });
     }
 
@@ -242,7 +387,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     let order: OrderRow | null = null;
 
-    if (action.kind === "status") {
+    if (action.kind === "order_status") {
       const { data, error } = await supabase
         .from("orders")
         .update({ status: action.status })
@@ -278,7 +423,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       return reply.code(200).send({ ok: true });
     }
 
-    if (action.kind === "status" && action.status === "done") {
+    if (action.kind === "order_status" && action.status === "done") {
       try {
         await processReferralRewardForOrderDone({ orderId: order.id });
       } catch (e) {
@@ -291,7 +436,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       request.log.warn({ orderId: order.id }, "Order has null city_id; skip message edit");
       await answerSafe(
         parsed.callbackQueryId,
-        action.kind === "ui" ? "Ок" : "Статус обновлен",
+        action.kind === "order_ui" ? "Ок" : "Статус обновлен",
       );
       return reply.code(200).send({ ok: true });
     }
@@ -306,7 +451,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       request.log.error({ err: cityError, cityId }, "Failed to load city for order");
       await answerSafe(
         parsed.callbackQueryId,
-        action.kind === "ui" ? "Ок" : "Статус обновлен",
+        action.kind === "order_ui" ? "Ок" : "Статус обновлен",
       );
       return reply.code(200).send({ ok: true });
     }
@@ -316,7 +461,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       request.log.warn({ slug: city.slug }, "Unknown city slug; skip message edit");
       await answerSafe(
         parsed.callbackQueryId,
-        action.kind === "ui" ? "Ок" : "Статус обновлен",
+        action.kind === "order_ui" ? "Ок" : "Статус обновлен",
       );
       return reply.code(200).send({ ok: true });
     }
@@ -368,12 +513,12 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     const telegramMessage = buildOrderTelegramMessage({
       status: orderStatus,
       actionsView:
-        action.kind === "ui" &&
+        action.kind === "order_ui" &&
         action.view === "done_confirm" &&
         orderStatus !== "done" &&
         orderStatus !== "cancelled"
           ? "done_confirm"
-          : action.kind === "ui" &&
+          : action.kind === "order_ui" &&
               action.view === "cancel_confirm" &&
               orderStatus !== "done" &&
               orderStatus !== "cancelled"
@@ -391,7 +536,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     });
 
     if (
-      action.kind === "status" &&
+      action.kind === "order_status" &&
       (action.status === "done" || action.status === "cancelled") &&
       config.telegram.chatIdsOrderStatus
     ) {
@@ -432,7 +577,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       // Final statuses are removed from the admin chat queue.
       // If deletion fails (e.g. missing rights), fall back to editing the message as before.
       if (
-        action.kind === "status" &&
+        action.kind === "order_status" &&
         (action.status === "done" || action.status === "cancelled")
       ) {
         try {
@@ -472,13 +617,13 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     await answerSafe(
       parsed.callbackQueryId,
-      action.kind === "ui"
-        ? "??"
-        : action.kind === "status" && action.status === "done"
-          ? "??????: ??????"
-          : action.kind === "status" && action.status === "cancelled"
-            ? "??????: ???????"
-            : "?????? ????????",
+      action.kind === "order_ui"
+        ? "Ок"
+        : action.kind === "order_status" && action.status === "done"
+          ? "Статус: Готово"
+          : action.kind === "order_status" && action.status === "cancelled"
+            ? "Статус: Отменён"
+            : "Статус обновлен",
     );
     return reply.code(200).send({ ok: true });
   });
