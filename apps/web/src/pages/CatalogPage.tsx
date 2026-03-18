@@ -319,7 +319,7 @@ function ProductCard({
   imageLoading,
   onAdd,
   onToggleFavorite,
-  onOpenImage,
+  onOpenImage: _onOpenImage,
 }: {
   item: CatalogItem;
   isFavorite: boolean;
@@ -339,9 +339,9 @@ function ProductCard({
         {previewImageSrc ? (
           <button
             type="button"
-            className="block w-full cursor-zoom-in rounded-[20px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            aria-label={`Открыть фото товара ${item.title}`}
-            onClick={() => onOpenImage({ src: previewImageSrc, alt: item.title })}
+            className="block w-full rounded-[20px]"
+            aria-label={item.title}
+            disabled
           >
             <ProductImagePreview
               imageUrl={item.imageUrl}
