@@ -69,6 +69,7 @@ function formatCategoryLabel(categorySlug: string): string {
     liquid: "Жидкости",
     disposable: "Одноразки",
     pod: "Pod",
+    tobacco: "РўР°Р±Р°Рє",
     cartridge: "Картриджи",
   };
   const mapped = ruLabelsBySlug[normalized];
@@ -82,12 +83,13 @@ function formatCategoryLabel(categorySlug: string): string {
     .join(" ");
 }
 
-type CatalogFilterCategoryId = "liquid" | "disposable" | "pod" | "cartridge";
+type CatalogFilterCategoryId = "liquid" | "disposable" | "pod" | "cartridge" | "tobacco";
 
 const CATALOG_FILTER_CATEGORIES: Array<{ id: CatalogFilterCategoryId; label: string }> = [
   { id: "liquid", label: "Жидкости" },
   { id: "disposable", label: "Одноразки" },
   { id: "pod", label: "Pod" },
+  { id: "tobacco", label: "РўР°Р±Р°Рє" },
   { id: "cartridge", label: "Картриджи" },
 ];
 
@@ -131,6 +133,16 @@ function normalizeCatalogCategoryId(value: string): CatalogFilterCategoryId | nu
     normalized === "испарители"
   ) {
     return "cartridge";
+  }
+
+  if (
+    normalized === "tobacco" ||
+    normalized === "tabacco" ||
+    normalized === "С‚Р°Р±Р°Рє" ||
+    normalized === "snus" ||
+    normalized === "СЃРЅСЋСЃ"
+  ) {
+    return "tobacco";
   }
 
   return null;
