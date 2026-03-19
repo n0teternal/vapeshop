@@ -10,6 +10,7 @@ import { buildImageCandidates } from "../utils/imageCandidates";
 const CATALOG_INITIAL_RENDER_COUNT = 24;
 const CATALOG_RENDER_STEP = 20;
 const CATALOG_IMAGE_PREFETCH_AHEAD = 12;
+const TOBACCO_LABEL = "\u0422\u0430\u0431\u0430\u043a";
 
 function formatPriceRub(value: number): string {
   return new Intl.NumberFormat("ru-RU", {
@@ -63,6 +64,7 @@ function CatalogSkeleton({ count }: { count: number }) {
 
 function formatCategoryLabel(categorySlug: string): string {
   const normalized = normalizeCatalogCategoryId(categorySlug) ?? categorySlug.trim().toLowerCase();
+  if (normalized === "tobacco") return TOBACCO_LABEL;
 
   const ruLabelsBySlug: Record<string, string> = {
     other: "Прочее",
@@ -92,6 +94,11 @@ const CATALOG_FILTER_CATEGORIES: Array<{ id: CatalogFilterCategoryId; label: str
   { id: "tobacco", label: "РўР°Р±Р°Рє" },
   { id: "cartridge", label: "Картриджи" },
 ];
+
+const CATALOG_FILTER_CATEGORIES_UI: Array<{ id: CatalogFilterCategoryId; label: string }> =
+  CATALOG_FILTER_CATEGORIES.map((category) =>
+    category.id === "tobacco" ? { ...category, label: TOBACCO_LABEL } : category,
+  );
 
 function normalizeCatalogCategoryId(value: string): CatalogFilterCategoryId | null {
   const normalized = value.trim().toLowerCase();
@@ -580,7 +587,7 @@ export function CatalogPage() {
       counts.set(row.categoryId, (counts.get(row.categoryId) ?? 0) + 1);
     }
 
-    return CATALOG_FILTER_CATEGORIES.map((category) => ({
+    return CATALOG_FILTER_CATEGORIES_UI.map((category) => ({
       id: category.id,
       label: category.label,
       count: counts.get(category.id) ?? 0,
