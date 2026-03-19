@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
+import { isHttpError } from "../httpError.js";
+import { cancelOrderAndRestoreInventory } from "../order/cancelOrder.js";
 import {
   buildOrderStatusTelegramText,
   buildOrderTelegramMessage,
@@ -387,7 +389,18 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     let order: OrderRow | null = null;
 
-    if (action.kind === "order_status") {
+    if (action.kind === "order_status" && action.status === "cancelled") {
+      try {
+        await cancelOrderAndRestoreInventory({ orderId: action.orderId });
+      } catch (e) {
+        request.log.error({ err: e, orderId: action.orderId }, "Failed to cancel order");
+        await answerSafe(
+          parsed.callbackQueryId,
+          isHttpError(e) ? e.message : "Не удалось отменить заказ",
+        );
+        return reply.code(200).send({ ok: true });
+      }
+    } else if (action.kind === "order_status") {
       const { data, error } = await supabase
         .from("orders")
         .update({ status: action.status })
@@ -402,7 +415,9 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       }
 
       order = (data ?? null) as unknown as OrderRow | null;
-    } else {
+    }
+
+    if (!order) {
       const { data, error } = await supabase
         .from("orders")
         .select(selectCols)
