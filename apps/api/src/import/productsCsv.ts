@@ -235,6 +235,90 @@ async function fetchExistingProductIds(
   return existing;
 }
 
+type ExistingProductUsage = {
+  exists: boolean;
+  cityIds: Set<number>;
+};
+
+function addCityUsage(
+  usageByProductId: Map<string, ExistingProductUsage>,
+  productId: string,
+  cityId: number,
+): void {
+  const usage = usageByProductId.get(productId) ?? { exists: true, cityIds: new Set<number>() };
+  usage.exists = true;
+  usage.cityIds.add(cityId);
+  usageByProductId.set(productId, usage);
+}
+
+function parseJoinedCityIds(value: unknown): number[] {
+  const rows = Array.isArray(value) ? value : [value];
+  const cityIds: number[] = [];
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const maybeCityId = (row as { city_id?: unknown }).city_id;
+    if (typeof maybeCityId === "number" && Number.isFinite(maybeCityId)) {
+      cityIds.push(maybeCityId);
+    }
+  }
+
+  return cityIds;
+}
+
+async function fetchExistingProductUsageByCity(
+  supabase: SupabaseClient<Database>,
+  ids: string[],
+): Promise<Map<string, ExistingProductUsage>> {
+  const usageByProductId = new Map<string, ExistingProductUsage>();
+
+  for (const part of chunk(ids, 500)) {
+    const [
+      { data: products, error: productsError },
+      { data: inventory, error: inventoryError },
+      { data: orderItems, error: orderItemsError },
+    ] = await Promise.all([
+      supabase.from("products").select("id").in("id", part),
+      supabase.from("inventory").select("product_id,city_id").in("product_id", part),
+      supabase
+        .from("order_items")
+        .select("product_id,orders!inner(city_id)")
+        .in("product_id", part),
+    ]);
+
+    if (productsError) throw new Error(`Failed to query products: ${productsError.message}`);
+    if (inventoryError) throw new Error(`Failed to query inventory: ${inventoryError.message}`);
+    if (orderItemsError) throw new Error(`Failed to query order history: ${orderItemsError.message}`);
+
+    for (const row of products ?? []) {
+      const usage = usageByProductId.get(row.id) ?? { exists: true, cityIds: new Set<number>() };
+      usage.exists = true;
+      usageByProductId.set(row.id, usage);
+    }
+
+    for (const row of (inventory ?? []) as Array<{ product_id: string; city_id: number }>) {
+      addCityUsage(usageByProductId, row.product_id, row.city_id);
+    }
+
+    for (const row of (orderItems ?? []) as Array<{ product_id: string | null; orders: unknown }>) {
+      if (typeof row.product_id !== "string") continue;
+      const joinedCityIds = parseJoinedCityIds(row.orders);
+      if (joinedCityIds.length === 0) {
+        const usage =
+          usageByProductId.get(row.product_id) ?? { exists: true, cityIds: new Set<number>() };
+        usage.exists = true;
+        usageByProductId.set(row.product_id, usage);
+        continue;
+      }
+      for (const cityId of joinedCityIds) {
+        addCityUsage(usageByProductId, row.product_id, cityId);
+      }
+    }
+  }
+
+  return usageByProductId;
+}
+
 export async function importProductsCsv(params: {
   supabase: SupabaseClient<Database>;
   csvText: string;
@@ -337,6 +421,7 @@ export async function importProductsCsv(params: {
 
   const inputRecords: Array<{ rowNum: number; record: Record<string, string> }> = [];
   const parsedProducts: Array<{
+    rowNum: number;
     id: string;
     title: string;
     description: string | null;
@@ -555,6 +640,7 @@ export async function importProductsCsv(params: {
     }
 
     parsedProducts.push({
+      rowNum,
       id,
       title,
       description,
@@ -570,6 +656,42 @@ export async function importProductsCsv(params: {
     throw new Error("No valid rows to import");
   }
 
+  const inputRecordByRowNum = new Map(inputRecords.map((item) => [item.rowNum, item.record]));
+  const detachedSourceProductIds = new Set<string>();
+
+  if (targetCity) {
+    const usageByProductId = await fetchExistingProductUsageByCity(
+      params.supabase,
+      parsedProducts.map((p) => p.id),
+    );
+
+    for (const product of parsedProducts) {
+      const usage = usageByProductId.get(product.id);
+      if (!usage?.exists) continue;
+
+      const hasOtherCityUsage = Array.from(usage.cityIds).some((cityId) => cityId !== targetCity.id);
+      if (!hasOtherCityUsage) continue;
+
+      const sourceProductId = product.id;
+      const nextProductId = crypto.randomUUID();
+
+      product.id = nextProductId;
+      const sourceRecord = inputRecordByRowNum.get(product.rowNum);
+      if (sourceRecord) {
+        sourceRecord["id"] = nextProductId;
+      }
+
+      for (const inv of parsedInventory) {
+        if (inv.product_id === sourceProductId && inv.city_id === targetCity.id) {
+          inv.product_id = nextProductId;
+        }
+      }
+
+      detachedSourceProductIds.add(sourceProductId);
+      generatedIds = true;
+    }
+  }
+
   const existingIds = await fetchExistingProductIds(
     params.supabase,
     parsedProducts.map((p) => p.id),
@@ -578,8 +700,23 @@ export async function importProductsCsv(params: {
   const updated = parsedProducts.length - inserted;
 
   if (!dryRun) {
+    if (targetCity && detachedSourceProductIds.size > 0) {
+      for (const part of chunk(Array.from(detachedSourceProductIds), 500)) {
+        const { error } = await params.supabase
+          .from("inventory")
+          .delete()
+          .eq("city_id", targetCity.id)
+          .in("product_id", part);
+
+        if (error) {
+          throw new Error(`Failed to detach city inventory from shared products: ${error.message}`);
+        }
+      }
+    }
+
     for (const part of chunk(parsedProducts, 200)) {
-      const { error } = await params.supabase.from("products").upsert(part, { onConflict: "id" });
+      const payload = part.map(({ rowNum: _rowNum, ...product }) => product);
+      const { error } = await params.supabase.from("products").upsert(payload, { onConflict: "id" });
       if (error) throw new Error(`Failed to upsert products: ${error.message}`);
     }
     for (const part of chunk(parsedInventory, 500)) {

@@ -760,6 +760,14 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         invByKey.set(`${row.product_id}:${row.city_id}`, row);
       }
 
+      const filteredProductList =
+        selectedCity === null
+          ? productList
+          : productList.filter((product) => {
+              const cityInventory = invByKey.get(`${product.id}:${selectedCity.id}`);
+              return cityInventory?.in_stock === true;
+            });
+
       const headers = [
         "id",
         "title",
@@ -779,7 +787,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
 
       const aoa: Array<Array<string | number | boolean>> = [headers];
 
-      for (const product of productList) {
+      for (const product of filteredProductList) {
         const row: Array<string | number | boolean> = [
           product.id,
           product.title,
