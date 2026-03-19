@@ -735,16 +735,34 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       const productList = products ?? [];
       const productIds = productList.map((p) => p.id);
 
-      const { data: inventory, error: inventoryError } =
+      const [
+        { data: inventory, error: inventoryError },
+        { data: soldOrderItems, error: soldOrderItemsError },
+      ] = await Promise.all([
         productIds.length > 0
-          ? await supabase
+          ? supabase
               .from("inventory")
               .select("product_id,city_id,in_stock,stock_qty,price_override")
               .in("product_id", productIds)
-          : { data: [], error: null };
+          : Promise.resolve({ data: [], error: null }),
+        selectedCity && productIds.length > 0
+          ? supabase
+              .from("order_items")
+              .select("product_id,orders!inner(city_id)")
+              .in("product_id", productIds)
+              .eq("orders.city_id", selectedCity.id)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
 
       if (inventoryError) {
         throw new HttpError(500, "DB", `Failed to load inventory: ${inventoryError.message}`);
+      }
+      if (soldOrderItemsError) {
+        throw new HttpError(
+          500,
+          "DB",
+          `Failed to load order history for export: ${soldOrderItemsError.message}`,
+        );
       }
 
       type ExportInventoryRow = {
@@ -759,13 +777,24 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       for (const row of invRows) {
         invByKey.set(`${row.product_id}:${row.city_id}`, row);
       }
+      const soldProductIdsInSelectedCity = new Set<string>();
+      for (const row of (soldOrderItems ?? []) as Array<{ product_id: string | null }>) {
+        if (typeof row.product_id === "string") {
+          soldProductIdsInSelectedCity.add(row.product_id);
+        }
+      }
 
       const filteredProductList =
         selectedCity === null
           ? productList
           : productList.filter((product) => {
               const cityInventory = invByKey.get(`${product.id}:${selectedCity.id}`);
-              return cityInventory?.in_stock === true;
+              if (!cityInventory) return false;
+              if (cityInventory.in_stock === true) return true;
+              if (typeof cityInventory.stock_qty === "number" && cityInventory.stock_qty > 0) {
+                return true;
+              }
+              return soldProductIdsInSelectedCity.has(product.id);
             });
 
       const headers = [
