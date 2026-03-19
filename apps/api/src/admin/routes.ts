@@ -694,6 +694,14 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   ) => {
     try {
       await requireAdmin(request);
+      const parsedQuery = z
+        .object({
+          citySlug: z.string().trim().min(1).max(50).optional(),
+        })
+        .safeParse(request.query);
+      if (!parsedQuery.success) {
+        throw new HttpError(400, "BAD_REQUEST", "Invalid query");
+      }
 
       const supabase = createServiceSupabaseClient();
       const [{ data: cities, error: citiesError }, { data: products, error: productsError }] =
@@ -715,6 +723,15 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const cityList = (cities ?? []).map((c) => ({ id: c.id, slug: c.slug, name: c.name }));
+      const requestedCitySlug = parsedQuery.data.citySlug?.toLowerCase() ?? null;
+      const selectedCity =
+        requestedCitySlug === null
+          ? null
+          : cityList.find((city) => city.slug.toLowerCase() === requestedCitySlug) ?? null;
+      if (requestedCitySlug !== null && selectedCity === null) {
+        throw new HttpError(400, "BAD_REQUEST", "Unknown citySlug");
+      }
+      const exportCities = selectedCity ? [selectedCity] : cityList;
       const productList = products ?? [];
       const productIds = productList.map((p) => p.id);
 
@@ -751,11 +768,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         "base_price",
         "image_url",
         "is_active",
-        ...cityList.flatMap((c) => [
-          `${c.slug}_in_stock`,
-          `${c.slug}_stock_qty`,
-          `${c.slug}_price_override`,
-        ]),
+        ...(selectedCity
+          ? ["in_stock", "stock_qty", "price_override"]
+          : exportCities.flatMap((c) => [
+              `${c.slug}_in_stock`,
+              `${c.slug}_stock_qty`,
+              `${c.slug}_price_override`,
+            ])),
       ];
 
       const aoa: Array<Array<string | number | boolean>> = [headers];
@@ -771,7 +790,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           product.is_active === true,
         ];
 
-        for (const city of cityList) {
+        for (const city of exportCities) {
           const inv = invByKey.get(`${product.id}:${city.id}`);
           row.push(inv?.in_stock ?? false);
           row.push(inv?.stock_qty ?? "");
@@ -785,7 +804,10 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       const book = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(book, sheet, "products");
       const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
-      const fileName = `products.latest.${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const datePart = new Date().toISOString().slice(0, 10);
+      const fileName = selectedCity
+        ? `products.${selectedCity.slug}.latest.${datePart}.xlsx`
+        : `products.latest.${datePart}.xlsx`;
 
       return reply
         .header(
@@ -819,6 +841,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         await requireAdmin(request);
 
         const querySchema = z.object({
+          citySlug: z.string().trim().min(1).max(50).optional(),
           imageMode: z.enum(["filename"]).optional(),
           encoding: z
             .enum(["auto", "utf-8", "windows-1251", "ibm866", "koi8-r"])
@@ -892,6 +915,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         const result = await importProductsCsv({
           supabase,
           csvText,
+          citySlug: parsedQuery.data.citySlug ?? null,
           imageBaseUrl: useImagePrefix ? config.productImagesBaseUrl : null,
           imageItemsDir: useImagePrefix ? itemsDir : null,
           imageFileNames: useImagePrefix ? imageFileNames : null,

@@ -8,6 +8,12 @@ type AdminMe = {
   role: string;
 };
 
+type AdminCity = {
+  id: number;
+  name: string;
+  slug: string;
+};
+
 type ImportProductsCsvResult = {
   delimiter: ";" | "," | "\t";
   decodedEncoding?: "utf-8" | "windows-1251" | "ibm866" | "koi8-r" | "xlsx";
@@ -124,7 +130,11 @@ function Card({ children }: { children: ReactNode }) {
   );
 }
 
-function AdminImportProductsCsv() {
+function formatCityLabel(city: Pick<AdminCity, "name" | "slug">): string {
+  return `${city.name} (${city.slug.toUpperCase()})`;
+}
+
+function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [file, setFile] = useState<File | null>(null);
   const [useImagePrefix, setUseImagePrefix] = useState(false);
   const [csvEncoding, setCsvEncoding] = useState<
@@ -162,6 +172,7 @@ function AdminImportProductsCsv() {
       form.append("file", file);
 
       const search = new URLSearchParams();
+      search.set("citySlug", city.slug);
       if (useImagePrefix) search.set("imageMode", "filename");
       if (csvEncoding !== "auto") search.set("encoding", csvEncoding);
       const query = search.toString() ? `?${search.toString()}` : "";
@@ -183,7 +194,7 @@ function AdminImportProductsCsv() {
         const url = URL.createObjectURL(blob);
         setDownloadUrl(url);
 
-        const base = file.name.replace(/\.csv$/i, "");
+        const base = file.name.replace(/\.(csv|xlsx|xls)$/i, "");
         setDownloadName(`${base || "products"}.with_ids.xlsx`);
       }
     } catch (e: unknown) {
@@ -228,12 +239,14 @@ function AdminImportProductsCsv() {
         headers["x-dev-admin"] = "1";
       }
 
-      let res = await fetch(buildApiUrl("/api/admin/export/products.xlsx"), {
+      const query = `?${new URLSearchParams({ citySlug: city.slug }).toString()}`;
+
+      let res = await fetch(buildApiUrl(`/api/admin/export/products.xlsx${query}`), {
         method: "GET",
         headers,
       });
       if (res.status === 404) {
-        res = await fetch(buildApiUrl("/api/admin/export/products"), {
+        res = await fetch(buildApiUrl(`/api/admin/export/products${query}`), {
           method: "GET",
           headers,
         });
@@ -257,7 +270,7 @@ function AdminImportProductsCsv() {
       }
 
       const blob = await res.blob();
-      const fallbackName = `products.latest.${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fallbackName = `products.${city.slug}.latest.${new Date().toISOString().slice(0, 10)}.xlsx`;
       const fileName = parseDownloadFileName(
         res.headers.get("content-disposition"),
         fallbackName,
@@ -284,9 +297,11 @@ function AdminImportProductsCsv() {
     <Card>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold">Import products (CSV/XLSX)</div>
+          <div className="text-sm font-semibold">
+            Import products: {formatCityLabel(city)}
+          </div>
           <div className="mt-1 text-xs text-muted-foreground/80">
-            Upload CSV/XLSX based on `CUSTOMER_PRODUCTS_TEMPLATE.csv`.
+            Upload a CSV/XLSX file for this city only.
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -304,7 +319,7 @@ function AdminImportProductsCsv() {
             disabled={downloadingLastXlsx || submitting}
             onClick={() => void downloadLastXlsx()}
           >
-            {downloadingLastXlsx ? "Preparing..." : "Upload last XLSX"}
+            {downloadingLastXlsx ? "Preparing..." : `Download ${city.slug.toUpperCase()} XLSX`}
           </button>
         </div>
       </div>
@@ -367,6 +382,7 @@ function AdminImportProductsCsv() {
 
       {result ? (
         <div className="mt-3 space-y-2 text-sm text-foreground/80">
+          <div>Cities: {result.cities.map((item) => item.slug.toUpperCase()).join(", ")}</div>
           <div>
             Rows: total={result.rows.total} valid={result.rows.valid} invalid={result.rows.invalid}
           </div>
@@ -411,6 +427,74 @@ function AdminImportProductsCsv() {
         </div>
       ) : null}
     </Card>
+  );
+}
+
+function AdminImportProductsCsv() {
+  const [cities, setCities] = useState<AdminCity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadCities = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiGet<AdminCity[]>("/api/admin/cities");
+      setCities(data);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to load cities";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCities();
+  }, [loadCities]);
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="text-sm font-semibold">Import products by city</div>
+        <div className="mt-3 h-20 animate-pulse rounded-2xl bg-muted/60" />
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <div className="text-sm font-semibold">Import products by city</div>
+        <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+        <button
+          type="button"
+          className="mt-3 rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+          onClick={() => void loadCities()}
+        >
+          Reload
+        </button>
+      </Card>
+    );
+  }
+
+  if (cities.length === 0) {
+    return (
+      <Card>
+        <div className="text-sm font-semibold">Import products by city</div>
+        <div className="mt-2 text-sm text-muted-foreground">No cities found.</div>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="grid gap-4">
+      {cities.map((city) => (
+        <AdminImportProductsCityCard key={city.id} city={city} />
+      ))}
+    </div>
   );
 }
 

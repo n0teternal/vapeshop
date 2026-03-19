@@ -239,6 +239,7 @@ export async function importProductsCsv(params: {
   supabase: SupabaseClient<Database>;
   csvText: string;
   dryRun?: boolean;
+  citySlug?: string | null;
   imageBaseUrl?: string | null;
   imageItemsDir?: string | null;
   imageFileNames?: Iterable<string> | null;
@@ -275,6 +276,14 @@ export async function importProductsCsv(params: {
 
   const cityRows = (cities ?? []).slice().sort((a, b) => a.slug.localeCompare(b.slug));
   if (cityRows.length === 0) throw new Error("No cities found in DB");
+  const normalizedTargetCitySlug = params.citySlug?.trim().toLowerCase() ?? null;
+  const targetCity =
+    normalizedTargetCitySlug === null
+      ? null
+      : cityRows.find((city) => city.slug.toLowerCase() === normalizedTargetCitySlug) ?? null;
+  if (normalizedTargetCitySlug !== null && targetCity === null) {
+    throw new Error(`Unknown citySlug: ${params.citySlug}`);
+  }
 
   const requiredBaseCols = [
     "id",
@@ -290,12 +299,37 @@ export async function importProductsCsv(params: {
     throw new Error(`CSV is missing required columns: ${missingBase.join(", ")}`);
   }
 
+  const inventorySuffixes = ["in_stock", "stock_qty", "price_override"] as const;
+  const inventoryCities = targetCity ? [targetCity] : cityRows;
+  const inventoryColumnByCitySlug = new Map<
+    string,
+    Record<(typeof inventorySuffixes)[number], string>
+  >();
   const missingCityCols: string[] = [];
-  for (const c of cityRows) {
-    for (const suffix of ["in_stock", "stock_qty", "price_override"] as const) {
-      const col = `${c.slug}_${suffix}`;
-      if (!headerSet.has(col)) missingCityCols.push(col);
+
+  for (const c of inventoryCities) {
+    const columnMap = {
+      in_stock: "",
+      stock_qty: "",
+      price_override: "",
+    } satisfies Record<(typeof inventorySuffixes)[number], string>;
+
+    for (const suffix of inventorySuffixes) {
+      const genericCol = suffix;
+      const prefixedCol = `${c.slug}_${suffix}`;
+
+      if (targetCity && headerSet.has(genericCol)) {
+        columnMap[suffix] = genericCol;
+        continue;
+      }
+      if (headerSet.has(prefixedCol)) {
+        columnMap[suffix] = prefixedCol;
+        continue;
+      }
+      missingCityCols.push(targetCity ? genericCol : prefixedCol);
     }
+
+    inventoryColumnByCitySlug.set(c.slug, columnMap);
   }
   if (missingCityCols.length > 0) {
     throw new Error(`CSV is missing city columns: ${missingCityCols.join(", ")}`);
@@ -461,10 +495,16 @@ export async function importProductsCsv(params: {
     }
 
     const invRows: typeof parsedInventory = [];
-    for (const c of cityRows) {
+    for (const c of inventoryCities) {
+      const cityColumns = inventoryColumnByCitySlug.get(c.slug);
+      if (!cityColumns) {
+        rowMessages.push(`Missing inventory column mapping for city: ${c.slug}`);
+        continue;
+      }
+
       let in_stock = false;
       try {
-        in_stock = parseBool(record[`${c.slug}_in_stock`] ?? "", false);
+        in_stock = parseBool(record[cityColumns.in_stock] ?? "", false);
       } catch (e: unknown) {
         rowMessages.push(
           e instanceof Error ? `${c.slug}_in_stock: ${e.message}` : `${c.slug}_in_stock: invalid value`,
@@ -473,7 +513,7 @@ export async function importProductsCsv(params: {
 
       let stock_qty: number | null = null;
       try {
-        stock_qty = parseNullableInt(record[`${c.slug}_stock_qty`] ?? "");
+        stock_qty = parseNullableInt(record[cityColumns.stock_qty] ?? "");
         if (stock_qty !== null && stock_qty < 0) rowMessages.push(`${c.slug}_stock_qty must be >= 0`);
       } catch (e: unknown) {
         rowMessages.push(
@@ -483,7 +523,7 @@ export async function importProductsCsv(params: {
 
       let price_override: number | null = null;
       try {
-        price_override = parseNullableNumber(record[`${c.slug}_price_override`] ?? "");
+        price_override = parseNullableNumber(record[cityColumns.price_override] ?? "");
         if (price_override !== null && price_override < 0) {
           rowMessages.push(`${c.slug}_price_override must be >= 0`);
         }
@@ -565,7 +605,7 @@ export async function importProductsCsv(params: {
 
   return {
     delimiter,
-    cities: cityRows.map((c) => ({ id: c.id, slug: c.slug, name: c.name })),
+    cities: inventoryCities.map((c) => ({ id: c.id, slug: c.slug, name: c.name })),
     rows: { total: inputRecords.length, valid: parsedProducts.length, invalid: errors.length },
     products: { inserted, updated },
     inventoryRows: parsedInventory.length,
