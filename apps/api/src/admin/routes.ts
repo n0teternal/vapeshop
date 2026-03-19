@@ -1092,9 +1092,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const target = path.join(itemsDir, safeName);
+        const storageLocation = parseStorageLocationFromBaseUrl(config.productImagesBaseUrl);
+        let deletedLocal = false;
+        let deletedStorage = false;
+
         try {
           await fs.rm(target);
-          return reply.code(200).send(ok({ deleted: safeName }));
+          deletedLocal = true;
         } catch (e) {
           const isLocalMissing =
             e &&
@@ -1104,29 +1108,29 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           if (!isLocalMissing) {
             throw e;
           }
+        }
 
-          const storageLocation = parseStorageLocationFromBaseUrl(config.productImagesBaseUrl);
-          if (!storageLocation) {
-            const body = fail("NOT_FOUND", "File not found");
-            return reply.code(404).send(body);
-          }
-
+        if (storageLocation) {
           const objectPath = joinStoragePath(storageLocation.prefix, safeName);
           const supabase = createServiceSupabaseClient();
           const { error: removeError } = await supabase.storage
             .from(storageLocation.bucket)
             .remove([objectPath]);
 
-          if (removeError) {
-            if (isStorageNotFoundError(removeError)) {
-              const body = fail("NOT_FOUND", "File not found");
-              return reply.code(404).send(body);
-            }
+          if (removeError && !isStorageNotFoundError(removeError)) {
             throw new HttpError(500, "STORAGE", `Failed to delete file: ${removeError.message}`);
           }
-
-          return reply.code(200).send(ok({ deleted: safeName }));
+          if (!removeError) {
+            deletedStorage = true;
+          }
         }
+
+        if (!deletedLocal && !deletedStorage) {
+          const body = fail("NOT_FOUND", "File not found");
+          return reply.code(404).send(body);
+        }
+
+        return reply.code(200).send(ok({ deleted: safeName }));
       } catch (e) {
         if (e && typeof e === "object" && "code" in e && (e as { code?: unknown }).code === "ENOENT") {
           const body = fail("NOT_FOUND", "File not found");
