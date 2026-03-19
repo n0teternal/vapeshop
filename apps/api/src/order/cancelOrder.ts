@@ -176,7 +176,8 @@ export async function cancelOrderAndRestoreInventory(params: { orderId: string }
     throw new HttpError(404, "NOT_FOUND", "Order not found");
   }
 
-  const currentStatus = parseOrderStatus((order as OrderRow).status);
+  const rawStatus = typeof (order as OrderRow).status === "string" ? (order as OrderRow).status : null;
+  const currentStatus = parseOrderStatus(rawStatus);
   if (currentStatus === "cancelled") {
     return { changed: false, status: currentStatus };
   }
@@ -194,11 +195,10 @@ export async function cancelOrderAndRestoreInventory(params: { orderId: string }
     });
   }
 
-  const { data: updatedOrder, error: updateOrderError } = await supabase
-    .from("orders")
-    .update({ status: "cancelled" })
-    .eq("id", params.orderId)
-    .eq("status", currentStatus)
+  let updateQuery = supabase.from("orders").update({ status: "cancelled" }).eq("id", params.orderId);
+  updateQuery = rawStatus === null ? updateQuery.is("status", null) : updateQuery.eq("status", rawStatus);
+
+  const { data: updatedOrder, error: updateOrderError } = await updateQuery
     .select("status")
     .maybeSingle();
 
@@ -210,6 +210,20 @@ export async function cancelOrderAndRestoreInventory(params: { orderId: string }
         restorations,
       });
     }
+
+    const { data: freshOrder, error: freshOrderError } = await supabase
+      .from("orders")
+      .select("status")
+      .eq("id", params.orderId)
+      .maybeSingle();
+
+    if (!freshOrderError && freshOrder) {
+      const freshStatus = parseOrderStatus((freshOrder as Pick<OrderRow, "status">).status);
+      if (freshStatus === "cancelled") {
+        return { changed: false, status: "cancelled" };
+      }
+    }
+
     throw new HttpError(409, "ORDER_CONFLICT", "Failed to mark order as cancelled");
   }
 
