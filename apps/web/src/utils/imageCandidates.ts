@@ -2,6 +2,7 @@ import { buildApiUrl } from "../config";
 
 const SUPABASE_OBJECT_PUBLIC_MARKER = "/storage/v1/object/public/";
 const SUPABASE_RENDER_PUBLIC_MARKER = "/storage/v1/render/image/public/";
+const IMAGE_EXTENSION_VARIANTS = [".jpg", ".jpeg", ".png", ".webp"] as const;
 
 function buildSupabaseRenderUrl(absoluteUrl: string, width: number): string | null {
   try {
@@ -91,19 +92,19 @@ export function buildImageCandidates(
       if (extMatch) {
         const ext = `.${(extMatch[1] ?? "").toLowerCase()}`;
         const base = pathPart.slice(0, -ext.length);
-        const variants = [".webp", ".jpg", ".jpeg", ".png"];
         // Keep the original first when extension is already known.
         pushDirect(raw);
-        for (const variant of variants) {
+        for (const variant of IMAGE_EXTENSION_VARIANTS) {
           if (variant === ext) continue;
           pushDirect(`${base}${variant}${suffix}`);
         }
       } else {
-        // If extension is missing, try common image formats first.
-        pushDirect(`${pathPart}.webp${suffix}`);
+        // Historical imports may omit the extension while the stored file is JPG.
+        // Prefer JPG first to avoid an extra failed request before the real image.
         pushDirect(`${pathPart}.jpg${suffix}`);
         pushDirect(`${pathPart}.jpeg${suffix}`);
         pushDirect(`${pathPart}.png${suffix}`);
+        pushDirect(`${pathPart}.webp${suffix}`);
         pushDirect(raw);
       }
     } else {
