@@ -505,10 +505,13 @@ function AdminUploadImages() {
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [files, setFiles] = useState<UploadedImageFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
-  const [deletingAll, setDeletingAll] = useState(false);
+  const [deletingFiles, setDeletingFiles] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [filesOpen, setFilesOpen] = useState(false);
+  const selectedFilesSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
+  const selectedCount = selectedFiles.length;
 
   const loadFiles = useCallback(async (): Promise<void> => {
     setLoadingFiles(true);
@@ -531,6 +534,17 @@ function AdminUploadImages() {
     if (!filesOpen) return;
     void loadFiles();
   }, [filesOpen, loadFiles]);
+
+  useEffect(() => {
+    setSelectedFiles((prev) =>
+      prev.filter((name) => files.some((file) => file.name === name)),
+    );
+  }, [files]);
+
+  useEffect(() => {
+    if (filesOpen) return;
+    setSelectedFiles([]);
+  }, [filesOpen]);
 
   async function handleUpload(files: FileList | null): Promise<void> {
     const list = files ? Array.from(files) : [];
@@ -563,38 +577,75 @@ function AdminUploadImages() {
 
   async function handleDelete(name: string): Promise<void> {
     setError(null);
+    setDeletingFiles(true);
     try {
       await apiDelete(`/api/admin/upload/items/${encodeURIComponent(name)}`);
       await loadFiles();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Delete failed";
       setError(message);
+    } finally {
+      setDeletingFiles(false);
+    }
+  }
+
+  async function deleteFiles(names: string[]): Promise<string[]> {
+    const failed: string[] = [];
+    for (const name of names) {
+      try {
+        await apiDelete(`/api/admin/upload/items/${encodeURIComponent(name)}`);
+      } catch {
+        failed.push(name);
+      }
+    }
+
+    await loadFiles();
+    return failed;
+  }
+
+  async function handleDeleteSelected(): Promise<void> {
+    if (selectedCount === 0) return;
+    const names = [...selectedFiles];
+    const confirmed = window.confirm(
+      names.length === 1
+        ? `Удалить выбранный файл "${names[0]}"?`
+        : `Удалить выбранные файлы (${names.length})?`,
+    );
+    if (!confirmed) return;
+
+    setDeletingFiles(true);
+    setError(null);
+    try {
+      const failed = await deleteFiles(names);
+      if (failed.length > 0) {
+        setError(`Failed to delete ${failed.length} of ${names.length} selected files`);
+      }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Delete failed";
+      setError(message);
+    } finally {
+      setDeletingFiles(false);
     }
   }
 
   async function handleDeleteAll(): Promise<void> {
     if (files.length === 0) return;
-    const confirmed = window.confirm(`Delete all files (${files.length})?`);
+    const names = files.map((file) => file.name);
+    const confirmed = window.confirm(`Delete all files (${names.length})?`);
     if (!confirmed) return;
 
-    setDeletingAll(true);
+    setDeletingFiles(true);
     setError(null);
-    const failed: string[] = [];
     try {
-      for (const file of files) {
-        try {
-          await apiDelete(`/api/admin/upload/items/${encodeURIComponent(file.name)}`);
-        } catch {
-          failed.push(file.name);
-        }
-      }
-
-      await loadFiles();
+      const failed = await deleteFiles(names);
       if (failed.length > 0) {
-        setError(`Failed to delete ${failed.length} of ${files.length} files`);
+        setError(`Failed to delete ${failed.length} of ${names.length} files`);
       }
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Delete failed";
+      setError(message);
     } finally {
-      setDeletingAll(false);
+      setDeletingFiles(false);
     }
   }
 
@@ -687,11 +738,14 @@ function AdminUploadImages() {
                   <div className="mt-1 break-all text-xs text-muted-foreground/80">Base URL: {baseUrl}</div>
                 ) : null}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {files.length > 0 ? (
+                  <div className="text-xs text-muted-foreground/80">Выбрано: {selectedCount}</div>
+                ) : null}
                 <button
                   type="button"
                   className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
-                  disabled={loadingFiles || deletingAll}
+                  disabled={loadingFiles || deletingFiles}
                   onClick={() => void loadFiles()}
                 >
                   Обновить
@@ -699,10 +753,18 @@ function AdminUploadImages() {
                 <button
                   type="button"
                   className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={loadingFiles || deletingAll || files.length === 0}
+                  disabled={loadingFiles || deletingFiles || selectedCount === 0}
+                  onClick={() => void handleDeleteSelected()}
+                >
+                  Удалить выбранные
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  disabled={loadingFiles || deletingFiles || files.length === 0}
                   onClick={() => void handleDeleteAll()}
                 >
-                  {deletingAll ? "Deleting..." : "Delete all"}
+                  Delete all
                 </button>
                 <button
                   type="button"
@@ -727,10 +789,17 @@ function AdminUploadImages() {
               <div className="mt-3 text-xs text-muted-foreground/80">Файлов нет</div>
             ) : (
               <div className="mt-3 space-y-2">
-                {files.map((f) => (
-                  <div
+                {files.map((f) => {
+                  const isSelected = selectedFilesSet.has(f.name);
+
+                  return (
+                    <div
                     key={f.name}
-                    className="grid grid-cols-[1fr_128px] gap-3 rounded-xl border border-border/70 bg-muted/55 p-3 text-xs sm:grid-cols-[1fr_200px]"
+                    className={`grid grid-cols-[minmax(0,1fr)_40px_96px] gap-3 rounded-xl border p-3 text-xs transition-colors sm:grid-cols-[minmax(0,1fr)_48px_200px] ${
+                      isSelected
+                        ? "border-primary/60 bg-primary/10"
+                        : "border-border/70 bg-muted/55"
+                    }`}
                   >
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold text-foreground">
@@ -745,7 +814,7 @@ function AdminUploadImages() {
                           className="h-8 w-44 rounded-lg border border-border/70 bg-card/90 px-2 text-xs"
                           placeholder="Новое имя"
                           value={renameDrafts[f.name] ?? ""}
-                          disabled={deletingAll}
+                          disabled={deletingFiles}
                           onChange={(e) =>
                             setRenameDrafts((prev) => ({ ...prev, [f.name]: e.target.value }))
                           }
@@ -753,7 +822,7 @@ function AdminUploadImages() {
                         <button
                           type="button"
                           className="rounded-lg border border-border/70 bg-card/90 px-2 py-1 text-xs font-semibold text-foreground hover:bg-muted/60"
-                          disabled={deletingAll}
+                          disabled={deletingFiles}
                           onClick={() => void handleRename(f.name)}
                         >
                           Переименовать
@@ -761,13 +830,34 @@ function AdminUploadImages() {
                         <button
                           type="button"
                           className="rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white hover:bg-rose-700"
-                          disabled={deletingAll}
+                          disabled={deletingFiles}
                           onClick={() => void handleDelete(f.name)}
                         >
                           Удалить
                         </button>
                       </div>
                     </div>
+
+                    <label className="flex items-start justify-center pt-1">
+                      <span className="sr-only">{`Выбрать ${f.name}`}</span>
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5 rounded border-border/70 bg-card/90 text-primary"
+                        checked={isSelected}
+                        disabled={deletingFiles}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setSelectedFiles((prev) => {
+                            if (checked) {
+                              if (prev.includes(f.name)) return prev;
+                              return [...prev, f.name];
+                            }
+
+                            return prev.filter((name) => name !== f.name);
+                          });
+                        }}
+                      />
+                    </label>
 
                     {baseUrl ? (
                       <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
@@ -783,8 +873,9 @@ function AdminUploadImages() {
                         no preview
                       </div>
                     )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
             </div>
