@@ -11,6 +11,8 @@ const CATALOG_INITIAL_RENDER_COUNT = 24;
 const CATALOG_RENDER_STEP = 20;
 const CATALOG_IMAGE_PREFETCH_AHEAD = 12;
 const TOBACCO_LABEL = "\u0422\u0430\u0431\u0430\u043a";
+const CARTRIDGE_LABEL =
+  "\u0421\u043c\u0435\u043d\u043d\u044b\u0435 \u043a\u0430\u0440\u0442\u0440\u0438\u0434\u0436\u0438 \u0438 \u0438\u0441\u043f\u0430\u0440\u0438\u0442\u0435\u043b\u0438";
 
 function formatPriceRub(value: number): string {
   return new Intl.NumberFormat("ru-RU", {
@@ -65,6 +67,7 @@ function CatalogSkeleton({ count }: { count: number }) {
 function formatCategoryLabel(categorySlug: string): string {
   const normalized = normalizeCatalogCategoryId(categorySlug) ?? categorySlug.trim().toLowerCase();
   if (normalized === "tobacco") return TOBACCO_LABEL;
+  if (normalized === "cartridge") return CARTRIDGE_LABEL;
 
   const ruLabelsBySlug: Record<string, string> = {
     other: "Прочее",
@@ -97,7 +100,11 @@ const CATALOG_FILTER_CATEGORIES: Array<{ id: CatalogFilterCategoryId; label: str
 
 const CATALOG_FILTER_CATEGORIES_UI: Array<{ id: CatalogFilterCategoryId; label: string }> =
   CATALOG_FILTER_CATEGORIES.map((category) =>
-    category.id === "tobacco" ? { ...category, label: TOBACCO_LABEL } : category,
+    category.id === "tobacco"
+      ? { ...category, label: TOBACCO_LABEL }
+      : category.id === "cartridge"
+        ? { ...category, label: CARTRIDGE_LABEL }
+        : category,
   );
 
 function normalizeCatalogCategoryId(value: string): CatalogFilterCategoryId | null {
@@ -299,6 +306,9 @@ const MANUFACTURER_LABEL_ALIASES = new Map<string, string>([
   ["aegis", "Geekvape"],
   ["geek", "Geekvape"],
   ["geekvape", "Geekvape"],
+  ["lost mary", "Lost Mary"],
+  ["pasito", "SMOANT"],
+  ["smoant", "SMOANT"],
 ]);
 
 function normalizeManufacturerLabel(value: string): string {
@@ -318,11 +328,22 @@ function extractManufacturerLabel(title: string): string {
     .map((token) => token.replaceAll(/[^\p{L}\p{N}-]+/gu, ""))
     .filter((token) => token.length > 0);
 
-  for (const token of tokens) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
     const normalized = normalizeSearchText(token);
     if (normalized.length < 2) continue;
     if (/^\d/.test(normalized)) continue;
     if (MANUFACTURER_STOP_WORDS.has(normalized)) continue;
+
+    const nextNormalized = normalizeSearchText(tokens[index + 1] ?? "");
+    const compoundManufacturer =
+      nextNormalized.length > 0
+        ? MANUFACTURER_LABEL_ALIASES.get(`${normalized} ${nextNormalized}`)
+        : undefined;
+    if (compoundManufacturer) {
+      return compoundManufacturer;
+    }
+
     return normalizeManufacturerLabel(token);
   }
 
