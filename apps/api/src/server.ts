@@ -7,6 +7,8 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { verifyTelegramInitData } from "./telegram/verifyInitData.js";
 import { createOrder, type CreateOrderPayload } from "./order/createOrder.js";
+import { listCustomerOrders } from "./order/customerOrders.js";
+import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
 import { HttpError, isHttpError } from "./httpError.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import {
@@ -80,6 +82,18 @@ function requireVerifiedTelegramRequest(params: {
   }
 
   return verified;
+}
+
+function requireCustomerTelegramUser(params: {
+  headers: Record<string, unknown>;
+  initDataFallback?: string | undefined;
+}): { id: number; username: string | null } {
+  const devHeaderOn = getHeaderString(params.headers["x-dev-admin"]) === "1";
+  if (config.isDev && devHeaderOn && config.dev.adminTgUserId) {
+    return { id: config.dev.adminTgUserId, username: null };
+  }
+
+  return requireVerifiedTelegramRequest(params).user;
 }
 
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
@@ -420,6 +434,64 @@ app.get<{
         : "Unexpected error";
 
     request.log.error({ err: e }, "Referral overview failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.get<{
+  Reply: ApiSuccess<{ orders: Awaited<ReturnType<typeof listCustomerOrders>> }> | ErrorResponse;
+}>("/api/orders", async (request, reply) => {
+  try {
+    const user = requireCustomerTelegramUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+
+    const orders = await listCustomerOrders(user.id);
+    return reply.code(200).send(ok({ orders }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Customer orders request failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.put<{
+  Params: { orderId: string };
+  Reply: ApiSuccess<Awaited<ReturnType<typeof cancelOrderAndRestoreInventory>>> | ErrorResponse;
+}>("/api/orders/:orderId/cancel", async (request, reply) => {
+  try {
+    const orderId = request.params.orderId?.trim() ?? "";
+    if (!orderId) {
+      throw new HttpError(400, "BAD_REQUEST", "orderId is required");
+    }
+
+    const user = requireCustomerTelegramUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+
+    const result = await cancelOrderAndRestoreInventory({
+      orderId,
+      expectedTgUserId: user.id,
+    });
+
+    return reply.code(200).send(ok(result));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Customer cancel order request failed");
     return reply.code(statusCode).send({ ok: false, error: { code, message } });
   }
 });

@@ -6,6 +6,7 @@ type OrderRow = {
   id: string;
   status: string;
   city_id: number | null;
+  tg_user_id: number;
 };
 
 type OrderItemRow = {
@@ -157,7 +158,10 @@ async function restoreOrderInventory(params: {
   return restorations;
 }
 
-export async function cancelOrderAndRestoreInventory(params: { orderId: string }): Promise<{
+export async function cancelOrderAndRestoreInventory(params: {
+  orderId: string;
+  expectedTgUserId?: number;
+}): Promise<{
   changed: boolean;
   status: OrderStatus;
 }> {
@@ -165,7 +169,7 @@ export async function cancelOrderAndRestoreInventory(params: { orderId: string }
 
   const { data: order, error: orderError } = await supabase
     .from("orders")
-    .select("id,status,city_id")
+    .select("id,status,city_id,tg_user_id")
     .eq("id", params.orderId)
     .maybeSingle();
 
@@ -173,6 +177,12 @@ export async function cancelOrderAndRestoreInventory(params: { orderId: string }
     throw new HttpError(500, "DB", `Failed to load order for cancellation: ${orderError.message}`);
   }
   if (!order) {
+    throw new HttpError(404, "NOT_FOUND", "Order not found");
+  }
+  if (
+    typeof params.expectedTgUserId === "number" &&
+    (order as OrderRow).tg_user_id !== params.expectedTgUserId
+  ) {
     throw new HttpError(404, "NOT_FOUND", "Order not found");
   }
 

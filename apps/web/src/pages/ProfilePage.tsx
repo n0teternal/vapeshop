@@ -1,4 +1,4 @@
-import { Gift, ShieldCheck, UserRound } from "lucide-react";
+import { Gift, PackageSearch, ShieldCheck, UserRound } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet } from "../api/client";
@@ -83,6 +83,23 @@ export function ProfilePage() {
               </div>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/80 bg-card/90">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Управление заказами</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="text-sm text-muted-foreground">
+            Просматривайте свои заказы и отменяйте те, которые ещё не достигли статуса done.
+          </div>
+          <Button asChild>
+            <Link to="/orders" className="inline-flex items-center gap-2">
+              <PackageSearch className="h-4 w-4" />
+              Открыть управление заказами
+            </Link>
+          </Button>
         </CardContent>
       </Card>
 
