@@ -41,6 +41,7 @@ type SuccessResponse = {
 
 type CitySlug = "vvo" | "blg";
 const TEST_ORDER_SELF_CHAT_ID = "1208488286";
+const DEV_FALLBACK_TG_USER_ID = 42;
 
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
@@ -91,6 +92,9 @@ function requireCustomerTelegramUser(params: {
   const devHeaderOn = getHeaderString(params.headers["x-dev-admin"]) === "1";
   if (config.isDev && devHeaderOn && config.dev.adminTgUserId) {
     return { id: config.dev.adminTgUserId, username: null };
+  }
+  if (config.isDev && devHeaderOn) {
+    return { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" };
   }
 
   return requireVerifiedTelegramRequest(params).user;

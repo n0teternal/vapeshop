@@ -1,4 +1,4 @@
-import { buildApiUrl } from "../config";
+import { API_BASE_URL, buildApiUrl } from "../config";
 
 export class ApiError extends Error {
   public readonly code: string;
@@ -19,8 +19,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseApiEnvelope<T>(value: unknown): ApiOk<T> | ApiErr {
-  if (!isRecord(value) || typeof value.ok !== "boolean") {
+  if (!isRecord(value)) {
     return { ok: false, error: { code: "BAD_RESPONSE", message: "Invalid API response" } };
+  }
+
+  if (typeof value.ok !== "boolean") {
+    const fallbackMessage =
+      typeof value.message === "string" && value.message.trim().length > 0
+        ? value.message
+        : "Invalid API response";
+    const fallbackCode =
+      typeof value.code === "string" && value.code.trim().length > 0
+        ? value.code
+        : typeof value.statusCode === "number"
+          ? `HTTP_${value.statusCode}`
+          : "BAD_RESPONSE";
+
+    return { ok: false, error: { code: fallbackCode, message: fallbackMessage } };
   }
 
   if (value.ok === true) {
@@ -60,6 +75,27 @@ function mergeHeaders(...parts: Array<HeadersInit | undefined>): Record<string, 
   return out;
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1"
+  );
+}
+
+function shouldUseLocalDevBypass(): boolean {
+  if (import.meta.env.DEV) return true;
+  if (typeof window !== "undefined" && isLoopbackHost(window.location.hostname)) return true;
+
+  try {
+    const apiUrl = new URL(API_BASE_URL, typeof window !== "undefined" ? window.location.href : "http://localhost");
+    return isLoopbackHost(apiUrl.hostname);
+  } catch {
+    return false;
+  }
+}
+
 type RequestOptions = {
   withTelegramAuth?: boolean;
 };
@@ -77,7 +113,7 @@ function buildHeaders(extra?: HeadersInit, options?: RequestOptions): HeadersIni
     base["x-telegram-init-data"] = tgInitData;
   }
 
-  if (import.meta.env.DEV && !tgInitData) {
+  if (!tgInitData && shouldUseLocalDevBypass()) {
     base["x-dev-admin"] = "1";
   }
 
