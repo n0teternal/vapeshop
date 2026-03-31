@@ -17,6 +17,7 @@
 | `notify_chat_id` | `bigint` | yes | Telegram chat id уведомления |
 | `notify_message_id` | `bigint` | yes | Telegram message id уведомления |
 | `notify_sent_at` | `timestamptz` | yes | Когда отправлено уведомление |
+| `notify_targets` | `jsonb` | no | Все пары `{chat_id,message_id}` для Telegram-копий заказа |
 
 ## `public.order_items`
 | Поле | Тип | NULL | Описание |

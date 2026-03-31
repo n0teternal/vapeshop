@@ -53,6 +53,12 @@ type ReservedInventory = {
   reservedQty: number;
 };
 
+function normalizeTelegramUsername(username: string | null): string | null {
+  if (!username) return null;
+  const normalized = username.trim().replace(/^@+/, "");
+  return normalized.length > 0 ? normalized : null;
+}
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
@@ -144,11 +150,47 @@ async function rollbackReservedInventory(params: {
   }
 }
 
+async function resolveOrderTgUser(params: {
+  supabase: ReturnType<typeof createServiceSupabaseClient>;
+  tgUser: TgUser;
+}): Promise<TgUser> {
+  const immediateUsername = normalizeTelegramUsername(params.tgUser.username);
+  if (immediateUsername) {
+    return { id: params.tgUser.id, username: immediateUsername };
+  }
+
+  const { data, error } = await params.supabase
+    .from("customer_profiles")
+    .select("tg_username")
+    .eq("tg_user_id", params.tgUser.id)
+    .maybeSingle();
+
+  if (error) {
+    throw new HttpError(
+      500,
+      "DB",
+      `Failed to load customer profile for order username fallback: ${error.message}`,
+    );
+  }
+
+  const profileUsername =
+    data && typeof data.tg_username === "string" ? data.tg_username : null;
+
+  return {
+    id: params.tgUser.id,
+    username: normalizeTelegramUsername(profileUsername),
+  };
+}
+
 export async function createOrder(params: {
   payload: CreateOrderPayload;
   tgUser: TgUser;
 }): Promise<CreateOrderResult> {
   const supabase = createServiceSupabaseClient();
+  const effectiveTgUser = await resolveOrderTgUser({
+    supabase,
+    tgUser: params.tgUser,
+  });
   const requested = normalizeItems(params.payload.items);
   const productIds = Array.from(requested.keys());
 
@@ -278,8 +320,8 @@ export async function createOrder(params: {
   }
 
   const orderRow = {
-    tg_user_id: params.tgUser.id,
-    tg_username: params.tgUser.username ?? null,
+    tg_user_id: effectiveTgUser.id,
+    tg_username: effectiveTgUser.username,
     city_id: city.id ?? null,
     delivery_method: params.payload.deliveryMethod,
     comment: params.payload.comment ?? null,
@@ -359,7 +401,7 @@ export async function createOrder(params: {
       status: "new",
       cityName: city.name,
       citySlug: params.payload.citySlug,
-      tgUser: params.tgUser,
+      tgUser: effectiveTgUser,
       deliveryMethod: params.payload.deliveryMethod,
       comment: params.payload.comment,
       lines,

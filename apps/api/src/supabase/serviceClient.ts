@@ -1,6 +1,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { config } from "../config.js";
 
+type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+
 export type Database = {
   public: {
     Tables: {
@@ -224,6 +226,7 @@ export type Database = {
           notify_chat_id: number | null;
           notify_message_id: number | null;
           notify_sent_at: string | null;
+          notify_targets: Json;
           coupon_id: string | null;
           total_before_discount: number | null;
           discount_amount: number;
@@ -242,6 +245,7 @@ export type Database = {
           notify_chat_id?: number | null;
           notify_message_id?: number | null;
           notify_sent_at?: string | null;
+          notify_targets?: Json;
           coupon_id?: string | null;
           total_before_discount?: number | null;
           discount_amount?: number;
@@ -260,6 +264,7 @@ export type Database = {
           notify_chat_id?: number | null;
           notify_message_id?: number | null;
           notify_sent_at?: string | null;
+          notify_targets?: Json;
           coupon_id?: string | null;
           total_before_discount?: number | null;
           discount_amount?: number;

@@ -3,18 +3,18 @@ import { config } from "../config.js";
 import { isHttpError } from "../httpError.js";
 import { cancelOrderAndRestoreInventory } from "../order/cancelOrder.js";
 import {
-  buildOrderStatusTelegramText,
   buildOrderTelegramMessage,
   type CitySlug,
   type OrderStatus,
 } from "../order/telegramMessage.js";
+import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import {
   bootstrapReferralProfile,
   getCustomerReferralShare,
   processReferralRewardForOrderDone,
 } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
-import { answerCallbackQuery, deleteMessage, editMessageText, sendMessage } from "./api.js";
+import { answerCallbackQuery, editMessageText, sendMessage } from "./api.js";
 import {
   buildCustomerMainMenuMessage,
   buildCustomerOrdersMenuMessage,
@@ -382,10 +382,11 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       discount_amount: unknown;
       notify_chat_id: number | null;
       notify_message_id: number | null;
+      notify_targets: unknown;
     };
 
     const selectCols =
-      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id";
+      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_targets";
 
     let order: OrderRow | null = null;
 
@@ -444,6 +445,36 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       } catch (e) {
         request.log.error({ err: e, orderId: order.id }, "Failed to process referral reward");
       }
+    }
+
+    if (
+      action.kind === "order_status" &&
+      (action.status === "done" || action.status === "cancelled")
+    ) {
+      try {
+        await syncFinalOrderTelegramState({
+          orderId: order.id,
+          status: action.status,
+          fallbackTarget: parsed.message
+            ? {
+                chatId: parsed.message.chatId,
+                messageId: parsed.message.messageId,
+              }
+            : null,
+          logger: request.log,
+        });
+      } catch (e) {
+        request.log.error(
+          { err: e, orderId: order.id, status: action.status },
+          "Final Telegram order sync failed after webhook status update",
+        );
+      }
+
+      await answerSafe(
+        parsed.callbackQueryId,
+        action.status === "done" ? "РЎС‚Р°С‚СѓСЃ: Р“РѕС‚РѕРІРѕ" : "РЎС‚Р°С‚СѓСЃ: РћС‚РјРµРЅС‘РЅ",
+      );
+      return reply.code(200).send({ ok: true });
     }
 
     const cityId = order.city_id;
@@ -550,37 +581,6 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       orderId: order.id,
     });
 
-    if (
-      action.kind === "order_status" &&
-      (action.status === "done" || action.status === "cancelled") &&
-      config.telegram.chatIdsOrderStatus
-    ) {
-      const statusMessage = buildOrderStatusTelegramText({
-        status: action.status,
-        cityName: city.name,
-        citySlug,
-        tgUser: { id: order.tg_user_id, username: order.tg_username },
-        deliveryMethod: order.delivery_method,
-        comment: order.comment,
-        lines,
-        totalPrice,
-        discountApplied: discountAmount > 0,
-        orderId: order.id,
-      });
-
-      for (const chatId of config.telegram.chatIdsOrderStatus) {
-        try {
-          await sendMessage({
-            botToken: config.telegram.botToken,
-            chatId,
-            text: statusMessage,
-          });
-        } catch (e) {
-          request.log.error({ err: e, chatId, orderId: order.id }, "Failed to notify order status chat");
-        }
-      }
-    }
-
     const notifyChatId = order.notify_chat_id;
     const notifyMessageId = order.notify_message_id;
     const editTarget =
@@ -589,33 +589,6 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         : parsed.message;
 
     if (editTarget) {
-      // Final statuses are removed from the admin chat queue.
-      // If deletion fails (e.g. missing rights), fall back to editing the message as before.
-      if (
-        action.kind === "order_status" &&
-        (action.status === "done" || action.status === "cancelled")
-      ) {
-        try {
-          await deleteMessage({
-            botToken: config.telegram.botToken,
-            chatId: editTarget.chatId,
-            messageId: editTarget.messageId,
-          });
-        } catch (e) {
-          request.log.error({ err: e }, "Failed to delete Telegram message; fallback to edit");
-          try {
-            await editMessageText({
-              botToken: config.telegram.botToken,
-              chatId: editTarget.chatId,
-              messageId: editTarget.messageId,
-              text: telegramMessage.text,
-              replyMarkup: telegramMessage.reply_markup,
-            });
-          } catch (e2) {
-            request.log.error({ err: e2 }, "Failed to edit Telegram message after delete failure");
-          }
-        }
-      } else {
       try {
         await editMessageText({
           botToken: config.telegram.botToken,
@@ -626,7 +599,6 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         });
       } catch (e) {
         request.log.error({ err: e }, "Failed to edit Telegram message");
-      }
       }
     }
 

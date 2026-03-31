@@ -57,6 +57,12 @@ function shortOrderId(orderId: string): string {
   return suffix.toUpperCase();
 }
 
+function normalizeTelegramUsername(username: string | null): string | null {
+  if (!username) return null;
+  const normalized = username.trim().replace(/^@+/, "");
+  return normalized.length > 0 ? normalized : null;
+}
+
 function buildOrderBody(params: OrderMessageBaseParams): string {
   const cityLine = `${escapeHtml(params.cityName)} (${params.citySlug.toUpperCase()})`;
   const userLine = params.tgUser.username
@@ -92,6 +98,7 @@ export function buildOrderTelegramMessage(
   },
 ): TelegramOrderMessage {
   const actionsView: TelegramOrderActionsView = params.actionsView ?? "main";
+  const username = normalizeTelegramUsername(params.tgUser.username);
   const text =
     statusPrefix(params.status) +
     `<b>Новый заказ</b>\n` +
@@ -147,8 +154,8 @@ export function buildOrderTelegramMessage(
               ]),
       [
         {
-          text: "Написать клиенту",
-          url: `tg://user?id=${params.tgUser.id}`,
+          text: "Скопировать контакт",
+          copy_text: { text: username ? `@${username}` : String(params.tgUser.id) },
         },
       ],
     ],

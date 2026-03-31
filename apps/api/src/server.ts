@@ -9,6 +9,11 @@ import { verifyTelegramInitData } from "./telegram/verifyInitData.js";
 import { createOrder, type CreateOrderPayload } from "./order/createOrder.js";
 import { listCustomerOrders } from "./order/customerOrders.js";
 import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
+import { sendOrderNotificationToChats } from "./order/sendOrderNotification.js";
+import {
+  buildNotifyTargetRecords,
+  syncFinalOrderTelegramState,
+} from "./order/telegramFinalStatus.js";
 import { HttpError, isHttpError } from "./httpError.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import {
@@ -480,12 +485,27 @@ app.put<{
       headers: request.headers as Record<string, unknown>,
     });
 
-    const result = await cancelOrderAndRestoreInventory({
-      orderId,
-      expectedTgUserId: user.id,
-    });
+      const result = await cancelOrderAndRestoreInventory({
+        orderId,
+        expectedTgUserId: user.id,
+      });
 
-    return reply.code(200).send(ok(result));
+      if (result.changed && result.status === "cancelled") {
+        try {
+          await syncFinalOrderTelegramState({
+            orderId,
+            status: "cancelled",
+            logger: request.log,
+          });
+        } catch (syncError) {
+          request.log.error(
+            { err: syncError, orderId },
+            "Customer cancellation completed, but Telegram final status sync failed",
+          );
+        }
+      }
+
+      return reply.code(200).send(ok(result));
   } catch (e: unknown) {
     const statusCode = isHttpError(e) ? e.statusCode : 500;
     const code = isHttpError(e) ? e.code : "INTERNAL";
@@ -540,27 +560,25 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
         citySlug: body.citySlug,
         tgUserId: verified.user.id,
       });
-      let notified = false;
-      let firstSent:
-        | {
-            chat: { id: number };
-            message_id: number;
-          }
-        | null = null;
+      const notificationResult = await sendOrderNotificationToChats({
+        botToken: config.telegram.botToken,
+        chatIds,
+        text: order.telegramMessage.text,
+        replyMarkup: order.telegramMessage.reply_markup,
+        logger: request.log,
+      });
+      const { sentMessages, fallbackWithoutMarkupChatIds } = notificationResult;
+      const notified = sentMessages.length > 0;
+      const firstSent = sentMessages[0] ?? null;
 
-      for (const chatId of chatIds) {
-        try {
-          const result = await sendMessage({
-            botToken: config.telegram.botToken,
-            chatId,
-            text: order.telegramMessage.text,
-            replyMarkup: order.telegramMessage.reply_markup,
-          });
-          notified = true;
-          if (!firstSent) firstSent = result;
-        } catch (e) {
-          request.log.error({ err: e, chatId }, "Failed to notify Telegram chat");
-        }
+      if (fallbackWithoutMarkupChatIds.length > 0) {
+        request.log.warn(
+          {
+            orderId: order.orderId,
+            chatIds: fallbackWithoutMarkupChatIds,
+          },
+          "Order notifications sent without reply markup fallback",
+        );
       }
 
       if (firstSent) {
@@ -572,6 +590,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
               notify_chat_id: firstSent.chat.id,
               notify_message_id: firstSent.message_id,
               notify_sent_at: new Date().toISOString(),
+              notify_targets: buildNotifyTargetRecords(sentMessages),
             })
             .eq("id", order.orderId);
 
