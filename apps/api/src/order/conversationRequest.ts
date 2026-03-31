@@ -16,21 +16,18 @@ function shortOrderId(orderId: string): string {
   return orderId.slice(-6).toUpperCase();
 }
 
-export function hasTelegramUsername(username: string | null): boolean {
-  return typeof username === "string" && username.trim().replace(/^@+/, "").length > 0;
-}
-
-export function shouldOfferConversationRequest(params: {
-  tgUsername: string | null;
-  status: "new" | "processing" | "done" | "cancelled";
-}): boolean {
-  if (params.status === "done") return false;
-  return !hasTelegramUsername(params.tgUsername);
-}
-
 export function buildConversationRequestButton(orderId: string): TelegramInlineKeyboardButton {
   return {
     text: "Запросить разговор",
+    callback_data: `ui:contact_confirm:${orderId}`,
+  };
+}
+
+export function buildConversationRequestConfirmButton(
+  orderId: string,
+): TelegramInlineKeyboardButton {
+  return {
+    text: "Подтвердить запрос 💬",
     callback_data: `contact_request:${orderId}`,
   };
 }

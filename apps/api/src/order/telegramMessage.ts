@@ -1,7 +1,7 @@
-import type { TelegramInlineKeyboardButton, TelegramReplyMarkup } from "../telegram/api.js";
+import type { TelegramReplyMarkup } from "../telegram/api.js";
 import {
   buildConversationRequestButton,
-  shouldOfferConversationRequest,
+  buildConversationRequestConfirmButton,
 } from "./conversationRequest.js";
 
 export type OrderStatus = "new" | "processing" | "done" | "cancelled";
@@ -21,7 +21,7 @@ export type TelegramOrderMessage = {
   reply_markup: TelegramReplyMarkup;
 };
 
-type TelegramOrderActionsView = "main" | "done_confirm" | "cancel_confirm";
+type TelegramOrderActionsView = "main" | "done_confirm" | "cancel_confirm" | "contact_confirm";
 
 type OrderMessageBaseParams = {
   cityName: string;
@@ -45,8 +45,7 @@ function escapeHtml(input: string): string {
 }
 
 function formatRub(value: number): string {
-  const rounded = Math.round(value);
-  return `${rounded} ₽`;
+  return `${Math.round(value)} ₽`;
 }
 
 function statusPrefix(status: OrderStatus): string {
@@ -68,8 +67,9 @@ function normalizeTelegramUsername(username: string | null): string | null {
 
 function buildOrderBody(params: OrderMessageBaseParams): string {
   const cityLine = `${escapeHtml(params.cityName)} (${params.citySlug.toUpperCase()})`;
-  const userLine = params.tgUser.username
-    ? `@${escapeHtml(params.tgUser.username)} (${params.tgUser.id})`
+  const normalizedUsername = normalizeTelegramUsername(params.tgUser.username);
+  const userLine = normalizedUsername
+    ? `@${escapeHtml(normalizedUsername)} (${params.tgUser.id})`
     : `${params.tgUser.id}`;
 
   const itemsLines = params.lines
@@ -99,45 +99,48 @@ export function buildOrderTelegramMessage(
   },
 ): TelegramOrderMessage {
   const actionsView: TelegramOrderActionsView = params.actionsView ?? "main";
-  const username = normalizeTelegramUsername(params.tgUser.username);
-  const text =
-    statusPrefix(params.status) + `<b>Новый заказ</b>\n` + buildOrderBody(params);
-
+  const text = statusPrefix(params.status) + `<b>Новый заказ</b>\n` + buildOrderBody(params);
   const hasFinalStatus = params.status === "done" || params.status === "cancelled";
-  const contactRow: TelegramInlineKeyboardButton[] = shouldOfferConversationRequest({
-    tgUsername: username,
-    status: params.status,
-  })
-    ? [buildConversationRequestButton(params.orderId)]
-    : username
-      ? [{ text: "Скопировать контакт", copy_text: { text: `@${username}` } }]
-      : [];
 
-  const reply_markup: TelegramReplyMarkup = {
-    inline_keyboard: [
-      ...(hasFinalStatus
-        ? []
-        : actionsView === "done_confirm"
-          ? [
-              [{ text: "Подтвердить ✅", callback_data: `status:done:${params.orderId}` }],
-              [{ text: "⬅ Назад", callback_data: `ui:main:${params.orderId}` }],
-            ]
-          : actionsView === "cancel_confirm"
-            ? [
-                [{ text: "Подтвердить ❌", callback_data: `status:cancelled:${params.orderId}` }],
-                [{ text: "⬅ Назад", callback_data: `ui:main:${params.orderId}` }],
-              ]
-            : [
-                [
-                  { text: "✅ Готово", callback_data: `ui:done_confirm:${params.orderId}` },
-                  { text: "❌ Отменить", callback_data: `ui:cancel_confirm:${params.orderId}` },
-                ],
-              ]),
-      ...(contactRow.length > 0 ? [contactRow] : []),
-    ],
+  const inline_keyboard =
+    actionsView === "contact_confirm"
+      ? [
+          [buildConversationRequestConfirmButton(params.orderId)],
+          [{ text: "⬅ Назад", callback_data: `ui:main:${params.orderId}` }],
+        ]
+      : [
+          ...(!hasFinalStatus
+            ? actionsView === "done_confirm"
+              ? [
+                  [{ text: "Подтвердить ✅", callback_data: `status:done:${params.orderId}` }],
+                  [{ text: "⬅ Назад", callback_data: `ui:main:${params.orderId}` }],
+                ]
+              : actionsView === "cancel_confirm"
+                ? [
+                    [
+                      {
+                        text: "Подтвердить ❌",
+                        callback_data: `status:cancelled:${params.orderId}`,
+                      },
+                    ],
+                    [{ text: "⬅ Назад", callback_data: `ui:main:${params.orderId}` }],
+                  ]
+                : [
+                    [
+                      { text: "✅ Готово", callback_data: `ui:done_confirm:${params.orderId}` },
+                      { text: "❌ Отменить", callback_data: `ui:cancel_confirm:${params.orderId}` },
+                    ],
+                  ]
+            : []),
+          [buildConversationRequestButton(params.orderId)],
+        ];
+
+  return {
+    text,
+    reply_markup: {
+      inline_keyboard,
+    },
   };
-
-  return { text, reply_markup };
 }
 
 export function buildOrderStatusTelegramText(

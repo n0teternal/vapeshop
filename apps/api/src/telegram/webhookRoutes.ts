@@ -24,7 +24,7 @@ import {
 
 type CallbackStatus = Exclude<OrderStatus, "new">;
 
-type CallbackUiView = "main" | "done_confirm" | "cancel_confirm";
+type CallbackUiView = "main" | "done_confirm" | "cancel_confirm" | "contact_confirm";
 
 type ParsedCallbackQuery = {
   callbackQueryId: string;
@@ -170,7 +170,12 @@ function parseCallbackData(data: string): ParsedCallbackAction | null {
   }
 
   if (type === "ui") {
-    if (actionRaw !== "main" && actionRaw !== "done_confirm" && actionRaw !== "cancel_confirm") {
+    if (
+      actionRaw !== "main" &&
+      actionRaw !== "done_confirm" &&
+      actionRaw !== "cancel_confirm" &&
+      actionRaw !== "contact_confirm"
+    ) {
       return null;
     }
     return { kind: "order_ui", view: actionRaw, orderId };
@@ -610,6 +615,8 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
               orderStatus !== "done" &&
               orderStatus !== "cancelled"
             ? "cancel_confirm"
+            : action.kind === "order_ui" && action.view === "contact_confirm"
+              ? "contact_confirm"
             : "main",
       cityName: city.name,
       citySlug,
