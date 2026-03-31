@@ -1,4 +1,8 @@
-import type { TelegramReplyMarkup } from "../telegram/api.js";
+import type { TelegramInlineKeyboardButton, TelegramReplyMarkup } from "../telegram/api.js";
+import {
+  buildConversationRequestButton,
+  shouldOfferConversationRequest,
+} from "./conversationRequest.js";
 
 export type OrderStatus = "new" | "processing" | "done" | "cancelled";
 
@@ -53,8 +57,7 @@ function statusPrefix(status: OrderStatus): string {
 }
 
 function shortOrderId(orderId: string): string {
-  const suffix = orderId.slice(-6);
-  return suffix.toUpperCase();
+  return orderId.slice(-6).toUpperCase();
 }
 
 function normalizeTelegramUsername(username: string | null): string | null {
@@ -73,9 +76,7 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
     .map((line) => `• ${escapeHtml(line.title)} ×${line.qty} — ${formatRub(line.unitPrice)}`)
     .join("\n");
 
-  const commentPart = params.comment
-    ? `\nКомментарий: ${escapeHtml(params.comment)}`
-    : "";
+  const commentPart = params.comment ? `\nКомментарий: ${escapeHtml(params.comment)}` : "";
   const totalSuffix = params.discountApplied ? " - СКИДКА!" : "";
 
   return (
@@ -100,11 +101,17 @@ export function buildOrderTelegramMessage(
   const actionsView: TelegramOrderActionsView = params.actionsView ?? "main";
   const username = normalizeTelegramUsername(params.tgUser.username);
   const text =
-    statusPrefix(params.status) +
-    `<b>Новый заказ</b>\n` +
-    buildOrderBody(params);
+    statusPrefix(params.status) + `<b>Новый заказ</b>\n` + buildOrderBody(params);
 
   const hasFinalStatus = params.status === "done" || params.status === "cancelled";
+  const contactRow: TelegramInlineKeyboardButton[] = shouldOfferConversationRequest({
+    tgUsername: username,
+    status: params.status,
+  })
+    ? [buildConversationRequestButton(params.orderId)]
+    : username
+      ? [{ text: "Скопировать контакт", copy_text: { text: `@${username}` } }]
+      : [];
 
   const reply_markup: TelegramReplyMarkup = {
     inline_keyboard: [
@@ -112,52 +119,21 @@ export function buildOrderTelegramMessage(
         ? []
         : actionsView === "done_confirm"
           ? [
-              [
-                {
-                  text: "Подтвердить ✅",
-                  callback_data: `status:done:${params.orderId}`,
-                },
-              ],
-              [
-                {
-                  text: "⬅ Назад",
-                  callback_data: `ui:main:${params.orderId}`,
-                },
-              ],
+              [{ text: "Подтвердить ✅", callback_data: `status:done:${params.orderId}` }],
+              [{ text: "⬅ Назад", callback_data: `ui:main:${params.orderId}` }],
             ]
           : actionsView === "cancel_confirm"
             ? [
-                [
-                  {
-                    text: "Подтвердить ❌",
-                    callback_data: `status:cancelled:${params.orderId}`,
-                  },
-                ],
-                [
-                  {
-                    text: "⬅ Назад",
-                    callback_data: `ui:main:${params.orderId}`,
-                  },
-                ],
+                [{ text: "Подтвердить ❌", callback_data: `status:cancelled:${params.orderId}` }],
+                [{ text: "⬅ Назад", callback_data: `ui:main:${params.orderId}` }],
               ]
             : [
                 [
-                  {
-                    text: "✅ Готово",
-                    callback_data: `ui:done_confirm:${params.orderId}`,
-                  },
-                  {
-                    text: "❌ Отменить",
-                    callback_data: `ui:cancel_confirm:${params.orderId}`,
-                  },
+                  { text: "✅ Готово", callback_data: `ui:done_confirm:${params.orderId}` },
+                  { text: "❌ Отменить", callback_data: `ui:cancel_confirm:${params.orderId}` },
                 ],
               ]),
-      [
-        {
-          text: "Скопировать контакт",
-          copy_text: { text: username ? `@${username}` : String(params.tgUser.id) },
-        },
-      ],
+      ...(contactRow.length > 0 ? [contactRow] : []),
     ],
   };
 
@@ -169,9 +145,5 @@ export function buildOrderStatusTelegramText(
     status: Extract<OrderStatus, "done" | "cancelled">;
   },
 ): string {
-  return (
-    statusPrefix(params.status) +
-    `<b>Обновление заказа</b>\n` +
-    buildOrderBody(params)
-  );
+  return statusPrefix(params.status) + `<b>Обновление заказа</b>\n` + buildOrderBody(params);
 }

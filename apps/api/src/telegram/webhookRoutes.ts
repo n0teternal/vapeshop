@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { isHttpError } from "../httpError.js";
 import { cancelOrderAndRestoreInventory } from "../order/cancelOrder.js";
+import { buildCustomerConversationRequestMessage } from "../order/conversationRequest.js";
 import {
   buildOrderTelegramMessage,
   type CitySlug,
@@ -42,6 +43,7 @@ type ParsedStartCommand = {
 type ParsedCallbackAction =
   | { kind: "order_status"; status: CallbackStatus; orderId: string }
   | { kind: "order_ui"; view: CallbackUiView; orderId: string }
+  | { kind: "request_conversation"; orderId: string }
   | { kind: "menu"; view: "main" | "orders" | "referral" };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -142,6 +144,14 @@ function parseCallbackData(data: string): ParsedCallbackAction | null {
     return null;
   }
 
+  if (type === "contact_request" && parts.length === 2) {
+    const orderId = actionRaw;
+    const uuidV4ish =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
+    if (!uuidV4ish) return null;
+    return { kind: "request_conversation", orderId };
+  }
+
   // Keep this tolerant: Telegram callback_data is just a string and older/newer clients may add segments.
   if (parts.length < 3) return null;
 
@@ -185,12 +195,17 @@ function parseOrderStatus(value: unknown): OrderStatus {
   return "new";
 }
 
-async function answerSafe(callbackQueryId: string, text: string): Promise<void> {
+async function answerSafe(
+  callbackQueryId: string,
+  text: string,
+  showAlert = false,
+): Promise<void> {
   try {
     await answerCallbackQuery({
       botToken: config.telegram.botToken,
       callbackQueryId,
       text,
+      showAlert,
     });
   } catch {
     // Best-effort; webhook should still return 200 to avoid Telegram retries.
@@ -509,6 +524,32 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         parsed.callbackQueryId,
         action.kind === "order_ui" ? "Ок" : "Статус обновлен",
       );
+      return reply.code(200).send({ ok: true });
+    }
+
+    if (action.kind === "request_conversation") {
+      try {
+        const customerMessage = buildCustomerConversationRequestMessage({
+          citySlug,
+          orderId: order.id,
+        });
+
+        await sendMessage({
+          botToken: config.telegram.botToken,
+          chatId: String(order.tg_user_id),
+          text: customerMessage.text,
+          replyMarkup: customerMessage.reply_markup,
+        });
+
+        await answerSafe(parsed.callbackQueryId, "Запрос отправлен");
+      } catch (e) {
+        request.log.error(
+          { err: e, orderId: order.id, tgUserId: order.tg_user_id },
+          "Failed to send conversation request to customer",
+        );
+        await answerSafe(parsed.callbackQueryId, "Не удалось написать клиенту", true);
+      }
+
       return reply.code(200).send({ ok: true });
     }
 

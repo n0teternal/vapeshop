@@ -24,6 +24,8 @@ export type AppConfig = {
     chatIdsVvo: string[] | null;
     chatIdsBlg: string[] | null;
     chatIdsOrderStatus: string[] | null;
+    orderContactUsernameVvo: string;
+    orderContactUsernameBlg: string;
   };
   referrals: {
     pointsInviter: number;
@@ -139,6 +141,15 @@ function parseOptionalTelegramChatIds(key: string): string[] | null {
   return parseTelegramChatIds(raw, key);
 }
 
+function parseTelegramUsernameEnv(key: string, fallbackValue: string): string {
+  const raw = readEnv(key) ?? fallbackValue;
+  const normalized = raw.trim().replace(/^@+/, "");
+  if (normalized.length === 0) {
+    throw new Error(`Invalid env ${key}: expected Telegram username`);
+  }
+  return normalized;
+}
+
 function parseNodeEnv(): NodeEnv {
   const raw = readEnv("NODE_ENV");
   if (!raw) return "development";
@@ -175,6 +186,14 @@ export const config: AppConfig = (() => {
       chatIdsVvo: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_VVO"),
       chatIdsBlg: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_BLG"),
       chatIdsOrderStatus: parseOptionalTelegramChatIds("TELEGRAM_CHAT_ID_ORDER_STATUS"),
+      orderContactUsernameVvo: parseTelegramUsernameEnv(
+        "TELEGRAM_ORDER_CONTACT_USERNAME_VVO",
+        "sdfgshopinss",
+      ),
+      orderContactUsernameBlg: parseTelegramUsernameEnv(
+        "TELEGRAM_ORDER_CONTACT_USERNAME_BLG",
+        "Smoke_Diller_Admin",
+      ),
     },
     referrals: {
       pointsInviter: parsePositiveIntEnv("REFERRAL_POINTS_INVITER", 100),
