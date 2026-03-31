@@ -33,6 +33,7 @@ type LoggerLike = {
 type OrderRow = {
   id: string;
   status: string;
+  created_at: string;
   city_id: number | null;
   tg_user_id: number;
   tg_username: string | null;
@@ -177,7 +178,7 @@ async function loadOrderContext(orderId: string): Promise<{
   const { data: orderData, error: orderError } = await supabase
     .from("orders")
     .select(
-      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_targets",
+      "id,status,created_at,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_targets",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -262,14 +263,47 @@ async function loadOrderContext(orderId: string): Promise<{
   };
 }
 
+async function isRecentCityOrder(params: {
+  cityId: number;
+  orderId: string;
+  limit?: number;
+}): Promise<boolean> {
+  const supabase = createServiceSupabaseClient();
+  const limit = params.limit ?? 3;
+  const { data, error } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("city_id", params.cityId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(`Failed to load recent city orders: ${error.message}`);
+  }
+
+  return (data ?? []).some((row) => row.id === params.orderId);
+}
+
 export async function syncFinalOrderTelegramState(params: {
   orderId: string;
   status: FinalOrderStatus;
   fallbackTarget?: NotifyTarget | null;
   skipStatusChats?: boolean;
+  cancelledOrderChatsMode?: "auto" | "edit_only";
   logger?: LoggerLike;
 }): Promise<void> {
   const context = await loadOrderContext(params.orderId);
+  const cancelledOrderChatsMode = params.cancelledOrderChatsMode ?? "auto";
+  const shouldDuplicateCancelledOrderChats =
+    params.status === "cancelled"
+      ? cancelledOrderChatsMode === "edit_only"
+        ? false
+        : !(await isRecentCityOrder({
+            cityId: context.order.city_id ?? 0,
+            orderId: context.order.id,
+            limit: 3,
+          }))
+      : false;
 
   const statusText = buildOrderStatusTelegramText({
     status: params.status,
@@ -335,7 +369,10 @@ export async function syncFinalOrderTelegramState(params: {
     }
   }
 
-  const persistedTargets: NotifyTarget[] = params.status === "cancelled" ? [] : [...notifyTargets];
+  const persistedTargets: NotifyTarget[] =
+    params.status === "cancelled" && shouldDuplicateCancelledOrderChats
+      ? []
+      : [...notifyTargets];
 
   for (const target of notifyTargets) {
     if (params.status === "done") {
@@ -399,12 +436,18 @@ export async function syncFinalOrderTelegramState(params: {
     orderChatIdsToNotify.add(String(target.chatId));
   }
 
+  if (params.status === "cancelled" && cancelledOrderChatsMode === "edit_only") {
+    orderChatIdsToNotify.clear();
+  }
+
   for (const chatId of orderChatIdsToNotify) {
     const numericChatId = Number(chatId);
 
     if (params.status !== "cancelled") {
       if (!Number.isInteger(numericChatId)) continue;
       if (orderTargetsByChatId.has(numericChatId)) continue;
+    } else if (!shouldDuplicateCancelledOrderChats) {
+      if (Number.isInteger(numericChatId) && orderTargetsByChatId.has(numericChatId)) continue;
     }
 
     try {
