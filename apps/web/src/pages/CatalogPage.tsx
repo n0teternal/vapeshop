@@ -165,10 +165,274 @@ function normalizeCatalogCategoryId(value: string): CatalogFilterCategoryId | nu
 function normalizeSearchText(value: string): string {
   return value
     .toLowerCase()
+    .normalize("NFKD")
+    .replaceAll(/\p{M}+/gu, "")
     .replaceAll("ё", "е")
-    .replaceAll(/[^a-z0-9а-я\s]+/g, " ")
+    .replaceAll(/[^\p{L}\p{N}\s]+/gu, " ")
     .replaceAll(/\s+/g, " ")
     .trim();
+}
+
+const SEARCH_CYRILLIC_TO_LATIN_MAP: Record<string, string> = {
+  а: "a",
+  б: "b",
+  в: "v",
+  г: "g",
+  д: "d",
+  е: "e",
+  ё: "e",
+  ж: "zh",
+  з: "z",
+  и: "i",
+  й: "y",
+  к: "k",
+  л: "l",
+  м: "m",
+  н: "n",
+  о: "o",
+  п: "p",
+  р: "r",
+  с: "s",
+  т: "t",
+  у: "u",
+  ф: "f",
+  х: "h",
+  ц: "ts",
+  ч: "ch",
+  ш: "sh",
+  щ: "shch",
+  ъ: "",
+  ы: "y",
+  ь: "",
+  э: "e",
+  ю: "yu",
+  я: "ya",
+};
+
+const EN_TO_RU_KEYBOARD_MAP: Record<string, string> = {
+  q: "й",
+  w: "ц",
+  e: "у",
+  r: "к",
+  t: "е",
+  y: "н",
+  u: "г",
+  i: "ш",
+  o: "щ",
+  p: "з",
+  a: "ф",
+  s: "ы",
+  d: "в",
+  f: "а",
+  g: "п",
+  h: "р",
+  j: "о",
+  k: "л",
+  l: "д",
+  z: "я",
+  x: "ч",
+  c: "с",
+  v: "м",
+  b: "и",
+  n: "т",
+  m: "ь",
+};
+
+const RU_TO_EN_KEYBOARD_MAP = Object.fromEntries(
+  Object.entries(EN_TO_RU_KEYBOARD_MAP).map(([left, right]) => [right, left]),
+) as Record<string, string>;
+
+const MANUFACTURER_SYNONYM_GROUPS = [
+  ["CATSWILL", "catswill", "кэтсвилл", "кэтсвил", "кетсвилл"],
+  ["D.L.T.A.", "dlta", "d l t a", "длта", "д л т а"],
+  ["DUAL EXTREME", "dual", "dual extreme", "дуал", "дуал экстрим", "дуал экстрем"],
+  ["Elf Bar", "elf", "elf bar", "эльф", "эльф бар"],
+  ["FEDRS", "fedrs", "федрс"],
+  ["Fummo", "fummo", "фуммо"],
+  ["Geekvape", "aegis", "geek", "geek vape", "geekvape", "эгис", "эйгис", "гик", "гиквейп", "гик вейп"],
+  ["HQD", "hqd", "хкд", "ашкьюди"],
+  ["Lost Mary", "lost mary", "лост мэри", "лост мари", "лостмери", "лостмэри"],
+  ["ODENS", "odens", "оденс"],
+  ["OGGO", "oggo", "огго"],
+  ["Podonki", "podonki", "подонки"],
+  ["Puffmi", "puffmi", "пуффми", "паффми"],
+  ["RnM", "rnm", "рнм", "эрэнэм"],
+  ["SMOANT", "pasito", "smoant", "пасито", "смоант"],
+  ["Vozol", "vozol", "возол"],
+  ["WAKA", "waka", "вака"],
+  ["XROS", "xros", "иксрос", "ксрос"],
+  ["ГРЕХ", "greh", "грех"],
+] as const;
+
+const CATEGORY_SEARCH_TERMS: Record<string, string[]> = {
+  liquid: ["liquid", "liquids", "juice", "жидкость", "жидкости", "жижа", "жижи"],
+  disposable: ["disposable", "disposables", "одноразка", "одноразки", "одноразовый", "одноразовые"],
+  pod: ["pod", "pods", "pod system", "под", "поды", "подик", "подики"],
+  tobacco: ["tobacco", "tabacco", "snus", "pouch", "pouches", "табак", "снюс", "пауч", "паучи"],
+  cartridge: ["cartridge", "cartridges", "coil", "coils", "картридж", "картриджи", "испаритель", "испарители"],
+};
+
+function transliterateSearchText(value: string): string {
+  const normalized = normalizeSearchText(value);
+  if (normalized.length === 0) return "";
+
+  let result = "";
+  for (const char of normalized) {
+    result += SEARCH_CYRILLIC_TO_LATIN_MAP[char] ?? char;
+  }
+
+  return normalizeSearchText(result);
+}
+
+function buildPhoneticSearchText(value: string): string {
+  const latin = transliterateSearchText(value);
+  if (latin.length === 0) return "";
+
+  return latin
+    .replaceAll("shch", "sch")
+    .replaceAll("zh", "j")
+    .replaceAll("kh", "h")
+    .replaceAll("ts", "c")
+    .replaceAll("ph", "f")
+    .replaceAll("ck", "k")
+    .replaceAll("qu", "k")
+    .replaceAll("x", "ks")
+    .replaceAll("w", "v")
+    .replaceAll("c", "k")
+    .replaceAll("y", "i")
+    .replaceAll(/[aeiou]+/g, "")
+    .replaceAll(/(.)\1+/g, "$1")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+}
+
+function switchKeyboardLayout(value: string, map: Record<string, string>): string {
+  let changed = false;
+  let result = "";
+
+  for (const char of value.toLowerCase()) {
+    const next = map[char] ?? char;
+    if (next !== char) changed = true;
+    result += next;
+  }
+
+  return changed ? result : value;
+}
+
+function addSearchVariant(variants: Set<string>, value: string): void {
+  const normalized = normalizeSearchText(value);
+  if (normalized.length > 0) {
+    variants.add(normalized);
+
+    const compact = normalized.replaceAll(" ", "");
+    if (compact.length >= 3) {
+      variants.add(compact);
+    }
+  }
+
+  const transliterated = transliterateSearchText(value);
+  if (transliterated.length > 0) {
+    variants.add(transliterated);
+
+    const compact = transliterated.replaceAll(" ", "");
+    if (compact.length >= 3) {
+      variants.add(compact);
+    }
+  }
+
+  const phonetic = buildPhoneticSearchText(value);
+  if (phonetic.length > 0) {
+    variants.add(phonetic);
+
+    const compact = phonetic.replaceAll(" ", "");
+    if (compact.length >= 3) {
+      variants.add(compact);
+    }
+  }
+}
+
+function buildManufacturerAliasMaps(groups: readonly (readonly string[])[]): {
+  labelAliases: Map<string, string>;
+  searchAliases: Map<string, string[]>;
+} {
+  const labelAliases = new Map<string, string>();
+  const searchAliases = new Map<string, string[]>();
+
+  for (const group of groups) {
+    const [canonicalLabel, ...terms] = group;
+    const searchableTerms = Array.from(new Set([canonicalLabel, ...terms]));
+    const normalizedTerms = searchableTerms
+      .map((value) => normalizeSearchText(value))
+      .filter((value) => value.length > 0);
+
+    for (const normalizedTerm of normalizedTerms) {
+      labelAliases.set(normalizedTerm, canonicalLabel);
+      searchAliases.set(normalizedTerm, searchableTerms);
+    }
+  }
+
+  return { labelAliases, searchAliases };
+}
+
+const { labelAliases: MANUFACTURER_LABEL_ALIASES, searchAliases: MANUFACTURER_SEARCH_ALIASES } =
+  buildManufacturerAliasMaps(MANUFACTURER_SYNONYM_GROUPS);
+
+function getManufacturerSearchTerms(value: string): string[] {
+  const normalized = normalizeSearchText(value);
+  if (normalized.length === 0) return [];
+
+  const directAliases = MANUFACTURER_SEARCH_ALIASES.get(normalized);
+  if (directAliases) {
+    return directAliases;
+  }
+
+  const canonicalLabel = MANUFACTURER_LABEL_ALIASES.get(normalized);
+  if (!canonicalLabel) {
+    return [value];
+  }
+
+  return MANUFACTURER_SEARCH_ALIASES.get(normalizeSearchText(canonicalLabel)) ?? [canonicalLabel];
+}
+
+function buildCatalogSearchTexts(
+  item: CatalogItem,
+  manufacturerLabel: string,
+  categoryId: string,
+): string[] {
+  const fragments = new Set<string>();
+  fragments.add(item.title);
+  fragments.add(manufacturerLabel);
+
+  if (item.description) {
+    fragments.add(item.description);
+  }
+
+  for (const alias of getManufacturerSearchTerms(manufacturerLabel)) {
+    fragments.add(alias);
+  }
+
+  for (const categoryTerm of CATEGORY_SEARCH_TERMS[categoryId] ?? []) {
+    fragments.add(categoryTerm);
+  }
+
+  const variants = new Set<string>();
+  addSearchVariant(variants, Array.from(fragments).join(" "));
+  return Array.from(variants);
+}
+
+function buildSearchQueryVariants(value: string): string[] {
+  const rawCandidates = new Set<string>([
+    value,
+    switchKeyboardLayout(value, RU_TO_EN_KEYBOARD_MAP),
+    switchKeyboardLayout(value, EN_TO_RU_KEYBOARD_MAP),
+  ]);
+  const variants = new Set<string>();
+
+  for (const candidate of rawCandidates) {
+    addSearchVariant(variants, candidate);
+  }
+
+  return Array.from(variants);
 }
 
 
@@ -225,10 +489,10 @@ function levenshteinDistanceWithinLimit(
   return previous[right.length];
 }
 
-function getSearchMatchScore(title: string, normalizedQuery: string): number {
+function getSearchMatchScoreSingle(searchText: string, normalizedQuery: string): number {
   if (normalizedQuery.length === 0) return 1;
 
-  const normalizedTitle = normalizeSearchText(title);
+  const normalizedTitle = normalizeSearchText(searchText);
   if (normalizedTitle.length === 0) return 0;
 
   const exactIndex = normalizedTitle.indexOf(normalizedQuery);
@@ -283,6 +547,24 @@ function getSearchMatchScore(title: string, normalizedQuery: string): number {
   return totalScore;
 }
 
+function getSearchMatchScore(searchTexts: string[], queryVariants: string[]): number {
+  if (queryVariants.length === 0) return 1;
+  if (searchTexts.length === 0) return 0;
+
+  let bestScore = 0;
+
+  for (const queryVariant of queryVariants) {
+    for (const searchText of searchTexts) {
+      const score = getSearchMatchScoreSingle(searchText, queryVariant);
+      if (score > bestScore) {
+        bestScore = score;
+      }
+    }
+  }
+
+  return bestScore;
+}
+
 const MANUFACTURER_STOP_WORDS = new Set([
   "одноразка",
   "одноразовый",
@@ -300,15 +582,6 @@ const MANUFACTURER_STOP_WORDS = new Set([
   "cartridge",
   "картридж",
   "испаритель",
-]);
-
-const MANUFACTURER_LABEL_ALIASES = new Map<string, string>([
-  ["aegis", "Geekvape"],
-  ["geek", "Geekvape"],
-  ["geekvape", "Geekvape"],
-  ["lost mary", "Lost Mary"],
-  ["pasito", "SMOANT"],
-  ["smoant", "SMOANT"],
 ]);
 
 function normalizeManufacturerLabel(value: string): string {
@@ -359,14 +632,12 @@ function ProductCard({
   imageLoading,
   onAdd,
   onToggleFavorite,
-  onOpenImage: _onOpenImage,
 }: {
   item: CatalogItem;
   isFavorite: boolean;
   imageLoading: "eager" | "lazy";
   onAdd: () => void;
   onToggleFavorite: () => void;
-  onOpenImage: (preview: CatalogImagePreview) => void;
 }) {
   const previewImageSrc = useMemo(
     () => buildImageCandidates(item.imageUrl, { targetWidth: 1280 })[0] ?? null,
@@ -474,6 +745,7 @@ type CatalogRow = {
   categoryId: string;
   manufacturerId: string;
   manufacturerLabel: string;
+  searchTexts: string[];
 };
 
 type CatalogSortMode =
@@ -590,14 +862,17 @@ export function CatalogPage() {
   const catalogRows = useMemo<CatalogRow[]>(() => {
     return items.filter((item) => item.inStock).map((item) => {
       const manufacturerLabel = extractManufacturerLabel(item.title);
+      const categoryId =
+        typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
+          ? normalizeCatalogCategoryId(item.categorySlug) ?? item.categorySlug.trim().toLowerCase()
+          : "other";
+
       return {
         item,
-        categoryId:
-          typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
-            ? normalizeCatalogCategoryId(item.categorySlug) ?? item.categorySlug.trim().toLowerCase()
-            : "other",
+        categoryId,
         manufacturerLabel,
         manufacturerId: normalizeManufacturerId(manufacturerLabel),
+        searchTexts: buildCatalogSearchTexts(item, manufacturerLabel, categoryId),
       };
     });
   }, [items]);
@@ -644,8 +919,8 @@ export function CatalogPage() {
     return new Set(selectedManufacturerIds);
   }, [selectedManufacturerIds]);
 
-  const normalizedSearchQuery = useMemo(() => {
-    return normalizeSearchText(searchQuery);
+  const searchQueryVariants = useMemo(() => {
+    return buildSearchQueryVariants(searchQuery);
   }, [searchQuery]);
 
   const activeFilterCount = useMemo(() => {
@@ -708,11 +983,11 @@ export function CatalogPage() {
     });
 
     const scoredItems =
-      normalizedSearchQuery.length > 0
+      searchQueryVariants.length > 0
         ? preFilteredRows
             .map((row) => ({
               item: row.item,
-              score: getSearchMatchScore(row.item.title, normalizedSearchQuery),
+              score: getSearchMatchScore(row.searchTexts, searchQueryVariants),
             }))
             .filter((entry) => entry.score > 0)
         : preFilteredRows.map((row) => ({ item: row.item, score: 0 }));
@@ -761,7 +1036,7 @@ export function CatalogPage() {
         .map((entry) => entry.item);
     }
 
-    if (normalizedSearchQuery.length > 0) {
+    if (searchQueryVariants.length > 0) {
       return [...scoredItems]
         .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title, "ru"))
         .map((entry) => entry.item);
@@ -770,7 +1045,7 @@ export function CatalogPage() {
     return scoredItems.map((entry) => entry.item);
   }, [
     catalogRows,
-    normalizedSearchQuery,
+    searchQueryVariants,
     selectedCategoryId,
     selectedManufacturerIds.length,
     selectedManufacturersSet,
@@ -1122,7 +1397,6 @@ export function CatalogPage() {
                       : "\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u0438\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0435",
                   );
                 }}
-                onOpenImage={setImagePreview}
               />
             ))}
           </div>
