@@ -632,9 +632,10 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     const notifyChatId = order.notify_chat_id;
     const notifyMessageId = order.notify_message_id;
     const editTarget =
-      notifyChatId !== null && notifyMessageId !== null
+      parsed.message ??
+      (notifyChatId !== null && notifyMessageId !== null
         ? { chatId: notifyChatId, messageId: notifyMessageId }
-        : parsed.message;
+        : undefined);
 
     if (editTarget) {
       try {
