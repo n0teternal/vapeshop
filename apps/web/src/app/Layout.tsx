@@ -1,8 +1,6 @@
 import type { ReactNode } from "react";
 import { Heart, Home, ShoppingBag, UserRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
-import { DevModeBanner } from "../components/DevModeBanner";
-import { Badge } from "../components/ui/badge";
 import { cn } from "../lib/utils";
 import { useAppState } from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
@@ -44,7 +42,7 @@ function TabLink({ to, label, badge, end, icon, photoUrl }: TabLinkProps) {
 }
 
 export function Layout() {
-  const { isTelegram, webApp } = useTelegram();
+  const { webApp } = useTelegram();
   const { cartCount, favoritesCount } = useAppState();
 
   const photoUrl =
@@ -69,11 +67,8 @@ export function Layout() {
               </div>
               <div className="mt-1 text-lg font-semibold leading-none">Mini Market</div>
             </div>
-            {!isTelegram ? <Badge variant="warning">DEV MODE</Badge> : null}
           </div>
         </header>
-
-        {!isTelegram ? <DevModeBanner /> : null}
 
         <main className="mx-auto w-full max-w-md px-4 pb-[8.6rem] pt-5">
           <Outlet />

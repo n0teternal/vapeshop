@@ -623,6 +623,24 @@ function extractManufacturerLabel(title: string): string {
   return "Other";
 }
 
+function resolveCatalogManufacturerLabel(params: {
+  title: string;
+  categoryId: string;
+  citySlug: string | null;
+}): string {
+  const extracted = extractManufacturerLabel(params.title);
+
+  if (
+    params.citySlug === "blg" &&
+    params.categoryId === "pod" &&
+    normalizeSearchText(extracted) === "xros"
+  ) {
+    return "Vaporesso";
+  }
+
+  return extracted;
+}
+
 
 type CatalogImagePreview = { src: string; alt: string };
 
@@ -861,11 +879,15 @@ export function CatalogPage() {
 
   const catalogRows = useMemo<CatalogRow[]>(() => {
     return items.filter((item) => item.inStock).map((item) => {
-      const manufacturerLabel = extractManufacturerLabel(item.title);
       const categoryId =
         typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
           ? normalizeCatalogCategoryId(item.categorySlug) ?? item.categorySlug.trim().toLowerCase()
           : "other";
+      const manufacturerLabel = resolveCatalogManufacturerLabel({
+        title: item.title,
+        categoryId,
+        citySlug: state.city,
+      });
 
       return {
         item,
@@ -875,7 +897,7 @@ export function CatalogPage() {
         searchTexts: buildCatalogSearchTexts(item, manufacturerLabel, categoryId),
       };
     });
-  }, [items]);
+  }, [items, state.city]);
 
   const categories = useMemo<CategoryStat[]>(() => {
     const counts = new Map<string, number>();

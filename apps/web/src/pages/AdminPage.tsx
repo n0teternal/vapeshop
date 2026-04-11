@@ -1216,7 +1216,7 @@ function AdminOrdersView() {
                 </div>
 
                 {o.comment ? (
-                  <div className="mt-3 rounded-xl bg-muted/55 px-3 py-2 text-sm text-foreground/80">
+                  <div className="mt-3 whitespace-pre-line rounded-xl bg-muted/55 px-3 py-2 text-sm text-foreground/80">
                     <span className="text-xs font-semibold text-muted-foreground/80">
                       Комментарий:
                     </span>{" "}

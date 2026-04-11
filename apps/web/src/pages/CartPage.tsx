@@ -36,6 +36,12 @@ type ReferralOverviewBalance = {
   pointsBalance: number;
 };
 
+const BLG_DELIVERY_TIME_SLOTS = [
+  "18:00-19:00",
+  "19:00-20:00",
+  "20:00-21:00",
+] as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -72,6 +78,51 @@ function parseOrderApiResponse(value: unknown): OrderApiSuccess | OrderApiError 
   return { ok: false, error: { code: "BAD_RESPONSE", message: "Invalid API response" } };
 }
 
+function getTodayIsoDate(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDeliveryDateLabel(value: string): string {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}.${month}.${year}`;
+}
+
+function buildOrderComment(params: {
+  deliveryMethod: "pickup" | "delivery";
+  address: string;
+  comment: string;
+  citySlug: "vvo" | "blg" | null;
+  deliveryDate: string;
+  deliveryTimeSlot: string;
+}): string | null {
+  const trimmedComment = params.comment.trim();
+
+  if (params.deliveryMethod !== "delivery") {
+    return trimmedComment.length > 0 ? trimmedComment : null;
+  }
+
+  const lines = [`Адрес: ${params.address.trim()}`];
+
+  if (params.citySlug === "blg" && params.deliveryDate.trim().length > 0) {
+    lines.push(`Дата доставки: ${formatDeliveryDateLabel(params.deliveryDate)}`);
+  }
+
+  if (params.citySlug === "blg" && params.deliveryTimeSlot.trim().length > 0) {
+    lines.push(`Время доставки: ${params.deliveryTimeSlot.trim()}`);
+  }
+
+  if (trimmedComment.length > 0) {
+    lines.push(`Комментарий: ${trimmedComment}`);
+  }
+
+  return lines.join("\n");
+}
+
 export function CartPage() {
   const { state, dispatch } = useAppState();
   const { isTelegram, webApp } = useTelegram();
@@ -81,12 +132,17 @@ export function CartPage() {
   );
   const [address, setAddress] = useState("");
   const [comment, setComment] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
+  const [deliveryTimeSlot, setDeliveryTimeSlot] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pointsBalance, setPointsBalance] = useState(0);
   const [pointsEnabled, setPointsEnabled] = useState(false);
   const [pointsLoading, setPointsLoading] = useState(false);
   const [pointsError, setPointsError] = useState<string | null>(null);
+  const minDeliveryDate = getTodayIsoDate();
+  const showBlgDeliverySchedule =
+    state.city === "blg" && deliveryMethod === "delivery";
 
   const total = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
@@ -183,13 +239,14 @@ export function CartPage() {
         return;
       }
 
-      const trimmedComment = comment.trim();
-      const fullComment =
-        deliveryMethod === "delivery"
-          ? `Адрес: ${trimmedAddress}${trimmedComment ? `\n${trimmedComment}` : ""}`
-          : trimmedComment
-            ? trimmedComment
-            : null;
+      const fullComment = buildOrderComment({
+        deliveryMethod,
+        address: trimmedAddress,
+        comment,
+        citySlug: state.city,
+        deliveryDate,
+        deliveryTimeSlot,
+      });
 
       const pointsToSpendForOrder = pointsEnabled ? maxPointsToSpend : 0;
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
@@ -227,6 +284,8 @@ export function CartPage() {
       dispatch({ type: "cart/clear" });
       setAddress("");
       setComment("");
+      setDeliveryDate("");
+      setDeliveryTimeSlot("");
       if (pointsToSpendForOrder > 0) {
         setPointsBalance((prev) => Math.max(0, prev - pointsToSpendForOrder));
       }
@@ -373,17 +432,55 @@ export function CartPage() {
           </label>
 
           {deliveryMethod === "delivery" ? (
-            <label className="grid gap-1.5 text-sm">
-              <span className="text-xs font-semibold text-muted-foreground">
-                Ваш адрес <span className="text-destructive">*</span>
-              </span>
-              <Input
-                value={address}
-                disabled={submitting}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="Улица, дом"
-              />
-            </label>
+            <div className="space-y-3">
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">
+                  Ваш адрес <span className="text-destructive">*</span>
+                </span>
+                <Input
+                  value={address}
+                  disabled={submitting}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="Улица, дом"
+                />
+              </label>
+
+              {showBlgDeliverySchedule ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1.5 text-sm">
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      Дата доставки
+                    </span>
+                    <Input
+                      type="date"
+                      value={deliveryDate}
+                      min={minDeliveryDate}
+                      disabled={submitting}
+                      onChange={(e) => setDeliveryDate(e.target.value)}
+                    />
+                  </label>
+
+                  <label className="grid gap-1.5 text-sm">
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      Время доставки
+                    </span>
+                    <select
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                      value={deliveryTimeSlot}
+                      disabled={submitting}
+                      onChange={(e) => setDeliveryTimeSlot(e.target.value)}
+                    >
+                      <option value="">Не выбрано</option>
+                      {BLG_DELIVERY_TIME_SLOTS.map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+            </div>
           ) : null}
 
           <label className="grid gap-1.5 text-sm">
