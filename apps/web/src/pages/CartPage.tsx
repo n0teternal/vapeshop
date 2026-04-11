@@ -401,25 +401,25 @@ export function CartPage() {
       </div>
 
       <Card className="border-border/70 bg-card">
-        <CardHeader className="pb-2 sm:pb-3">
+        <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-[15px] sm:text-base">Оформление</CardTitle>
+            <CardTitle className="text-base">Оформление</CardTitle>
             <div className="text-right">
               {pointsToSpend > 0 ? (
                 <div className="text-xs text-muted-foreground line-through">
                   {formatPriceRub(total)}
                 </div>
               ) : null}
-              <div className="text-base font-semibold sm:text-lg">{formatPriceRub(totalToPay)}</div>
+              <div className="text-lg font-semibold">{formatPriceRub(totalToPay)}</div>
             </div>
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-2.5 p-4 pt-0 sm:space-y-3 sm:p-5 sm:pt-0">
-          <label className="grid min-w-0 gap-1 text-sm">
-            <span className="text-[11px] font-semibold text-muted-foreground sm:text-xs">Способ получения</span>
+        <CardContent className="space-y-3">
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-semibold text-muted-foreground">Способ получения</span>
             <select
-              className="h-9 w-full min-w-0 max-w-full rounded-xl border border-input bg-background px-3 text-[15px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:h-10 sm:text-sm"
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
               value={deliveryMethod}
               disabled={submitting}
               onChange={(e) =>
@@ -432,13 +432,12 @@ export function CartPage() {
           </label>
 
           {deliveryMethod === "delivery" ? (
-            <div className="min-w-0 space-y-2.5 sm:space-y-3">
-              <label className="grid min-w-0 gap-1 text-sm">
-                <span className="text-[11px] font-semibold text-muted-foreground sm:text-xs">
+            <div className="space-y-3">
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">
                   Ваш адрес <span className="text-destructive">*</span>
                 </span>
                 <Input
-                  className="h-9 min-w-0 max-w-full rounded-xl px-3 text-[15px] sm:h-10 sm:text-sm"
                   value={address}
                   disabled={submitting}
                   onChange={(e) => setAddress(e.target.value)}
@@ -447,13 +446,13 @@ export function CartPage() {
               </label>
 
               {showBlgDeliverySchedule ? (
-                <div className="grid min-w-0 gap-2.5 sm:grid-cols-2 sm:gap-3">
-                  <label className="grid min-w-0 gap-1 text-sm">
-                    <span className="text-[11px] font-semibold text-muted-foreground sm:text-xs">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-1.5 text-sm">
+                    <span className="text-xs font-semibold text-muted-foreground">
                       Дата доставки
                     </span>
                     <Input
-                      className="h-9 min-w-0 max-w-full rounded-xl px-3 text-[15px] sm:h-10 sm:text-sm"
+                      className="text-left [&::-webkit-date-and-time-value]:block [&::-webkit-date-and-time-value]:w-full [&::-webkit-date-and-time-value]:p-0 [&::-webkit-date-and-time-value]:text-left [&::-webkit-datetime-edit]:block [&::-webkit-datetime-edit]:p-0 [&::-webkit-datetime-edit]:text-left"
                       type="date"
                       value={deliveryDate}
                       min={minDeliveryDate}
@@ -462,12 +461,12 @@ export function CartPage() {
                     />
                   </label>
 
-                  <label className="grid min-w-0 gap-1 text-sm">
-                    <span className="text-[11px] font-semibold text-muted-foreground sm:text-xs">
+                  <label className="grid gap-1.5 text-sm">
+                    <span className="text-xs font-semibold text-muted-foreground">
                       Время доставки
                     </span>
                     <select
-                      className="h-9 w-full min-w-0 max-w-full rounded-xl border border-input bg-background px-3 text-[15px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:h-10 sm:text-sm"
+                      className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
                       value={deliveryTimeSlot}
                       disabled={submitting}
                       onChange={(e) => setDeliveryTimeSlot(e.target.value)}
@@ -485,10 +484,9 @@ export function CartPage() {
             </div>
           ) : null}
 
-          <label className="grid min-w-0 gap-1 text-sm">
-            <span className="text-[11px] font-semibold text-muted-foreground sm:text-xs">Комментарий</span>
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-semibold text-muted-foreground">Комментарий</span>
             <Textarea
-              className="min-h-[88px] min-w-0 max-w-full rounded-xl px-3 py-2.5 text-[15px] sm:min-h-[96px] sm:text-sm"
               value={comment}
               disabled={submitting}
               onChange={(e) => setComment(e.target.value)}
@@ -496,8 +494,8 @@ export function CartPage() {
             />
           </label>
 
-          <div className="space-y-2 rounded-xl border border-border/70 bg-background/50 p-2.5 sm:p-3">
-              <label className="flex min-w-0 items-start gap-2 text-[15px] leading-snug sm:text-sm">
+          <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
+              <label className="flex items-start gap-2 text-sm">
                 <input
                   type="checkbox"
                   className="mt-0.5 h-4 w-4 rounded border-input"
@@ -505,7 +503,7 @@ export function CartPage() {
                   disabled={submitting || pointsLoading || maxPointsToSpend <= 0}
                   onChange={(e) => setPointsEnabled(e.target.checked)}
                 />
-                <span className="min-w-0 break-words">
+                <span>
                   Использовать баллы ({pointsBalance})
                   {maxPointsToSpend > 0 ? `, спишется до ${pointsToSpend || maxPointsToSpend}` : ""}
                 </span>
@@ -528,7 +526,7 @@ export function CartPage() {
 
           <Button
             type="button"
-            className="h-10 w-full rounded-xl sm:h-11"
+            className="w-full"
             disabled={!canSubmit}
             onClick={() => void submitOrder()}
           >
