@@ -304,6 +304,9 @@ export async function syncFinalOrderTelegramState(params: {
             limit: 3,
           }))
       : false;
+  const shouldDeleteExistingOrderMessages =
+    params.status === "done" ||
+    (params.status === "cancelled" && shouldDuplicateCancelledOrderChats);
 
   const statusText = buildOrderStatusTelegramText({
     status: params.status,
@@ -375,7 +378,7 @@ export async function syncFinalOrderTelegramState(params: {
       : [...notifyTargets];
 
   for (const target of notifyTargets) {
-    if (params.status === "done") {
+    if (shouldDeleteExistingOrderMessages) {
       try {
         await deleteMessage({
           botToken: config.telegram.botToken,
@@ -386,7 +389,9 @@ export async function syncFinalOrderTelegramState(params: {
         logError(
           params.logger,
           { err: error, chatId: target.chatId, messageId: target.messageId, orderId: context.order.id },
-          "Failed to delete Telegram order message; falling back to edit",
+          params.status === "done"
+            ? "Failed to delete Telegram order message; falling back to edit"
+            : "Failed to delete cancelled Telegram order message before repost; falling back to edit",
         );
 
         try {
@@ -406,7 +411,9 @@ export async function syncFinalOrderTelegramState(params: {
               messageId: target.messageId,
               orderId: context.order.id,
             },
-            "Failed to edit Telegram order message after delete failure",
+            params.status === "done"
+              ? "Failed to edit Telegram order message after delete failure"
+              : "Failed to edit cancelled Telegram order message after delete failure",
           );
         }
       }

@@ -475,9 +475,6 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         await syncFinalOrderTelegramState({
           orderId: order.id,
           status: action.status,
-          ...(action.status === "cancelled"
-            ? { cancelledOrderChatsMode: "edit_only" as const }
-            : {}),
           fallbackTarget: parsed.message
             ? {
                 chatId: parsed.message.chatId,
