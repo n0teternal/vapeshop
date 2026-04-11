@@ -1700,10 +1700,10 @@ export function CatalogPage() {
       ) : null}
 
       {toast ? (
-        <div className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-4 [bottom:calc(env(safe-area-inset-bottom,0px)+7.1rem)]">
+        <div className="pointer-events-none fixed inset-x-0 z-30 flex justify-center px-4 [bottom:calc(env(safe-area-inset-bottom,0px)+5.2rem)]">
           <div
             key={toast.key}
-            className="w-full max-w-md rounded-2xl border border-border/80 bg-[linear-gradient(135deg,hsl(var(--card))_0%,hsl(var(--secondary))_100%)] px-4 py-3.5 text-sm font-semibold text-card-foreground shadow-[0_14px_40px_rgba(15,23,42,0.18)] backdrop-blur-xl"
+            className="catalog-toast-enter w-full max-w-md rounded-2xl border border-border/80 bg-[linear-gradient(135deg,hsl(var(--card))_0%,hsl(var(--secondary))_100%)] px-4 py-3.5 text-sm font-semibold text-card-foreground shadow-[0_14px_40px_rgba(15,23,42,0.18)] backdrop-blur-xl"
           >
             <div className="flex items-center gap-3">
               <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/16 text-primary">
