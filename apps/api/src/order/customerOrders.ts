@@ -1,5 +1,9 @@
 import { HttpError } from "../httpError.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import {
+  isCancellationLockedByDeliveryWindow,
+  type DeliveryCitySlug,
+} from "./deliverySchedule.js";
 import type { OrderStatus } from "./telegramMessage.js";
 
 type CustomerOrderRow = {
@@ -40,6 +44,7 @@ export type CustomerOrderSummary = {
   deliveryMethod: string;
   comment: string | null;
   canCancel: boolean;
+  cancelDisabledReason: "done" | "cancelled" | "deadline" | null;
   items: Array<{
     title: string;
     qty: number;
@@ -90,6 +95,7 @@ export async function listCustomerOrders(tgUserId: number): Promise<CustomerOrde
   );
 
   const cityLabelById = new Map<number, string>();
+  const cityById = new Map<number, CityRow>();
   if (cityIds.length > 0) {
     const { data: cities, error: citiesError } = await supabase
       .from("cities")
@@ -101,6 +107,7 @@ export async function listCustomerOrders(tgUserId: number): Promise<CustomerOrde
     }
 
     for (const city of (cities ?? []) as CityRow[]) {
+      cityById.set(city.id, city);
       cityLabelById.set(city.id, `${city.name} (${city.slug.toUpperCase()})`);
     }
   }
@@ -153,6 +160,29 @@ export async function listCustomerOrders(tgUserId: number): Promise<CustomerOrde
   return orderRows.map((row) => {
     const status = parseOrderStatus(row.status);
 
+    let orderCitySlug: DeliveryCitySlug | null = null;
+    if (row.city_id !== null) {
+      const cityRow = cityById.get(row.city_id);
+      if (cityRow && (cityRow.slug === "vvo" || cityRow.slug === "blg")) {
+        orderCitySlug = cityRow.slug;
+      }
+    }
+
+    const cancellationLocked = isCancellationLockedByDeliveryWindow({
+      citySlug: orderCitySlug,
+      comment: row.comment,
+    });
+    const canCancel =
+      status !== "done" && status !== "cancelled" && cancellationLocked !== true;
+    const cancelDisabledReason =
+      status === "done"
+        ? "done"
+        : status === "cancelled"
+          ? "cancelled"
+          : cancellationLocked
+            ? "deadline"
+            : null;
+
     return {
       id: row.id,
       status,
@@ -167,7 +197,8 @@ export async function listCustomerOrders(tgUserId: number): Promise<CustomerOrde
       createdAt: row.created_at,
       deliveryMethod: row.delivery_method,
       comment: row.comment,
-      canCancel: status !== "done" && status !== "cancelled",
+      canCancel,
+      cancelDisabledReason,
       items: itemsByOrderId.get(row.id) ?? [],
     };
   });

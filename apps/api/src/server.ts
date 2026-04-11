@@ -9,6 +9,12 @@ import { verifyTelegramInitData } from "./telegram/verifyInitData.js";
 import { createOrder, type CreateOrderPayload } from "./order/createOrder.js";
 import { listCustomerOrders } from "./order/customerOrders.js";
 import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
+import {
+  BLG_DELIVERY_TIME_SLOTS,
+  getTodayIsoDateForCity,
+  isDeliveryTimeSlotOpen,
+  isValidIsoDate,
+} from "./order/deliverySchedule.js";
 import { sendOrderNotificationToChats } from "./order/sendOrderNotification.js";
 import {
   buildNotifyTargetRecords,
@@ -47,15 +53,6 @@ type SuccessResponse = {
 type CitySlug = "vvo" | "blg";
 const TEST_ORDER_SELF_CHAT_ID = "1208488286";
 const DEV_FALLBACK_TG_USER_ID = 42;
-const CITY_UTC_OFFSET_MINUTES: Record<CitySlug, number> = {
-  vvo: 10 * 60,
-  blg: 9 * 60,
-};
-const BLG_DELIVERY_TIME_SLOTS = [
-  "18:00-19:00",
-  "19:00-20:00",
-  "20:00-21:00",
-] as const;
 
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
@@ -114,35 +111,6 @@ function requireCustomerTelegramUser(params: {
   return requireVerifiedTelegramRequest(params).user;
 }
 
-function getTodayIsoDateForCity(citySlug: CitySlug): string {
-  const adjusted = new Date(Date.now() + CITY_UTC_OFFSET_MINUTES[citySlug] * 60_000);
-  const year = adjusted.getUTCFullYear();
-  const month = String(adjusted.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(adjusted.getUTCDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function getMinutesOfDayForCity(citySlug: CitySlug): number {
-  const adjusted = new Date(Date.now() + CITY_UTC_OFFSET_MINUTES[citySlug] * 60_000);
-  return adjusted.getUTCHours() * 60 + adjusted.getUTCMinutes();
-}
-
-function isValidIsoDate(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return false;
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-
-  return (
-    parsed.getUTCFullYear() === year &&
-    parsed.getUTCMonth() === month - 1 &&
-    parsed.getUTCDate() === day
-  );
-}
-
 function parseOptionalTrimmedString(value: unknown, fieldName: string): string | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== "string") {
@@ -151,30 +119,6 @@ function parseOptionalTrimmedString(value: unknown, fieldName: string): string |
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function parseDeliveryTimeSlot(slot: string): { startMinutes: number; endMinutes: number } | null {
-  const match = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(slot);
-  if (!match) return null;
-
-  const startHours = Number(match[1]);
-  const startMinutes = Number(match[2]);
-  const endHours = Number(match[3]);
-  const endMinutes = Number(match[4]);
-
-  if (
-    !Number.isInteger(startHours) ||
-    !Number.isInteger(startMinutes) ||
-    !Number.isInteger(endHours) ||
-    !Number.isInteger(endMinutes)
-  ) {
-    return null;
-  }
-
-  return {
-    startMinutes: startHours * 60 + startMinutes,
-    endMinutes: endHours * 60 + endMinutes,
-  };
 }
 
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
@@ -243,18 +187,13 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     }
 
     if (deliveryDate === getTodayIsoDateForCity(citySlug)) {
-      const parsedSlot = parseDeliveryTimeSlot(deliveryTimeSlot);
-      if (!parsedSlot) {
-        throw new HttpError(
-          400,
-          "BAD_REQUEST",
-          "Выбран некорректный временной слот доставки.",
-        );
-      }
-
-      const cutoffMinutes = parsedSlot.startMinutes - 60;
-      const nowMinutes = getMinutesOfDayForCity(citySlug);
-      if (nowMinutes >= cutoffMinutes) {
+      if (
+        !isDeliveryTimeSlotOpen({
+          citySlug,
+          deliveryDate,
+          deliveryTimeSlot,
+        })
+      ) {
         throw new HttpError(
           400,
           "DELIVERY_TIME_SLOT_UNAVAILABLE",

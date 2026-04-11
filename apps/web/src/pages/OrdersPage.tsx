@@ -18,6 +18,7 @@ type CustomerOrder = {
   deliveryMethod: string;
   comment: string | null;
   canCancel: boolean;
+  cancelDisabledReason: "done" | "cancelled" | "deadline" | null;
   items: Array<{
     title: string;
     qty: number;
@@ -98,6 +99,16 @@ function shortOrderId(orderId: string): string {
   return orderId.slice(-6).toUpperCase();
 }
 
+function getCancelDisabledMessage(order: CustomerOrder): string {
+  if (order.cancelDisabledReason === "deadline") {
+    return "Этот заказ уже нельзя отменить: до начала выбранного интервала доставки остался час или меньше.";
+  }
+  if (order.cancelDisabledReason === "done" || order.status === "done") {
+    return "Заказ завершён и больше не может быть отменён.";
+  }
+  return "Этот заказ уже отменён.";
+}
+
 export function OrdersPage() {
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,7 +147,7 @@ export function OrdersPage() {
 
   async function handleCancel(orderId: string): Promise<void> {
     const confirmed = window.confirm(
-      "Отменить заказ? Это действие доступно только пока заказ не достиг статуса done.",
+      "Отменить заказ? Это действие доступно, пока заказ не завершён и до начала выбранного интервала доставки остаётся больше часа.",
     );
     if (!confirmed) return;
 
@@ -284,9 +295,7 @@ export function OrdersPage() {
                       </Button>
                     ) : (
                       <div className="text-xs text-muted-foreground">
-                        {order.status === "done"
-                          ? "Заказ завершён и больше не может быть отменён."
-                          : "Этот заказ уже отменён."}
+                        {getCancelDisabledMessage(order)}
                       </div>
                     )}
                   </div>

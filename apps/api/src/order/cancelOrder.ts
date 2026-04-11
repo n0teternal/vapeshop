@@ -1,5 +1,9 @@
 import { HttpError } from "../httpError.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import {
+  isCancellationLockedByDeliveryWindow,
+  type DeliveryCitySlug,
+} from "./deliverySchedule.js";
 import type { OrderStatus } from "./telegramMessage.js";
 
 type OrderRow = {
@@ -7,6 +11,7 @@ type OrderRow = {
   status: string;
   city_id: number | null;
   tg_user_id: number;
+  comment: string | null;
 };
 
 type OrderItemRow = {
@@ -26,6 +31,10 @@ type RestoredInventory = {
   previousStockQty: number;
   previousInStock: boolean;
   restoredQty: number;
+};
+
+type CityRow = {
+  slug: string;
 };
 
 function parseOrderStatus(value: unknown): OrderStatus {
@@ -169,7 +178,7 @@ export async function cancelOrderAndRestoreInventory(params: {
 
   const { data: order, error: orderError } = await supabase
     .from("orders")
-    .select("id,status,city_id,tg_user_id")
+    .select("id,status,city_id,tg_user_id,comment")
     .eq("id", params.orderId)
     .maybeSingle();
 
@@ -196,6 +205,40 @@ export async function cancelOrderAndRestoreInventory(params: {
   }
 
   const cityId = (order as OrderRow).city_id;
+  let citySlug: DeliveryCitySlug | null = null;
+  if (typeof cityId === "number") {
+    const { data: city, error: cityError } = await supabase
+      .from("cities")
+      .select("slug")
+      .eq("id", cityId)
+      .maybeSingle();
+
+    if (cityError) {
+      throw new HttpError(
+        500,
+        "DB",
+        `Failed to load city for order cancellation: ${cityError.message}`,
+      );
+    }
+
+    if (city && (((city as CityRow).slug === "vvo") || (city as CityRow).slug === "blg")) {
+      citySlug = (city as CityRow).slug as DeliveryCitySlug;
+    }
+  }
+
+  if (
+    isCancellationLockedByDeliveryWindow({
+      citySlug,
+      comment: (order as OrderRow).comment,
+    })
+  ) {
+    throw new HttpError(
+      409,
+      "ORDER_CANCELLATION_LOCKED",
+      "Заказ нельзя отменить менее чем за час до начала выбранного интервала доставки.",
+    );
+  }
+
   let restorations: RestoredInventory[] = [];
   if (typeof cityId === "number") {
     restorations = await restoreOrderInventory({
