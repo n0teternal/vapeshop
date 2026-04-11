@@ -1,5 +1,5 @@
 import { CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet } from "../api/client";
 import { ProductImagePreview } from "../components/ProductImagePreview";
@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { buildApiUrl } from "../config";
-import { useAppState } from "../state/AppStateProvider";
+import { useAppState, type City } from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
 
 function formatPriceRub(value: number): string {
@@ -41,6 +41,13 @@ const BLG_DELIVERY_TIME_SLOTS = [
   "19:00-20:00",
   "20:00-21:00",
 ] as const;
+
+const CITY_UTC_OFFSET_MINUTES: Record<City, number> = {
+  vvo: 10 * 60,
+  blg: 9 * 60,
+};
+
+type DeliveryTimeSlot = (typeof BLG_DELIVERY_TIME_SLOTS)[number];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -86,10 +93,63 @@ function getTodayIsoDate(): string {
   return `${year}-${month}-${day}`;
 }
 
-function formatDeliveryDateLabel(value: string): string {
-  const [year, month, day] = value.split("-");
-  if (!year || !month || !day) return value;
-  return `${day}.${month}.${year}`;
+function getTodayIsoDateForCity(city: City | null, nowMs: number = Date.now()): string {
+  if (!city) return getTodayIsoDate();
+
+  const offsetMinutes = CITY_UTC_OFFSET_MINUTES[city];
+  const adjusted = new Date(nowMs + offsetMinutes * 60_000);
+  const year = adjusted.getUTCFullYear();
+  const month = String(adjusted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(adjusted.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getMinutesOfDayForCity(city: City, nowMs: number = Date.now()): number {
+  const offsetMinutes = CITY_UTC_OFFSET_MINUTES[city];
+  const adjusted = new Date(nowMs + offsetMinutes * 60_000);
+  return adjusted.getUTCHours() * 60 + adjusted.getUTCMinutes();
+}
+
+function parseDeliveryTimeSlot(slot: string): { startMinutes: number; endMinutes: number } | null {
+  const match = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(slot);
+  if (!match) return null;
+
+  const startHours = Number(match[1]);
+  const startMinutes = Number(match[2]);
+  const endHours = Number(match[3]);
+  const endMinutes = Number(match[4]);
+
+  if (
+    !Number.isInteger(startHours) ||
+    !Number.isInteger(startMinutes) ||
+    !Number.isInteger(endHours) ||
+    !Number.isInteger(endMinutes)
+  ) {
+    return null;
+  }
+
+  return {
+    startMinutes: startHours * 60 + startMinutes,
+    endMinutes: endHours * 60 + endMinutes,
+  };
+}
+
+function isDeliveryTimeSlotAvailable(params: {
+  city: City | null;
+  deliveryDate: string;
+  slot: DeliveryTimeSlot;
+  nowMs: number;
+}): boolean {
+  if (params.city !== "blg") return true;
+  if (params.deliveryDate.trim().length === 0) return true;
+  if (params.deliveryDate !== getTodayIsoDateForCity(params.city, params.nowMs)) return true;
+
+  const parsed = parseDeliveryTimeSlot(params.slot);
+  if (!parsed) return false;
+
+  const nowMinutes = getMinutesOfDayForCity(params.city, params.nowMs);
+  const cutoffMinutes = parsed.startMinutes - 60;
+  return nowMinutes < cutoffMinutes;
 }
 
 function formatDeliveryDatePickerValue(value: string): string {
@@ -106,40 +166,10 @@ function formatDeliveryDatePickerValue(value: string): string {
   }).format(parsed);
 }
 
-function buildOrderComment(params: {
-  deliveryMethod: "pickup" | "delivery";
-  address: string;
-  comment: string;
-  citySlug: "vvo" | "blg" | null;
-  deliveryDate: string;
-  deliveryTimeSlot: string;
-}): string | null {
-  const trimmedComment = params.comment.trim();
-
-  if (params.deliveryMethod !== "delivery") {
-    return trimmedComment.length > 0 ? trimmedComment : null;
-  }
-
-  const lines = [`Адрес: ${params.address.trim()}`];
-
-  if (params.citySlug === "blg" && params.deliveryDate.trim().length > 0) {
-    lines.push(`Дата доставки: ${formatDeliveryDateLabel(params.deliveryDate)}`);
-  }
-
-  if (params.citySlug === "blg" && params.deliveryTimeSlot.trim().length > 0) {
-    lines.push(`Время доставки: ${params.deliveryTimeSlot.trim()}`);
-  }
-
-  if (trimmedComment.length > 0) {
-    lines.push(`Комментарий: ${trimmedComment}`);
-  }
-
-  return lines.join("\n");
-}
-
 export function CartPage() {
   const { state, dispatch } = useAppState();
   const { isTelegram, webApp } = useTelegram();
+  const deliveryDateInputRef = useRef<HTMLInputElement | null>(null);
 
   const [deliveryMethod, setDeliveryMethod] = useState<"pickup" | "delivery">(
     "delivery",
@@ -154,9 +184,32 @@ export function CartPage() {
   const [pointsEnabled, setPointsEnabled] = useState(false);
   const [pointsLoading, setPointsLoading] = useState(false);
   const [pointsError, setPointsError] = useState<string | null>(null);
-  const minDeliveryDate = getTodayIsoDate();
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const minDeliveryDate = useMemo(
+    () => getTodayIsoDateForCity(state.city, nowMs),
+    [state.city, nowMs],
+  );
   const showBlgDeliverySchedule =
     state.city === "blg" && deliveryMethod === "delivery";
+  const availableDeliveryTimeSlots = useMemo(
+    () =>
+      BLG_DELIVERY_TIME_SLOTS.filter((slot) =>
+        isDeliveryTimeSlotAvailable({
+          city: state.city,
+          deliveryDate,
+          slot,
+          nowMs,
+        }),
+      ),
+    [deliveryDate, nowMs, state.city],
+  );
+  const selectedDateHasNoAvailableSlots =
+    showBlgDeliverySchedule &&
+    deliveryDate.trim().length > 0 &&
+    availableDeliveryTimeSlots.length === 0;
+  const hasRequiredBlgScheduleSelection =
+    !showBlgDeliverySchedule ||
+    (deliveryDate.trim().length > 0 && deliveryTimeSlot.trim().length > 0);
 
   const total = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
@@ -219,11 +272,28 @@ export function CartPage() {
     setPointsEnabled(false);
   }, [maxPointsToSpend]);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 30_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!deliveryTimeSlot) return;
+    if (availableDeliveryTimeSlots.includes(deliveryTimeSlot as DeliveryTimeSlot)) return;
+    setDeliveryTimeSlot("");
+  }, [availableDeliveryTimeSlots, deliveryTimeSlot]);
+
   const canSubmit =
     state.cart.length > 0 &&
     state.city !== null &&
     !submitting &&
-    (deliveryMethod !== "delivery" || address.trim().length > 0);
+    (deliveryMethod !== "delivery" || address.trim().length > 0) &&
+    hasRequiredBlgScheduleSelection;
 
   async function notify(message: string): Promise<void> {
     if (isTelegram) {
@@ -235,6 +305,19 @@ export function CartPage() {
       }
     }
     alert(message);
+  }
+
+  function openDeliveryDatePicker(): void {
+    const input = deliveryDateInputRef.current;
+    if (!input || submitting) return;
+
+    if (typeof input.showPicker === "function") {
+      input.showPicker();
+      return;
+    }
+
+    input.focus();
+    input.click();
   }
 
   async function submitOrder(): Promise<void> {
@@ -253,14 +336,19 @@ export function CartPage() {
         return;
       }
 
-      const fullComment = buildOrderComment({
-        deliveryMethod,
-        address: trimmedAddress,
-        comment,
-        citySlug: state.city,
-        deliveryDate,
-        deliveryTimeSlot,
-      });
+      if (showBlgDeliverySchedule && deliveryDate.trim().length === 0) {
+        setSubmitError("Выберите дату доставки.");
+        return;
+      }
+
+      if (showBlgDeliverySchedule && deliveryTimeSlot.trim().length === 0) {
+        setSubmitError(
+          selectedDateHasNoAvailableSlots
+            ? "На выбранную дату свободных слотов уже нет. Выберите другую дату."
+            : "Выберите время доставки.",
+        );
+        return;
+      }
 
       const pointsToSpendForOrder = pointsEnabled ? maxPointsToSpend : 0;
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
@@ -274,7 +362,10 @@ export function CartPage() {
         body: JSON.stringify({
           citySlug: state.city,
           deliveryMethod,
-          comment: fullComment,
+          address: trimmedAddress || null,
+          comment: comment.trim() || null,
+          deliveryDate: showBlgDeliverySchedule ? deliveryDate || null : null,
+          deliveryTimeSlot: showBlgDeliverySchedule ? deliveryTimeSlot || null : null,
           pointsToSpend: pointsToSpendForOrder,
           items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
         }),
@@ -466,10 +557,13 @@ export function CartPage() {
                       Дата доставки
                     </span>
                     <div className="relative">
-                      <div
-                        className={`flex h-10 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm ${
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        onClick={openDeliveryDatePicker}
+                        className={`flex h-10 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background ${
                           deliveryDate ? "text-foreground" : "text-muted-foreground"
-                        } ${submitting ? "opacity-50" : ""}`}
+                        } ${submitting ? "cursor-not-allowed opacity-50" : ""}`}
                       >
                         <span className="truncate">
                           {deliveryDate
@@ -480,10 +574,11 @@ export function CartPage() {
                           className="ml-auto h-4 w-4 shrink-0 text-muted-foreground"
                           strokeWidth={2}
                         />
-                      </div>
+                      </button>
 
                       <Input
-                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        ref={deliveryDateInputRef}
+                        className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
                         type="date"
                         value={deliveryDate}
                         min={minDeliveryDate}
@@ -500,16 +595,29 @@ export function CartPage() {
                     <select
                       className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
                       value={deliveryTimeSlot}
-                      disabled={submitting}
+                      disabled={
+                        submitting || deliveryDate.trim().length === 0 || selectedDateHasNoAvailableSlots
+                      }
                       onChange={(e) => setDeliveryTimeSlot(e.target.value)}
                     >
-                      <option value="">Не выбрано</option>
-                      {BLG_DELIVERY_TIME_SLOTS.map((slot) => (
+                      <option value="">
+                        {deliveryDate.trim().length === 0
+                          ? "Выберите время"
+                          : selectedDateHasNoAvailableSlots
+                            ? "Нет слотов"
+                            : "Не выбрано"}
+                      </option>
+                      {availableDeliveryTimeSlots.map((slot) => (
                         <option key={slot} value={slot}>
                           {slot}
                         </option>
                       ))}
                     </select>
+                    {selectedDateHasNoAvailableSlots ? (
+                      <span className="text-xs text-muted-foreground">
+                        На выбранную дату свободных слотов уже нет. Выберите другую дату.
+                      </span>
+                    ) : null}
                   </label>
                 </div>
               ) : null}

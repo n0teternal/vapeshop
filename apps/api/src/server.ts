@@ -47,6 +47,15 @@ type SuccessResponse = {
 type CitySlug = "vvo" | "blg";
 const TEST_ORDER_SELF_CHAT_ID = "1208488286";
 const DEV_FALLBACK_TG_USER_ID = 42;
+const CITY_UTC_OFFSET_MINUTES: Record<CitySlug, number> = {
+  vvo: 10 * 60,
+  blg: 9 * 60,
+};
+const BLG_DELIVERY_TIME_SLOTS = [
+  "18:00-19:00",
+  "19:00-20:00",
+  "20:00-21:00",
+] as const;
 
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
@@ -105,6 +114,69 @@ function requireCustomerTelegramUser(params: {
   return requireVerifiedTelegramRequest(params).user;
 }
 
+function getTodayIsoDateForCity(citySlug: CitySlug): string {
+  const adjusted = new Date(Date.now() + CITY_UTC_OFFSET_MINUTES[citySlug] * 60_000);
+  const year = adjusted.getUTCFullYear();
+  const month = String(adjusted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(adjusted.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getMinutesOfDayForCity(citySlug: CitySlug): number {
+  const adjusted = new Date(Date.now() + CITY_UTC_OFFSET_MINUTES[citySlug] * 60_000);
+  return adjusted.getUTCHours() * 60 + adjusted.getUTCMinutes();
+}
+
+function isValidIsoDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
+function parseOptionalTrimmedString(value: unknown, fieldName: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    throw new HttpError(400, "BAD_REQUEST", `${fieldName} must be a string`);
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseDeliveryTimeSlot(slot: string): { startMinutes: number; endMinutes: number } | null {
+  const match = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(slot);
+  if (!match) return null;
+
+  const startHours = Number(match[1]);
+  const startMinutes = Number(match[2]);
+  const endHours = Number(match[3]);
+  const endMinutes = Number(match[4]);
+
+  if (
+    !Number.isInteger(startHours) ||
+    !Number.isInteger(startMinutes) ||
+    !Number.isInteger(endHours) ||
+    !Number.isInteger(endMinutes)
+  ) {
+    return null;
+  }
+
+  return {
+    startMinutes: startHours * 60 + startMinutes,
+    endMinutes: endHours * 60 + endMinutes,
+  };
+}
+
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
   if (!isRecord(value)) {
     throw new HttpError(400, "BAD_REQUEST", "Invalid JSON body");
@@ -119,14 +191,78 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   if (typeof deliveryMethod !== "string" || deliveryMethod.trim().length === 0) {
     throw new HttpError(400, "BAD_REQUEST", "deliveryMethod is required");
   }
+  const normalizedDeliveryMethod = deliveryMethod.trim();
 
-  const commentRaw = value.comment;
-  const comment =
-    commentRaw === undefined || commentRaw === null
-      ? null
-      : typeof commentRaw === "string"
-        ? commentRaw
-        : null;
+  const comment = parseOptionalTrimmedString(value.comment, "comment");
+  const address = parseOptionalTrimmedString(value.address, "address");
+  const deliveryDate = parseOptionalTrimmedString(value.deliveryDate, "deliveryDate");
+  const deliveryTimeSlot = parseOptionalTrimmedString(
+    value.deliveryTimeSlot,
+    "deliveryTimeSlot",
+  );
+
+  if (citySlug === "blg" && normalizedDeliveryMethod === "delivery") {
+    if (deliveryDate === null) {
+      throw new HttpError(400, "BAD_REQUEST", "Выберите дату доставки.");
+    }
+    if (deliveryTimeSlot === null) {
+      throw new HttpError(400, "BAD_REQUEST", "Выберите время доставки.");
+    }
+  }
+
+  if (deliveryDate !== null && !isValidIsoDate(deliveryDate)) {
+    throw new HttpError(400, "BAD_REQUEST", "deliveryDate must be in YYYY-MM-DD format");
+  }
+
+  if (deliveryDate !== null) {
+    const cityToday = getTodayIsoDateForCity(citySlug);
+    if (deliveryDate < cityToday) {
+      throw new HttpError(
+        400,
+        "DELIVERY_DATE_IN_PAST",
+        "Нельзя выбрать дату раньше сегодняшней по местному времени города.",
+      );
+    }
+  }
+
+  if (deliveryTimeSlot !== null && citySlug === "blg" && normalizedDeliveryMethod === "delivery") {
+    if (!BLG_DELIVERY_TIME_SLOTS.includes(deliveryTimeSlot as (typeof BLG_DELIVERY_TIME_SLOTS)[number])) {
+      throw new HttpError(
+        400,
+        "BAD_REQUEST",
+        "Выбран неизвестный временной слот доставки.",
+      );
+    }
+
+    if (deliveryDate === null) {
+      throw new HttpError(
+        400,
+        "BAD_REQUEST",
+        "Сначала выберите дату доставки для этого временного слота.",
+      );
+    }
+
+    if (deliveryDate === getTodayIsoDateForCity(citySlug)) {
+      const parsedSlot = parseDeliveryTimeSlot(deliveryTimeSlot);
+      if (!parsedSlot) {
+        throw new HttpError(
+          400,
+          "BAD_REQUEST",
+          "Выбран некорректный временной слот доставки.",
+        );
+      }
+
+      const cutoffMinutes = parsedSlot.startMinutes - 60;
+      const nowMinutes = getMinutesOfDayForCity(citySlug);
+      if (nowMinutes >= cutoffMinutes) {
+        throw new HttpError(
+          400,
+          "DELIVERY_TIME_SLOT_UNAVAILABLE",
+          "Этот слот уже недоступен. Выберите более позднее время или другую дату.",
+        );
+      }
+    }
+  }
 
   const itemsRaw = value.items;
   if (!Array.isArray(itemsRaw) || itemsRaw.length === 0) {
@@ -163,8 +299,11 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
 
   const base: CreateOrderPayload = {
     citySlug: citySlug as CitySlug,
-    deliveryMethod: deliveryMethod.trim(),
-    comment: comment?.trim() ? comment.trim() : null,
+    deliveryMethod: normalizedDeliveryMethod,
+    address,
+    comment,
+    deliveryDate,
+    deliveryTimeSlot,
     pointsToSpend,
     items,
   };
@@ -546,7 +685,10 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
         payload: {
           citySlug: body.citySlug,
           deliveryMethod: body.deliveryMethod,
+          address: body.address,
           comment: body.comment,
+          deliveryDate: body.deliveryDate,
+          deliveryTimeSlot: body.deliveryTimeSlot,
           pointsToSpend: body.pointsToSpend,
           items: body.items,
         },

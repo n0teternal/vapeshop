@@ -29,6 +29,7 @@ export type FavoriteItem = {
 export type AppState = {
   isAdultConfirmed: boolean;
   city: City | null;
+  cartCity: City | null;
   cart: CartItem[];
   favorites: FavoriteItem[];
 };
@@ -57,6 +58,7 @@ const STORAGE_KEY = "miniapp.state.v1";
 const initialState: AppState = {
   isAdultConfirmed: false,
   city: null,
+  cartCity: null,
   cart: [],
   favorites: [],
 };
@@ -110,13 +112,23 @@ function loadStateFromStorage(): AppState {
         ? parsed.isAdultConfirmed
         : initialState.isAdultConfirmed;
     const city = parsed.city === null || isCity(parsed.city) ? parsed.city : null;
+    const cartCity =
+      parsed.cartCity === null || isCity(parsed.cartCity) ? parsed.cartCity : null;
 
     const cartRaw = Array.isArray(parsed.cart) ? parsed.cart : [];
-    const cart = cartRaw.filter(isCartItem);
+    const parsedCart = cartRaw.filter(isCartItem);
+    const cart =
+      parsedCart.length > 0 && (!cartCity || cartCity !== city) ? [] : parsedCart;
     const favoritesRaw = Array.isArray(parsed.favorites) ? parsed.favorites : [];
     const favorites = favoritesRaw.filter(isFavoriteItem);
 
-    return { isAdultConfirmed, city, cart, favorites };
+    return {
+      isAdultConfirmed,
+      city,
+      cartCity: cart.length > 0 ? cartCity : null,
+      cart,
+      favorites,
+    };
   } catch {
     return initialState;
   }
@@ -127,14 +139,18 @@ function reducer(state: AppState, action: Action): AppState {
     case "adult/confirm":
       return { ...state, isAdultConfirmed: true };
     case "city/set":
-      return { ...state, city: action.city };
+      if (state.city === action.city) {
+        return state;
+      }
+      return { ...state, city: action.city, cartCity: null, cart: [] };
     case "city/clear":
-      return { ...state, city: null };
+      return { ...state, city: null, cartCity: null, cart: [] };
     case "cart/add": {
       const existing = state.cart.find((x) => x.productId === action.item.productId);
       if (existing) {
         return {
           ...state,
+          cartCity: state.city,
           cart: state.cart.map((x) =>
             x.productId === action.item.productId
               ? {
@@ -148,6 +164,7 @@ function reducer(state: AppState, action: Action): AppState {
       }
       return {
         ...state,
+        cartCity: state.city,
         cart: [
           ...state.cart,
           { ...action.item, qty: 1, imageUrl: action.item.imageUrl ?? null },
@@ -157,26 +174,34 @@ function reducer(state: AppState, action: Action): AppState {
     case "cart/inc":
       return {
         ...state,
+        cartCity: state.city,
         cart: state.cart.map((x) =>
           x.productId === action.productId ? { ...x, qty: x.qty + 1 } : x,
         ),
       };
     case "cart/dec":
-      return {
-        ...state,
-        cart: state.cart
+      {
+        const nextCart = state.cart
           .map((x) =>
             x.productId === action.productId ? { ...x, qty: x.qty - 1 } : x,
           )
-          .filter((x) => x.qty > 0),
-      };
-    case "cart/remove":
+          .filter((x) => x.qty > 0);
+        return {
+          ...state,
+          cartCity: nextCart.length > 0 ? state.cartCity : null,
+          cart: nextCart,
+        };
+      }
+    case "cart/remove": {
+      const nextCart = state.cart.filter((x) => x.productId !== action.productId);
       return {
         ...state,
-        cart: state.cart.filter((x) => x.productId !== action.productId),
+        cartCity: nextCart.length > 0 ? state.cartCity : null,
+        cart: nextCart,
       };
+    }
     case "cart/clear":
-      return { ...state, cart: [] };
+      return { ...state, cartCity: null, cart: [] };
     case "favorite/toggle": {
       const exists = state.favorites.some((x) => x.productId === action.item.productId);
       if (exists) {

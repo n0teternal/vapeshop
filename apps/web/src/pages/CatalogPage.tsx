@@ -377,6 +377,22 @@ function buildManufacturerAliasMaps(groups: readonly (readonly string[])[]): {
 const { labelAliases: MANUFACTURER_LABEL_ALIASES, searchAliases: MANUFACTURER_SEARCH_ALIASES } =
   buildManufacturerAliasMaps(MANUFACTURER_SYNONYM_GROUPS);
 
+const DUALL_EXTREME_CANONICAL_LABEL = "DUALL EXTREME";
+const DUALL_EXTREME_TERMS = [
+  DUALL_EXTREME_CANONICAL_LABEL,
+  "DUAL EXTREME",
+  "dual",
+  "duall",
+  "dual extreme",
+  "duall extreme",
+];
+
+for (const alias of DUALL_EXTREME_TERMS) {
+  const normalizedAlias = normalizeSearchText(alias);
+  MANUFACTURER_LABEL_ALIASES.set(normalizedAlias, DUALL_EXTREME_CANONICAL_LABEL);
+  MANUFACTURER_SEARCH_ALIASES.set(normalizedAlias, DUALL_EXTREME_TERMS);
+}
+
 function getManufacturerSearchTerms(value: string): string[] {
   const normalized = normalizeSearchText(value);
   if (normalized.length === 0) return [];

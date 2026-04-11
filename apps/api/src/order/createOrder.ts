@@ -11,7 +11,10 @@ export type CitySlug = "vvo" | "blg";
 export type CreateOrderPayload = {
   citySlug: CitySlug;
   deliveryMethod: string;
+  address: string | null;
   comment: string | null;
+  deliveryDate: string | null;
+  deliveryTimeSlot: string | null;
   pointsToSpend: number;
   items: Array<{ productId: string; qty: number }>;
 };
@@ -57,6 +60,40 @@ function normalizeTelegramUsername(username: string | null): string | null {
   if (!username) return null;
   const normalized = username.trim().replace(/^@+/, "");
   return normalized.length > 0 ? normalized : null;
+}
+
+function formatDeliveryDateLabel(value: string): string {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}.${month}.${year}`;
+}
+
+function buildOrderComment(params: CreateOrderPayload): string | null {
+  const trimmedComment = params.comment?.trim() ?? "";
+
+  if (params.deliveryMethod !== "delivery") {
+    return trimmedComment.length > 0 ? trimmedComment : null;
+  }
+
+  const lines: string[] = [];
+  const trimmedAddress = params.address?.trim() ?? "";
+  if (trimmedAddress.length > 0) {
+    lines.push(`Адрес: ${trimmedAddress}`);
+  }
+
+  if (params.citySlug === "blg" && params.deliveryDate) {
+    lines.push(`Дата доставки: ${formatDeliveryDateLabel(params.deliveryDate)}`);
+  }
+
+  if (params.citySlug === "blg" && params.deliveryTimeSlot) {
+    lines.push(`Время доставки: ${params.deliveryTimeSlot}`);
+  }
+
+  if (trimmedComment.length > 0) {
+    lines.push(`Комментарий: ${trimmedComment}`);
+  }
+
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 function isUuid(value: string): boolean {
@@ -187,6 +224,7 @@ export async function createOrder(params: {
   tgUser: TgUser;
 }): Promise<CreateOrderResult> {
   const supabase = createServiceSupabaseClient();
+  const orderComment = buildOrderComment(params.payload);
   const effectiveTgUser = await resolveOrderTgUser({
     supabase,
     tgUser: params.tgUser,
@@ -324,7 +362,7 @@ export async function createOrder(params: {
     tg_username: effectiveTgUser.username,
     city_id: city.id ?? null,
     delivery_method: params.payload.deliveryMethod,
-    comment: params.payload.comment ?? null,
+    comment: orderComment,
     total_price: totalAfterDiscount,
     total_before_discount: totalBeforeDiscount,
     discount_amount: discountAmount,
@@ -403,7 +441,7 @@ export async function createOrder(params: {
       citySlug: params.payload.citySlug,
       tgUser: effectiveTgUser,
       deliveryMethod: params.payload.deliveryMethod,
-      comment: params.payload.comment,
+      comment: orderComment,
       lines,
       totalPrice: totalAfterDiscount,
       discountApplied: discountAmount > 0,
