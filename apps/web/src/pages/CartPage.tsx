@@ -1,4 +1,4 @@
-import { Minus, Plus, ShoppingBag } from "lucide-react";
+import { CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet } from "../api/client";
@@ -90,6 +90,20 @@ function formatDeliveryDateLabel(value: string): string {
   const [year, month, day] = value.split("-");
   if (!year || !month || !day) return value;
   return `${day}.${month}.${year}`;
+}
+
+function formatDeliveryDatePickerValue(value: string): string {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day));
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(parsed);
 }
 
 function buildOrderComment(params: {
@@ -451,14 +465,32 @@ export function CartPage() {
                     <span className="text-xs font-semibold text-muted-foreground">
                       Дата доставки
                     </span>
-                    <Input
-                      className="text-left [&::-webkit-date-and-time-value]:block [&::-webkit-date-and-time-value]:w-full [&::-webkit-date-and-time-value]:p-0 [&::-webkit-date-and-time-value]:text-left [&::-webkit-datetime-edit]:block [&::-webkit-datetime-edit]:p-0 [&::-webkit-datetime-edit]:text-left"
-                      type="date"
-                      value={deliveryDate}
-                      min={minDeliveryDate}
-                      disabled={submitting}
-                      onChange={(e) => setDeliveryDate(e.target.value)}
-                    />
+                    <div className="relative">
+                      <div
+                        className={`flex h-10 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm ${
+                          deliveryDate ? "text-foreground" : "text-muted-foreground"
+                        } ${submitting ? "opacity-50" : ""}`}
+                      >
+                        <span className="truncate">
+                          {deliveryDate
+                            ? formatDeliveryDatePickerValue(deliveryDate)
+                            : "Выберите дату"}
+                        </span>
+                        <CalendarDays
+                          className="ml-auto h-4 w-4 shrink-0 text-muted-foreground"
+                          strokeWidth={2}
+                        />
+                      </div>
+
+                      <Input
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        type="date"
+                        value={deliveryDate}
+                        min={minDeliveryDate}
+                        disabled={submitting}
+                        onChange={(e) => setDeliveryDate(e.target.value)}
+                      />
+                    </div>
                   </label>
 
                   <label className="grid gap-1.5 text-sm">
