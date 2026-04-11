@@ -14,6 +14,10 @@ export type TelegramWebAppLike = Pick<
   | "platform"
   | "version"
   | "colorScheme"
+  | "onEvent"
+  | "offEvent"
+  | "setHeaderColor"
+  | "setBackgroundColor"
   | "ready"
   | "expand"
   | "close"
@@ -61,12 +65,30 @@ function createMockWebApp(): TelegramWebAppLike {
     platform: "unknown",
     version: "dev",
     colorScheme,
+    onEvent: () => undefined,
+    offEvent: () => undefined,
+    setHeaderColor: () => undefined,
+    setBackgroundColor: () => undefined,
     ready: () => undefined,
     expand: () => undefined,
     close: () => undefined,
     showAlert: () => undefined,
     showPopup: () => undefined,
   };
+}
+
+function applyThemeToDocument(colorScheme: "light" | "dark"): void {
+  if (typeof document === "undefined") return;
+
+  document.documentElement.dataset.theme = colorScheme;
+  document.documentElement.style.colorScheme = colorScheme;
+}
+
+function clearDocumentTheme(): void {
+  if (typeof document === "undefined") return;
+
+  document.documentElement.removeAttribute("data-theme");
+  document.documentElement.style.removeProperty("color-scheme");
 }
 
 export function TelegramProvider({ children }: { children: ReactNode }) {
@@ -88,6 +110,32 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
+  }, [isTelegram, webApp]);
+
+  useEffect(() => {
+    if (!isTelegram) {
+      clearDocumentTheme();
+      return;
+    }
+
+    const syncTheme = () => {
+      const nextScheme = webApp.colorScheme === "dark" ? "dark" : "light";
+      applyThemeToDocument(nextScheme);
+
+      try {
+        webApp.setHeaderColor(nextScheme === "dark" ? "secondary_bg_color" : "bg_color");
+        webApp.setBackgroundColor("bg_color");
+      } catch {
+        // ignore
+      }
+    };
+
+    syncTheme();
+    webApp.onEvent("themeChanged", syncTheme);
+
+    return () => {
+      webApp.offEvent("themeChanged", syncTheme);
+    };
   }, [isTelegram, webApp]);
 
   const value = useMemo<TelegramContextValue>(() => {

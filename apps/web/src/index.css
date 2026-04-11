@@ -28,8 +28,30 @@
     --radius: 0.95rem;
   }
 
+  :root[data-theme="dark"] {
+    --background: 225 31% 10%;
+    --foreground: 215 31% 91%;
+    --card: 224 25% 14%;
+    --card-foreground: 215 31% 91%;
+    --popover: 224 25% 14%;
+    --popover-foreground: 215 31% 91%;
+    --primary: 201 100% 58%;
+    --primary-foreground: 221 39% 15%;
+    --secondary: 222 22% 20%;
+    --secondary-foreground: 213 30% 90%;
+    --muted: 221 20% 18%;
+    --muted-foreground: 215 20% 67%;
+    --accent: 206 100% 22%;
+    --accent-foreground: 213 30% 90%;
+    --destructive: 358 84% 67%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 219 17% 27%;
+    --input: 219 17% 27%;
+    --ring: 201 100% 58%;
+  }
+
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme]) {
       --background: 225 31% 10%;
       --foreground: 215 31% 91%;
       --card: 224 25% 14%;
