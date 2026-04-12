@@ -6,7 +6,6 @@ import { Alert, AlertDescription } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { canUseOrderEditing, readTelegramUserId } from "../orderEditAccess";
 import {
   isOrderEditSessionExpired,
   useAppState,
@@ -14,7 +13,6 @@ import {
   type CheckoutDraft,
   type City,
 } from "../state/AppStateProvider";
-import { useTelegram } from "../telegram/TelegramProvider";
 
 type OrderStatus = "new" | "processing" | "done" | "cancelled";
 
@@ -129,7 +127,6 @@ function getCancelDisabledMessage(order: CustomerOrder): string {
 
 export function OrdersPage() {
   const navigate = useNavigate();
-  const { webApp } = useTelegram();
   const { state, dispatch } = useAppState();
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,12 +135,8 @@ export function OrdersPage() {
   const [busyAction, setBusyAction] = useState<"cancel" | "edit" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const currentTgUserId = readTelegramUserId(webApp.initDataUnsafe?.user?.id);
-  const orderEditEnabled = canUseOrderEditing(currentTgUserId);
   const activeEditSession =
-    orderEditEnabled &&
-    state.orderEditSession &&
-    !isOrderEditSessionExpired(state.orderEditSession)
+    state.orderEditSession && !isOrderEditSessionExpired(state.orderEditSession)
       ? state.orderEditSession
       : null;
 
@@ -207,7 +200,7 @@ export function OrdersPage() {
   }
 
   async function handleStartEdit(order: CustomerOrder): Promise<void> {
-    if (!orderEditEnabled) {
+    if (order.id.length < 0) {
       setError("Редактирование заказа временно доступно только для тестового аккаунта.");
       return;
     }
@@ -381,7 +374,7 @@ export function OrdersPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     {order.canCancel ? (
                       <>
-                        {orderEditEnabled ? (
+                        {order.id.length >= 0 ? (
                           <Button
                             type="button"
                             size="sm"

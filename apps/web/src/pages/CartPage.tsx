@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { buildApiUrl } from "../config";
-import { canUseOrderEditing, readTelegramUserId } from "../orderEditAccess";
 import {
   getOrderEditRemainingMs,
   useAppState,
@@ -182,14 +181,12 @@ export function CartPage() {
   const [pointsLoading, setPointsLoading] = useState(false);
   const [pointsError, setPointsError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const currentTgUserId = readTelegramUserId(webApp.initDataUnsafe?.user?.id);
-  const orderEditEnabled = canUseOrderEditing(currentTgUserId);
   const minDeliveryDate = useMemo(
     () => getTodayIsoDateForCity(state.city, nowMs),
     [state.city, nowMs],
   );
   const checkoutDraft = state.checkoutDraft;
-  const orderEditSession = orderEditEnabled ? state.orderEditSession : null;
+  const orderEditSession = state.orderEditSession;
   const editSessionExpired = orderEditSession
     ? getOrderEditRemainingMs(orderEditSession, nowMs) <= 0
     : false;
@@ -312,6 +309,18 @@ export function CartPage() {
     alert(message);
   }
 
+  function updateCheckoutDraft(
+    patch: Partial<{
+      deliveryMethod: "pickup" | "delivery";
+      address: string;
+      comment: string;
+      deliveryDate: string;
+      deliveryTimeSlot: string;
+    }>,
+  ): void {
+    dispatch({ type: "checkout/set", patch });
+  }
+
   function openDeliveryDatePicker(): void {
     const input = deliveryDateInputRef.current;
     if (!input || submitting) return;
@@ -323,18 +332,6 @@ export function CartPage() {
 
     input.focus();
     input.click();
-  }
-
-  function updateCheckoutDraft(
-    patch: Partial<{
-      deliveryMethod: "pickup" | "delivery";
-      address: string;
-      comment: string;
-      deliveryDate: string;
-      deliveryTimeSlot: string;
-    }>,
-  ): void {
-    dispatch({ type: "checkout/set", patch });
   }
 
   async function submitOrder(): Promise<void> {
@@ -596,6 +593,7 @@ export function CartPage() {
                   Ваш адрес <span className="text-destructive">*</span>
                 </span>
                 <Input
+                  className="border-sky-300/70 focus-visible:ring-sky-200/70"
                   value={checkoutDraft.address}
                   disabled={submitting}
                   onChange={(e) => updateCheckoutDraft({ address: e.target.value })}
@@ -631,7 +629,7 @@ export function CartPage() {
 
                       <Input
                         ref={deliveryDateInputRef}
-                        className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                         type="date"
                         value={checkoutDraft.deliveryDate}
                         min={minDeliveryDate}
@@ -649,9 +647,7 @@ export function CartPage() {
                       className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
                       value={checkoutDraft.deliveryTimeSlot}
                       disabled={
-                        submitting ||
-                        checkoutDraft.deliveryDate.trim().length === 0 ||
-                        selectedDateHasNoAvailableSlots
+                        submitting || selectedDateHasNoAvailableSlots
                       }
                       onChange={(e) =>
                         updateCheckoutDraft({ deliveryTimeSlot: e.target.value })
@@ -670,7 +666,7 @@ export function CartPage() {
                         </option>
                       ))}
                     </select>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="hidden">
                       Дату и время можно не указывать.
                     </span>
                     {selectedDateHasNoAvailableSlots ? (

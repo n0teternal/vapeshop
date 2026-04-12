@@ -5,7 +5,6 @@ import {
   type OrderStatus,
 } from "../src/order/telegramMessage.js";
 import { sendOrderNotificationToChats } from "../src/order/sendOrderNotification.js";
-import { isSelfOnlyTestOrderUser } from "../src/order/testOrderAccess.js";
 import { buildNotifyTargetRecords } from "../src/order/telegramFinalStatus.js";
 import { createServiceSupabaseClient } from "../src/supabase/serviceClient.js";
 
@@ -96,9 +95,6 @@ function pickTelegramChatIdsForOrder(params: {
   citySlug: CitySlug;
   tgUserId: number;
 }): string[] {
-  if (isSelfOnlyTestOrderUser(params.tgUserId)) {
-    return [String(params.tgUserId)];
-  }
   return pickTelegramChatIds(params.citySlug);
 }
 

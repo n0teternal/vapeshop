@@ -6,7 +6,6 @@ import {
 } from "./deliverySchedule.js";
 import type { CitySlug, CreateOrderPayload } from "./createOrder.js";
 import { buildOrderComment, parseOrderComment } from "./orderComment.js";
-import { canUseOrderEditing } from "./testOrderAccess.js";
 
 const ORDER_EDIT_WINDOW_MS = 30 * 60 * 1_000;
 const ORDER_POINTS_SPEND_KIND = "order_points_spend";
@@ -141,16 +140,6 @@ function normalizeItems(items: CreateOrderPayload["items"]): Map<string, number>
   }
 
   return byId;
-}
-
-function ensureOrderEditAccess(expectedTgUserId?: number): void {
-  if (canUseOrderEditing(expectedTgUserId)) return;
-
-  throw new HttpError(
-    403,
-    "FORBIDDEN",
-    "Order editing is temporarily available only for the test Telegram account.",
-  );
 }
 
 async function loadOrder(params: {
@@ -427,8 +416,6 @@ export async function startOrderEditSession(params: {
   orderId: string;
   expectedTgUserId?: number;
 }): Promise<StartOrderEditSessionResult> {
-  ensureOrderEditAccess(params.expectedTgUserId);
-
   const supabase = createServiceSupabaseClient();
   const order = await loadOrder(params);
   const city = await loadOrderCity(order.city_id);
@@ -505,8 +492,6 @@ export async function stopOrderEditSession(params: {
   orderId: string;
   expectedTgUserId?: number;
 }): Promise<void> {
-  ensureOrderEditAccess(params.expectedTgUserId);
-
   const supabase = createServiceSupabaseClient();
   await loadOrder(params);
 
@@ -525,8 +510,6 @@ export async function applyOrderEdit(params: {
   expectedTgUserId?: number;
   payload: CreateOrderPayload;
 }): Promise<{ orderId: string }> {
-  ensureOrderEditAccess(params.expectedTgUserId);
-
   const supabase = createServiceSupabaseClient();
   const order = await loadOrder({
     orderId: params.orderId,

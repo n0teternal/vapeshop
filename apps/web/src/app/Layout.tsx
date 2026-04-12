@@ -4,7 +4,6 @@ import { NavLink, Outlet } from "react-router-dom";
 import { apiDelete } from "../api/client";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
-import { canUseOrderEditing, readTelegramUserId } from "../orderEditAccess";
 import {
   getOrderEditRemainingMs,
   useAppState,
@@ -57,9 +56,7 @@ export function Layout() {
     typeof webApp.initDataUnsafe?.user?.photo_url === "string"
       ? webApp.initDataUnsafe.user.photo_url
       : null;
-  const currentTgUserId = readTelegramUserId(webApp.initDataUnsafe?.user?.id);
-  const orderEditEnabled = canUseOrderEditing(currentTgUserId);
-  const orderEditSession = orderEditEnabled ? state.orderEditSession : null;
+  const orderEditSession = state.orderEditSession;
 
   useEffect(() => {
     if (!orderEditSession) return;

@@ -21,7 +21,6 @@ import {
   isValidIsoDate,
 } from "./order/deliverySchedule.js";
 import { sendOrderNotificationToChats } from "./order/sendOrderNotification.js";
-import { isSelfOnlyTestOrderUser } from "./order/testOrderAccess.js";
 import {
   buildNotifyTargetRecords,
   syncEditedOrderTelegramState,
@@ -274,10 +273,6 @@ function pickTelegramChatIdsForOrder(params: {
   citySlug: CitySlug;
   tgUserId: number;
 }): string[] {
-  if (isSelfOnlyTestOrderUser(params.tgUserId)) {
-    return [String(params.tgUserId)];
-  }
-
   return pickTelegramChatIds(params.citySlug);
 }
 

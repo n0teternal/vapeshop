@@ -12,7 +12,6 @@ import {
   type CitySlug,
   type OrderStatus,
 } from "./telegramMessage.js";
-import { isSelfOnlyTestOrderUser } from "./testOrderAccess.js";
 
 export type FinalOrderStatus = Extract<OrderStatus, "done" | "cancelled">;
 
@@ -78,12 +77,8 @@ function parseCitySlug(value: unknown): CitySlug | null {
   return null;
 }
 
-function pickOrderChatIds(params: { citySlug: CitySlug; tgUserId: number }): string[] {
-  if (isSelfOnlyTestOrderUser(params.tgUserId)) {
-    return [String(params.tgUserId)];
-  }
-
-  if (params.citySlug === "vvo") {
+function pickOrderChatIds(citySlug: CitySlug): string[] {
+  if (citySlug === "vvo") {
     return config.telegram.chatIdsVvo ?? config.telegram.chatIdsOwner;
   }
   return config.telegram.chatIdsBlg ?? config.telegram.chatIdsOwner;
@@ -375,11 +370,7 @@ export async function syncFinalOrderTelegramState(params: {
     isEdited: context.isEdited,
   });
 
-  if (
-    !params.skipStatusChats &&
-    !isSelfOnlyTestOrderUser(context.order.tg_user_id) &&
-    config.telegram.chatIdsOrderStatus
-  ) {
+  if (!params.skipStatusChats && config.telegram.chatIdsOrderStatus) {
     for (const chatId of config.telegram.chatIdsOrderStatus) {
       try {
         await sendMessage({
@@ -404,10 +395,7 @@ export async function syncFinalOrderTelegramState(params: {
     notifyMessageId: context.order.notify_message_id,
     fallbackTarget: params.fallbackTarget ?? null,
   });
-  const orderChatIds = pickOrderChatIds({
-    citySlug: context.citySlug,
-    tgUserId: context.order.tg_user_id,
-  });
+  const orderChatIds = pickOrderChatIds(context.citySlug);
   const orderTargetsByChatId = new Map<number, NotifyTarget>();
   for (const target of notifyTargets) {
     if (!orderTargetsByChatId.has(target.chatId)) {
@@ -578,12 +566,7 @@ export async function syncEditedOrderTelegramState(params: {
     fallbackTarget: params.fallbackTarget ?? null,
   });
   const persistedTargets: NotifyTarget[] = shouldRepostEditedOrder ? [] : [...notifyTargets];
-  const orderChatIdsToNotify = new Set<string>(
-    pickOrderChatIds({
-      citySlug: context.citySlug,
-      tgUserId: context.order.tg_user_id,
-    }),
-  );
+  const orderChatIdsToNotify = new Set<string>(pickOrderChatIds(context.citySlug));
   for (const target of notifyTargets) {
     orderChatIdsToNotify.add(String(target.chatId));
   }
