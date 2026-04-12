@@ -60,10 +60,15 @@ create table if not exists public.orders (
   comment text null,
   status text not null default 'new',
   total_price numeric not null,
+  total_before_discount numeric null,
+  discount_amount numeric not null default 0,
+  total_after_discount numeric null,
   notify_chat_id bigint null,
   notify_message_id bigint null,
   notify_sent_at timestamptz null,
   notify_targets jsonb not null default '[]'::jsonb,
+  edited_at timestamptz null,
+  edit_session_expires_at timestamptz null,
   created_at timestamptz not null default now()
 );
 

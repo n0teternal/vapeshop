@@ -12,6 +12,7 @@ import {
   type CitySlug,
   type OrderStatus,
 } from "./telegramMessage.js";
+import { isSelfOnlyTestOrderUser } from "./testOrderAccess.js";
 
 export type FinalOrderStatus = Extract<OrderStatus, "done" | "cancelled">;
 
@@ -44,6 +45,7 @@ type OrderRow = {
   notify_chat_id: number | null;
   notify_message_id: number | null;
   notify_targets: unknown;
+  edited_at: string | null;
 };
 
 function logError(logger: LoggerLike | undefined, fields: Record<string, unknown>, message: string): void {
@@ -76,8 +78,12 @@ function parseCitySlug(value: unknown): CitySlug | null {
   return null;
 }
 
-function pickOrderChatIds(citySlug: CitySlug): string[] {
-  if (citySlug === "vvo") {
+function pickOrderChatIds(params: { citySlug: CitySlug; tgUserId: number }): string[] {
+  if (isSelfOnlyTestOrderUser(params.tgUserId)) {
+    return [String(params.tgUserId)];
+  }
+
+  if (params.citySlug === "vvo") {
     return config.telegram.chatIdsVvo ?? config.telegram.chatIdsOwner;
   }
   return config.telegram.chatIdsBlg ?? config.telegram.chatIdsOwner;
@@ -165,6 +171,32 @@ function toNotifyTargetRecords(targets: NotifyTarget[]): NotifyTargetRecord[] {
   }));
 }
 
+function parseOrderStatus(value: unknown): OrderStatus {
+  if (value === "new" || value === "processing" || value === "done" || value === "cancelled") {
+    return value;
+  }
+  return "new";
+}
+
+async function persistNotifyTargets(params: {
+  orderId: string;
+  targets: NotifyTarget[];
+}): Promise<void> {
+  const supabase = createServiceSupabaseClient();
+  const dedupedTargets = dedupeNotifyTargets(params.targets);
+  const firstTarget = dedupedTargets[0] ?? null;
+
+  await supabase
+    .from("orders")
+    .update({
+      notify_chat_id: firstTarget?.chatId ?? null,
+      notify_message_id: firstTarget?.messageId ?? null,
+      notify_sent_at: new Date().toISOString(),
+      notify_targets: toNotifyTargetRecords(dedupedTargets),
+    })
+    .eq("id", params.orderId);
+}
+
 async function loadOrderContext(orderId: string): Promise<{
   order: OrderRow;
   city: { id: number; name: string; slug: string };
@@ -172,13 +204,14 @@ async function loadOrderContext(orderId: string): Promise<{
   lines: Array<{ title: string; qty: number; unitPrice: number }>;
   totalPrice: number;
   discountAmount: number;
+  isEdited: boolean;
 }> {
   const supabase = createServiceSupabaseClient();
 
   const { data: orderData, error: orderError } = await supabase
     .from("orders")
     .select(
-      "id,status,created_at,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_targets",
+      "id,status,created_at,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_targets,edited_at",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -260,6 +293,7 @@ async function loadOrderContext(orderId: string): Promise<{
       order.discount_amount === null || order.discount_amount === undefined
         ? 0
         : numberFromUnknown(order.discount_amount),
+    isEdited: typeof order.edited_at === "string" && order.edited_at.trim().length > 0,
   };
 }
 
@@ -322,6 +356,7 @@ export async function syncFinalOrderTelegramState(params: {
     totalPrice: context.totalPrice,
     discountApplied: context.discountAmount > 0,
     orderId: context.order.id,
+    isEdited: context.isEdited,
   });
   const orderStatusMessage = buildOrderTelegramMessage({
     status: params.status,
@@ -337,9 +372,14 @@ export async function syncFinalOrderTelegramState(params: {
     totalPrice: context.totalPrice,
     discountApplied: context.discountAmount > 0,
     orderId: context.order.id,
+    isEdited: context.isEdited,
   });
 
-  if (!params.skipStatusChats && config.telegram.chatIdsOrderStatus) {
+  if (
+    !params.skipStatusChats &&
+    !isSelfOnlyTestOrderUser(context.order.tg_user_id) &&
+    config.telegram.chatIdsOrderStatus
+  ) {
     for (const chatId of config.telegram.chatIdsOrderStatus) {
       try {
         await sendMessage({
@@ -364,7 +404,10 @@ export async function syncFinalOrderTelegramState(params: {
     notifyMessageId: context.order.notify_message_id,
     fallbackTarget: params.fallbackTarget ?? null,
   });
-  const orderChatIds = pickOrderChatIds(context.citySlug);
+  const orderChatIds = pickOrderChatIds({
+    citySlug: context.citySlug,
+    tgUserId: context.order.tg_user_id,
+  });
   const orderTargetsByChatId = new Map<number, NotifyTarget>();
   for (const target of notifyTargets) {
     if (!orderTargetsByChatId.has(target.chatId)) {
@@ -486,23 +529,169 @@ export async function syncFinalOrderTelegramState(params: {
   }
 
   try {
-    const supabase = createServiceSupabaseClient();
-    const dedupedTargets = dedupeNotifyTargets(persistedTargets);
-    const firstTarget = dedupedTargets[0] ?? null;
-    await supabase
-      .from("orders")
-      .update({
-        notify_chat_id: firstTarget?.chatId ?? null,
-        notify_message_id: firstTarget?.messageId ?? null,
-        notify_sent_at: new Date().toISOString(),
-        notify_targets: toNotifyTargetRecords(dedupedTargets),
-      })
-      .eq("id", context.order.id);
+    await persistNotifyTargets({
+      orderId: context.order.id,
+      targets: persistedTargets,
+    });
   } catch (error) {
     logError(
       params.logger,
       { err: error, orderId: context.order.id },
       "Failed to persist Telegram notify targets after final status sync",
+    );
+  }
+}
+
+export async function syncEditedOrderTelegramState(params: {
+  orderId: string;
+  fallbackTarget?: NotifyTarget | null;
+  logger?: LoggerLike;
+}): Promise<void> {
+  const context = await loadOrderContext(params.orderId);
+  const shouldRepostEditedOrder = !(await isRecentCityOrder({
+    cityId: context.order.city_id ?? 0,
+    orderId: context.order.id,
+    limit: 3,
+  }));
+
+  const editedOrderMessage = buildOrderTelegramMessage({
+    status: parseOrderStatus(context.order.status),
+    cityName: context.city.name,
+    citySlug: context.citySlug,
+    tgUser: {
+      id: context.order.tg_user_id,
+      username: context.order.tg_username,
+    },
+    deliveryMethod: context.order.delivery_method,
+    comment: context.order.comment,
+    lines: context.lines,
+    totalPrice: context.totalPrice,
+    discountApplied: context.discountAmount > 0,
+    orderId: context.order.id,
+    isEdited: true,
+  });
+
+  const notifyTargets = readNotifyTargets({
+    notifyTargets: context.order.notify_targets,
+    notifyChatId: context.order.notify_chat_id,
+    notifyMessageId: context.order.notify_message_id,
+    fallbackTarget: params.fallbackTarget ?? null,
+  });
+  const persistedTargets: NotifyTarget[] = shouldRepostEditedOrder ? [] : [...notifyTargets];
+  const orderChatIdsToNotify = new Set<string>(
+    pickOrderChatIds({
+      citySlug: context.citySlug,
+      tgUserId: context.order.tg_user_id,
+    }),
+  );
+  for (const target of notifyTargets) {
+    orderChatIdsToNotify.add(String(target.chatId));
+  }
+
+  for (const target of notifyTargets) {
+    if (shouldRepostEditedOrder) {
+      try {
+        await deleteMessage({
+          botToken: config.telegram.botToken,
+          chatId: target.chatId,
+          messageId: target.messageId,
+        });
+      } catch (error) {
+        logError(
+          params.logger,
+          { err: error, chatId: target.chatId, messageId: target.messageId, orderId: context.order.id },
+          "Failed to delete edited Telegram order message before repost; falling back to edit",
+        );
+
+        try {
+          await editMessageText({
+            botToken: config.telegram.botToken,
+            chatId: target.chatId,
+            messageId: target.messageId,
+            text: editedOrderMessage.text,
+            replyMarkup: editedOrderMessage.reply_markup,
+          });
+          persistedTargets.push(target);
+        } catch (editError) {
+          logError(
+            params.logger,
+            {
+              err: editError,
+              chatId: target.chatId,
+              messageId: target.messageId,
+              orderId: context.order.id,
+            },
+            "Failed to edit Telegram order message after delete failure during edit sync",
+          );
+        }
+      }
+
+      continue;
+    }
+
+    try {
+      await editMessageText({
+        botToken: config.telegram.botToken,
+        chatId: target.chatId,
+        messageId: target.messageId,
+        text: editedOrderMessage.text,
+        replyMarkup: editedOrderMessage.reply_markup,
+      });
+    } catch (error) {
+      logError(
+        params.logger,
+        { err: error, chatId: target.chatId, messageId: target.messageId, orderId: context.order.id },
+        "Failed to edit Telegram order message",
+      );
+    }
+  }
+
+  const existingChatIds = new Set<number>(persistedTargets.map((target) => target.chatId));
+  for (const chatId of orderChatIdsToNotify) {
+    const numericChatId = Number(chatId);
+    if (Number.isInteger(numericChatId) && existingChatIds.has(numericChatId)) {
+      continue;
+    }
+
+    try {
+      const sent = await sendMessage({
+        botToken: config.telegram.botToken,
+        chatId,
+        text: editedOrderMessage.text,
+        replyMarkup: editedOrderMessage.reply_markup,
+      });
+      persistedTargets.push({ chatId: sent.chat.id, messageId: sent.message_id });
+      existingChatIds.add(sent.chat.id);
+    } catch (error) {
+      logError(
+        params.logger,
+        { err: error, chatId, orderId: context.order.id },
+        shouldRepostEditedOrder
+          ? "Failed to repost edited order message"
+          : "Failed to send edited order message to missing chat",
+      );
+    }
+  }
+
+  if (persistedTargets.length === 0) {
+    logWarn(
+      params.logger,
+      { orderId: context.order.id },
+      "No Telegram order message targets found for edited order sync",
+    );
+    return;
+  }
+
+  try {
+    await persistNotifyTargets({
+      orderId: context.order.id,
+      targets: persistedTargets,
+    });
+  } catch (error) {
+    logError(
+      params.logger,
+      { err: error, orderId: context.order.id },
+      "Failed to persist Telegram notify targets after edited order sync",
     );
   }
 }

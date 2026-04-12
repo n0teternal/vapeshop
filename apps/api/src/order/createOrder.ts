@@ -1,6 +1,7 @@
 import { HttpError } from "../httpError.js";
 import { spendPointsForOrder } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import { buildOrderComment } from "./orderComment.js";
 import {
   buildOrderTelegramMessage,
   type TelegramOrderMessage,
@@ -60,40 +61,6 @@ function normalizeTelegramUsername(username: string | null): string | null {
   if (!username) return null;
   const normalized = username.trim().replace(/^@+/, "");
   return normalized.length > 0 ? normalized : null;
-}
-
-function formatDeliveryDateLabel(value: string): string {
-  const [year, month, day] = value.split("-");
-  if (!year || !month || !day) return value;
-  return `${day}.${month}.${year}`;
-}
-
-function buildOrderComment(params: CreateOrderPayload): string | null {
-  const trimmedComment = params.comment?.trim() ?? "";
-
-  if (params.deliveryMethod !== "delivery") {
-    return trimmedComment.length > 0 ? trimmedComment : null;
-  }
-
-  const lines: string[] = [];
-  const trimmedAddress = params.address?.trim() ?? "";
-  if (trimmedAddress.length > 0) {
-    lines.push(`Адрес: ${trimmedAddress}`);
-  }
-
-  if (params.citySlug === "blg" && params.deliveryDate) {
-    lines.push(`Дата доставки: ${formatDeliveryDateLabel(params.deliveryDate)}`);
-  }
-
-  if (params.citySlug === "blg" && params.deliveryTimeSlot) {
-    lines.push(`Время доставки: ${params.deliveryTimeSlot}`);
-  }
-
-  if (trimmedComment.length > 0) {
-    lines.push(`Комментарий: ${trimmedComment}`);
-  }
-
-  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 function isUuid(value: string): boolean {

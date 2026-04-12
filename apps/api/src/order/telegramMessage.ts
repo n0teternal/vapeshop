@@ -55,6 +55,10 @@ function statusPrefix(status: OrderStatus): string {
   return "";
 }
 
+function editedPrefix(isEdited: boolean | undefined): string {
+  return isEdited ? "✏️ <b>Изменено</b>\n" : "";
+}
+
 function shortOrderId(orderId: string): string {
   return orderId.slice(-6).toUpperCase();
 }
@@ -96,10 +100,15 @@ export function buildOrderTelegramMessage(
   params: OrderMessageBaseParams & {
     status: OrderStatus;
     actionsView?: TelegramOrderActionsView;
+    isEdited?: boolean;
   },
 ): TelegramOrderMessage {
   const actionsView: TelegramOrderActionsView = params.actionsView ?? "main";
-  const text = statusPrefix(params.status) + `<b>Новый заказ</b>\n` + buildOrderBody(params);
+  const text =
+    statusPrefix(params.status) +
+    editedPrefix(params.isEdited) +
+    `<b>Новый заказ</b>\n` +
+    buildOrderBody(params);
   const hasFinalStatus = params.status === "done" || params.status === "cancelled";
 
   const inline_keyboard =
@@ -146,7 +155,13 @@ export function buildOrderTelegramMessage(
 export function buildOrderStatusTelegramText(
   params: OrderMessageBaseParams & {
     status: Extract<OrderStatus, "done" | "cancelled">;
+    isEdited?: boolean;
   },
 ): string {
-  return statusPrefix(params.status) + `<b>Обновление заказа</b>\n` + buildOrderBody(params);
+  return (
+    statusPrefix(params.status) +
+    editedPrefix(params.isEdited) +
+    `<b>Обновление заказа</b>\n` +
+    buildOrderBody(params)
+  );
 }

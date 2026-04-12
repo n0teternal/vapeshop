@@ -1,8 +1,14 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Heart, Home, ShoppingBag, UserRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
+import { apiDelete } from "../api/client";
+import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
-import { useAppState } from "../state/AppStateProvider";
+import { canUseOrderEditing, readTelegramUserId } from "../orderEditAccess";
+import {
+  getOrderEditRemainingMs,
+  useAppState,
+} from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
 
 type TabLinkProps = {
@@ -43,12 +49,50 @@ function TabLink({ to, label, badge, end, icon, photoUrl }: TabLinkProps) {
 
 export function Layout() {
   const { webApp } = useTelegram();
-  const { cartCount, favoritesCount } = useAppState();
+  const { state, dispatch, cartCount, favoritesCount } = useAppState();
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [exitingEditMode, setExitingEditMode] = useState(false);
 
   const photoUrl =
     typeof webApp.initDataUnsafe?.user?.photo_url === "string"
       ? webApp.initDataUnsafe.user.photo_url
       : null;
+  const currentTgUserId = readTelegramUserId(webApp.initDataUnsafe?.user?.id);
+  const orderEditEnabled = canUseOrderEditing(currentTgUserId);
+  const orderEditSession = orderEditEnabled ? state.orderEditSession : null;
+
+  useEffect(() => {
+    if (!orderEditSession) return;
+
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [orderEditSession]);
+
+  const remainingMs = orderEditSession
+    ? getOrderEditRemainingMs(orderEditSession, nowMs)
+    : 0;
+  const remainingMinutes = Math.ceil(remainingMs / 60_000);
+  const editModeExpired = orderEditSession ? remainingMs <= 0 : false;
+
+  async function handleExitEditMode(): Promise<void> {
+    const session = orderEditSession;
+    if (!session) return;
+
+    setExitingEditMode(true);
+    try {
+      await apiDelete(`/api/orders/${session.orderId}/edit-session`);
+    } catch {
+      // Keep local exit resilient even if backend cleanup fails.
+    } finally {
+      dispatch({ type: "order-edit/cancel" });
+      setExitingEditMode(false);
+    }
+  }
 
   return (
     <div className="relative min-h-screen text-foreground">
@@ -69,6 +113,36 @@ export function Layout() {
             </div>
           </div>
         </header>
+
+        {orderEditSession ? (
+          <div className="sticky top-[69px] z-20 border-b border-amber-500/25 bg-amber-500/10 backdrop-blur-xl">
+            <div className="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-amber-950">
+                  {editModeExpired
+                    ? "Режим редактирования заказа истёк"
+                    : `Включен режим редактирования, осталось минут: ${remainingMinutes}`}
+                </div>
+                <div className="mt-1 text-xs text-amber-950/75">
+                  {editModeExpired
+                    ? "Можно выйти из режима и запустить редактирование заново из управления заказами."
+                    : "Изменения применятся только после повторного оформления заказа."}
+                </div>
+              </div>
+
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0 border-amber-950/20 bg-white/70 text-amber-950 hover:bg-white"
+                disabled={exitingEditMode}
+                onClick={() => void handleExitEditMode()}
+              >
+                {exitingEditMode ? "Выходим..." : "Выйти"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         <main className="mx-auto w-full max-w-md px-4 pb-[8.6rem] pt-5">
           <Outlet />

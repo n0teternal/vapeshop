@@ -231,6 +231,8 @@ export type Database = {
           total_before_discount: number | null;
           discount_amount: number;
           total_after_discount: number | null;
+          edited_at: string | null;
+          edit_session_expires_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -250,6 +252,8 @@ export type Database = {
           total_before_discount?: number | null;
           discount_amount?: number;
           total_after_discount?: number | null;
+          edited_at?: string | null;
+          edit_session_expires_at?: string | null;
           created_at?: string;
         };
         Update: {
@@ -269,6 +273,8 @@ export type Database = {
           total_before_discount?: number | null;
           discount_amount?: number;
           total_after_discount?: number | null;
+          edited_at?: string | null;
+          edit_session_expires_at?: string | null;
           created_at?: string;
         };
         Relationships: [];

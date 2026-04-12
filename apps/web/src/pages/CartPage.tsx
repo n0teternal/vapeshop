@@ -10,7 +10,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { buildApiUrl } from "../config";
-import { useAppState, type City } from "../state/AppStateProvider";
+import { canUseOrderEditing, readTelegramUserId } from "../orderEditAccess";
+import {
+  getOrderEditRemainingMs,
+  useAppState,
+  type City,
+} from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
 
 function formatPriceRub(value: number): string {
@@ -170,14 +175,6 @@ export function CartPage() {
   const { state, dispatch } = useAppState();
   const { isTelegram, webApp } = useTelegram();
   const deliveryDateInputRef = useRef<HTMLInputElement | null>(null);
-
-  const [deliveryMethod, setDeliveryMethod] = useState<"pickup" | "delivery">(
-    "delivery",
-  );
-  const [address, setAddress] = useState("");
-  const [comment, setComment] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState("");
-  const [deliveryTimeSlot, setDeliveryTimeSlot] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pointsBalance, setPointsBalance] = useState(0);
@@ -185,31 +182,39 @@ export function CartPage() {
   const [pointsLoading, setPointsLoading] = useState(false);
   const [pointsError, setPointsError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const currentTgUserId = readTelegramUserId(webApp.initDataUnsafe?.user?.id);
+  const orderEditEnabled = canUseOrderEditing(currentTgUserId);
   const minDeliveryDate = useMemo(
     () => getTodayIsoDateForCity(state.city, nowMs),
     [state.city, nowMs],
   );
+  const checkoutDraft = state.checkoutDraft;
+  const orderEditSession = orderEditEnabled ? state.orderEditSession : null;
+  const editSessionExpired = orderEditSession
+    ? getOrderEditRemainingMs(orderEditSession, nowMs) <= 0
+    : false;
   const showBlgDeliverySchedule =
-    state.city === "blg" && deliveryMethod === "delivery";
+    state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
   const availableDeliveryTimeSlots = useMemo(
     () =>
       BLG_DELIVERY_TIME_SLOTS.filter((slot) =>
         isDeliveryTimeSlotAvailable({
           city: state.city,
-          deliveryDate,
+          deliveryDate: checkoutDraft.deliveryDate,
           slot,
           nowMs,
         }),
       ),
-    [deliveryDate, nowMs, state.city],
+    [checkoutDraft.deliveryDate, nowMs, state.city],
   );
   const selectedDateHasNoAvailableSlots =
     showBlgDeliverySchedule &&
-    deliveryDate.trim().length > 0 &&
+    checkoutDraft.deliveryDate.trim().length > 0 &&
     availableDeliveryTimeSlots.length === 0;
   const hasRequiredBlgScheduleSelection =
     !showBlgDeliverySchedule ||
-    (deliveryDate.trim().length > 0 && deliveryTimeSlot.trim().length > 0);
+    (checkoutDraft.deliveryDate.trim().length > 0 &&
+      checkoutDraft.deliveryTimeSlot.trim().length > 0);
 
   const total = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
@@ -219,58 +224,57 @@ export function CartPage() {
     return Math.max(0, Math.min(pointsBalance, Math.floor(total)));
   }, [pointsBalance, total]);
 
-  const pointsToSpend = pointsEnabled ? maxPointsToSpend : 0;
+  const fixedEditPointsToSpend = orderEditSession
+    ? Math.max(0, Math.min(orderEditSession.discountAmount, Math.floor(total)))
+    : 0;
+  const pointsToSpend = orderEditSession
+    ? fixedEditPointsToSpend
+    : pointsEnabled
+      ? maxPointsToSpend
+      : 0;
   const totalToPay = Math.max(0, total - pointsToSpend);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadPointsBalance(): Promise<void> {
-      setPointsLoading(true);
-      setPointsError(null);
-      try {
-        const data = await apiGet<ReferralOverviewBalance>(
-          "/api/referrals/overview?limit=1&offset=0",
-        );
-        if (!cancelled) {
-          setPointsBalance(Math.max(0, Math.trunc(data.pointsBalance)));
-        }
-      } catch (e: unknown) {
-        if (cancelled) return;
-
-        if (e instanceof ApiError) {
-          if (
-            e.code === "TG_INIT_DATA_REQUIRED" ||
-            e.code === "TG_INIT_DATA_INVALID" ||
-            e.code === "TG_INIT_DATA_EXPIRED"
-          ) {
-            setPointsBalance(0);
-            setPointsEnabled(false);
-            return;
-          }
-          setPointsError(e.message);
+  async function loadPointsBalance(): Promise<void> {
+    setPointsLoading(true);
+    setPointsError(null);
+    try {
+      const data = await apiGet<ReferralOverviewBalance>(
+        "/api/referrals/overview?limit=1&offset=0",
+      );
+      setPointsBalance(Math.max(0, Math.trunc(data.pointsBalance)));
+    } catch (e: unknown) {
+      if (e instanceof ApiError) {
+        if (
+          e.code === "TG_INIT_DATA_REQUIRED" ||
+          e.code === "TG_INIT_DATA_INVALID" ||
+          e.code === "TG_INIT_DATA_EXPIRED"
+        ) {
+          setPointsBalance(0);
+          setPointsEnabled(false);
           return;
         }
-
-        setPointsError(e instanceof Error ? e.message : "Failed to load points balance");
-      } finally {
-        if (!cancelled) {
-          setPointsLoading(false);
-        }
+        setPointsError(e.message);
+        return;
       }
+
+      setPointsError(e instanceof Error ? e.message : "Failed to load points balance");
+    } finally {
+      setPointsLoading(false);
     }
+  }
 
+  useEffect(() => {
     void loadPointsBalance();
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   useEffect(() => {
+    if (orderEditSession) {
+      setPointsEnabled(false);
+      return;
+    }
     if (maxPointsToSpend > 0) return;
     setPointsEnabled(false);
-  }, [maxPointsToSpend]);
+  }, [maxPointsToSpend, orderEditSession]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -283,16 +287,23 @@ export function CartPage() {
   }, []);
 
   useEffect(() => {
-    if (!deliveryTimeSlot) return;
-    if (availableDeliveryTimeSlots.includes(deliveryTimeSlot as DeliveryTimeSlot)) return;
-    setDeliveryTimeSlot("");
-  }, [availableDeliveryTimeSlots, deliveryTimeSlot]);
+    if (!checkoutDraft.deliveryTimeSlot) return;
+    if (availableDeliveryTimeSlots.includes(checkoutDraft.deliveryTimeSlot as DeliveryTimeSlot)) {
+      return;
+    }
+    dispatch({
+      type: "checkout/set",
+      patch: { deliveryTimeSlot: "" },
+    });
+  }, [availableDeliveryTimeSlots, checkoutDraft.deliveryTimeSlot, dispatch]);
 
   const canSubmit =
     state.cart.length > 0 &&
     state.city !== null &&
     !submitting &&
-    (deliveryMethod !== "delivery" || address.trim().length > 0) &&
+    !editSessionExpired &&
+    (checkoutDraft.deliveryMethod !== "delivery" ||
+      checkoutDraft.address.trim().length > 0) &&
     hasRequiredBlgScheduleSelection;
 
   async function notify(message: string): Promise<void> {
@@ -320,6 +331,18 @@ export function CartPage() {
     input.click();
   }
 
+  function updateCheckoutDraft(
+    patch: Partial<{
+      deliveryMethod: "pickup" | "delivery";
+      address: string;
+      comment: string;
+      deliveryDate: string;
+      deliveryTimeSlot: string;
+    }>,
+  ): void {
+    dispatch({ type: "checkout/set", patch });
+  }
+
   async function submitOrder(): Promise<void> {
     setSubmitting(true);
     setSubmitError(null);
@@ -330,18 +353,23 @@ export function CartPage() {
         return;
       }
 
-      const trimmedAddress = address.trim();
-      if (deliveryMethod === "delivery" && !trimmedAddress) {
+      if (orderEditSession && editSessionExpired) {
+        setSubmitError("Р’СЂРµРјСЏ РЅР° СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ РёСЃС‚РµРєР»Рѕ. Р—Р°РїСѓСЃС‚РёС‚Рµ РµРіРѕ Р·Р°РЅРѕРІРѕ РІ СѓРїСЂР°РІР»РµРЅРёРё Р·Р°РєР°Р·Р°РјРё.");
+        return;
+      }
+
+      const trimmedAddress = checkoutDraft.address.trim();
+      if (checkoutDraft.deliveryMethod === "delivery" && !trimmedAddress) {
         setSubmitError("Укажите адрес для доставки.");
         return;
       }
 
-      if (showBlgDeliverySchedule && deliveryDate.trim().length === 0) {
+      if (showBlgDeliverySchedule && checkoutDraft.deliveryDate.trim().length === 0) {
         setSubmitError("Выберите дату доставки.");
         return;
       }
 
-      if (showBlgDeliverySchedule && deliveryTimeSlot.trim().length === 0) {
+      if (showBlgDeliverySchedule && checkoutDraft.deliveryTimeSlot.trim().length === 0) {
         setSubmitError(
           selectedDateHasNoAvailableSlots
             ? "На выбранную дату свободных слотов уже нет. Выберите другую дату."
@@ -350,22 +378,36 @@ export function CartPage() {
         return;
       }
 
-      const pointsToSpendForOrder = pointsEnabled ? maxPointsToSpend : 0;
+      const pointsToSpendForOrder = orderEditSession
+        ? orderEditSession.discountAmount
+        : pointsEnabled
+          ? maxPointsToSpend
+          : 0;
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (tgInitData) {
+        headers["x-telegram-init-data"] = tgInitData;
+      } else if (import.meta.env.DEV) {
+        headers["x-dev-admin"] = "1";
+      }
+      const requestPath = orderEditSession
+        ? `/api/orders/${orderEditSession.orderId}/edit`
+        : "/api/order";
 
-      const res = await fetch(buildApiUrl("/api/order"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-telegram-init-data": tgInitData,
-        },
+      const res = await fetch(buildApiUrl(requestPath), {
+        method: orderEditSession ? "PUT" : "POST",
+        headers,
         body: JSON.stringify({
           citySlug: state.city,
-          deliveryMethod,
+          deliveryMethod: checkoutDraft.deliveryMethod,
           address: trimmedAddress || null,
-          comment: comment.trim() || null,
-          deliveryDate: showBlgDeliverySchedule ? deliveryDate || null : null,
-          deliveryTimeSlot: showBlgDeliverySchedule ? deliveryTimeSlot || null : null,
+          comment: checkoutDraft.comment.trim() || null,
+          deliveryDate: showBlgDeliverySchedule ? checkoutDraft.deliveryDate || null : null,
+          deliveryTimeSlot: showBlgDeliverySchedule
+            ? checkoutDraft.deliveryTimeSlot || null
+            : null,
           pointsToSpend: pointsToSpendForOrder,
           items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
         }),
@@ -386,17 +428,24 @@ export function CartPage() {
         return;
       }
 
-      dispatch({ type: "cart/clear" });
-      setAddress("");
-      setComment("");
-      setDeliveryDate("");
-      setDeliveryTimeSlot("");
-      if (pointsToSpendForOrder > 0) {
+      if (orderEditSession) {
+        dispatch({ type: "order-edit/complete" });
+        void loadPointsBalance();
+      } else {
+        dispatch({ type: "cart/clear" });
+        dispatch({ type: "checkout/reset" });
+      }
+
+      if (!orderEditSession && pointsToSpendForOrder > 0) {
         setPointsBalance((prev) => Math.max(0, prev - pointsToSpendForOrder));
       }
       setPointsEnabled(false);
 
-      await notify("Заказ создан.\nПередаём админу...");
+      await notify(
+        orderEditSession
+          ? "Заказ обновлён.\nПередаём админу..."
+          : "Заказ создан.\nПередаём админу...",
+      );
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Network error";
       setSubmitError(message);
@@ -525,10 +574,12 @@ export function CartPage() {
             <span className="text-xs font-semibold text-muted-foreground">Способ получения</span>
             <select
               className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-              value={deliveryMethod}
+              value={checkoutDraft.deliveryMethod}
               disabled={submitting}
               onChange={(e) =>
-                setDeliveryMethod(e.target.value === "delivery" ? "delivery" : "pickup")
+                updateCheckoutDraft({
+                  deliveryMethod: e.target.value === "delivery" ? "delivery" : "pickup",
+                })
               }
             >
               <option value="pickup">Самовывоз</option>
@@ -536,16 +587,16 @@ export function CartPage() {
             </select>
           </label>
 
-          {deliveryMethod === "delivery" ? (
+          {checkoutDraft.deliveryMethod === "delivery" ? (
             <div className="space-y-3">
               <label className="grid gap-1.5 text-sm">
                 <span className="text-xs font-semibold text-muted-foreground">
                   Ваш адрес <span className="text-destructive">*</span>
                 </span>
                 <Input
-                  value={address}
+                  value={checkoutDraft.address}
                   disabled={submitting}
-                  onChange={(e) => setAddress(e.target.value)}
+                  onChange={(e) => updateCheckoutDraft({ address: e.target.value })}
                   placeholder="Улица, дом"
                 />
               </label>
@@ -562,12 +613,12 @@ export function CartPage() {
                         disabled={submitting}
                         onClick={openDeliveryDatePicker}
                         className={`flex h-10 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background ${
-                          deliveryDate ? "text-foreground" : "text-muted-foreground"
+                          checkoutDraft.deliveryDate ? "text-foreground" : "text-muted-foreground"
                         } ${submitting ? "cursor-not-allowed opacity-50" : ""}`}
                       >
                         <span className="truncate">
-                          {deliveryDate
-                            ? formatDeliveryDatePickerValue(deliveryDate)
+                          {checkoutDraft.deliveryDate
+                            ? formatDeliveryDatePickerValue(checkoutDraft.deliveryDate)
                             : "Выберите дату"}
                         </span>
                         <CalendarDays
@@ -580,10 +631,10 @@ export function CartPage() {
                         ref={deliveryDateInputRef}
                         className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
                         type="date"
-                        value={deliveryDate}
+                        value={checkoutDraft.deliveryDate}
                         min={minDeliveryDate}
                         disabled={submitting}
-                        onChange={(e) => setDeliveryDate(e.target.value)}
+                        onChange={(e) => updateCheckoutDraft({ deliveryDate: e.target.value })}
                       />
                     </div>
                   </label>
@@ -594,14 +645,18 @@ export function CartPage() {
                     </span>
                     <select
                       className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-                      value={deliveryTimeSlot}
+                      value={checkoutDraft.deliveryTimeSlot}
                       disabled={
-                        submitting || deliveryDate.trim().length === 0 || selectedDateHasNoAvailableSlots
+                        submitting ||
+                        checkoutDraft.deliveryDate.trim().length === 0 ||
+                        selectedDateHasNoAvailableSlots
                       }
-                      onChange={(e) => setDeliveryTimeSlot(e.target.value)}
+                      onChange={(e) =>
+                        updateCheckoutDraft({ deliveryTimeSlot: e.target.value })
+                      }
                     >
                       <option value="">
-                        {deliveryDate.trim().length === 0
+                        {checkoutDraft.deliveryDate.trim().length === 0
                           ? "Выберите время"
                           : selectedDateHasNoAvailableSlots
                             ? "Нет слотов"
@@ -627,14 +682,27 @@ export function CartPage() {
           <label className="grid gap-1.5 text-sm">
             <span className="text-xs font-semibold text-muted-foreground">Комментарий</span>
             <Textarea
-              value={comment}
+              value={checkoutDraft.comment}
               disabled={submitting}
-              onChange={(e) => setComment(e.target.value)}
+              onChange={(e) => updateCheckoutDraft({ comment: e.target.value })}
               placeholder="Опционально"
             />
           </label>
 
-          <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
+          {orderEditSession ? (
+            orderEditSession.discountAmount > 0 ? (
+              <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
+                <div className="text-sm font-medium">
+                  Скидка баллами из исходного заказа: -{formatPriceRub(pointsToSpend)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Если сумма заказа станет меньше, лишние баллы автоматически вернутся на
+                  баланс.
+                </div>
+              </div>
+            ) : null
+          ) : (
+            <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
               <label className="flex items-start gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -645,18 +713,24 @@ export function CartPage() {
                 />
                 <span>
                   Использовать баллы ({pointsBalance})
-                  {maxPointsToSpend > 0 ? `, спишется до ${pointsToSpend || maxPointsToSpend}` : ""}
+                  {maxPointsToSpend > 0
+                    ? `, спишется до ${pointsToSpend || maxPointsToSpend}`
+                    : ""}
                 </span>
               </label>
               {pointsToSpend > 0 ? (
                 <div className="text-xs text-muted-foreground">
-                  Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате: {formatPriceRub(totalToPay)}.
+                  Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате:{" "}
+                  {formatPriceRub(totalToPay)}.
                 </div>
               ) : null}
               {pointsError ? (
-                <div className="text-xs text-destructive">Баллы временно недоступны: {pointsError}</div>
+                <div className="text-xs text-destructive">
+                  Баллы временно недоступны: {pointsError}
+                </div>
               ) : null}
             </div>
+          )}
 
           {submitError ? (
             <Alert variant="destructive">
@@ -670,8 +744,21 @@ export function CartPage() {
             disabled={!canSubmit}
             onClick={() => void submitOrder()}
           >
-            {submitting ? "Отправляем..." : "Оформить"}
+            {submitting
+              ? orderEditSession
+                ? "Обновляем заказ..."
+                : "Отправляем..."
+              : orderEditSession
+                ? "Обновить заказ"
+                : "Оформить"}
           </Button>
+
+          {orderEditSession && editSessionExpired ? (
+            <div className="text-xs text-destructive">
+              Время редактирования истекло. Выйдите из режима и запустите его заново в
+              управлении заказами.
+            </div>
+          ) : null}
 
           {!state.city ? (
             <div className="text-xs text-muted-foreground">

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { PRODUCTS } from "../data/products";
+import { canUseOrderEditing, readTelegramUserId } from "../orderEditAccess";
 import { useAppState } from "../state/AppStateProvider";
 import { isSupabaseConfigured } from "../supabase/client";
 import { fetchCatalog, type CatalogItem, SupabaseQueryError } from "../supabase/catalog";
+import { useTelegram } from "../telegram/TelegramProvider";
 import { buildImageCandidates } from "../utils/imageCandidates";
 
 const CATALOG_INITIAL_RENDER_COUNT = 24;
@@ -848,7 +850,11 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
 }
 
 export function CatalogPage() {
+  const { webApp } = useTelegram();
   const { state, dispatch } = useAppState();
+  const currentTgUserId = readTelegramUserId(webApp.initDataUnsafe?.user?.id);
+  const orderEditEnabled = canUseOrderEditing(currentTgUserId);
+  const orderEditSessionActive = orderEditEnabled && state.orderEditSession !== null;
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<CatalogFilterCategoryId | null>(
     null,
@@ -1234,9 +1240,10 @@ export function CatalogPage() {
         <button
           type="button"
           className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-background"
+          disabled={orderEditSessionActive}
           onClick={() => dispatch({ type: "city/clear" })}
         >
-          Сменить город
+          {orderEditSessionActive ? "Город зафиксирован" : "Сменить город"}
         </button>
       </div>
 

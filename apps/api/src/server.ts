@@ -7,6 +7,11 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { verifyTelegramInitData } from "./telegram/verifyInitData.js";
 import { createOrder, type CreateOrderPayload } from "./order/createOrder.js";
+import {
+  applyOrderEdit,
+  startOrderEditSession,
+  stopOrderEditSession,
+} from "./order/editOrder.js";
 import { listCustomerOrders } from "./order/customerOrders.js";
 import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
 import {
@@ -16,8 +21,10 @@ import {
   isValidIsoDate,
 } from "./order/deliverySchedule.js";
 import { sendOrderNotificationToChats } from "./order/sendOrderNotification.js";
+import { isSelfOnlyTestOrderUser } from "./order/testOrderAccess.js";
 import {
   buildNotifyTargetRecords,
+  syncEditedOrderTelegramState,
   syncFinalOrderTelegramState,
 } from "./order/telegramFinalStatus.js";
 import { HttpError, isHttpError } from "./httpError.js";
@@ -51,7 +58,6 @@ type SuccessResponse = {
 };
 
 type CitySlug = "vvo" | "blg";
-const TEST_ORDER_SELF_CHAT_ID = "1208488286";
 const DEV_FALLBACK_TG_USER_ID = 42;
 
 type OrderRequestBody = CreateOrderPayload & {
@@ -268,10 +274,8 @@ function pickTelegramChatIdsForOrder(params: {
   citySlug: CitySlug;
   tgUserId: number;
 }): string[] {
-  const selfChatId = String(params.tgUserId);
-  // Only the main owner account gets self-notifications for test orders.
-  if (selfChatId === TEST_ORDER_SELF_CHAT_ID) {
-    return [selfChatId];
+  if (isSelfOnlyTestOrderUser(params.tgUserId)) {
+    return [String(params.tgUserId)];
   }
 
   return pickTelegramChatIds(params.citySlug);
@@ -597,6 +601,130 @@ app.put<{
     return reply.code(statusCode).send({ ok: false, error: { code, message } });
   }
 });
+
+app.put<{
+  Params: { orderId: string };
+  Reply: ApiSuccess<Awaited<ReturnType<typeof startOrderEditSession>>> | ErrorResponse;
+}>("/api/orders/:orderId/edit-session", async (request, reply) => {
+  try {
+    const orderId = request.params.orderId?.trim() ?? "";
+    if (!orderId) {
+      throw new HttpError(400, "BAD_REQUEST", "orderId is required");
+    }
+
+    const user = requireCustomerTelegramUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+
+    const result = await startOrderEditSession({
+      orderId,
+      expectedTgUserId: user.id,
+    });
+    return reply.code(200).send(ok(result));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Customer start edit session request failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.delete<{
+  Params: { orderId: string };
+  Reply: ApiSuccess<{ stopped: true }> | ErrorResponse;
+}>("/api/orders/:orderId/edit-session", async (request, reply) => {
+  try {
+    const orderId = request.params.orderId?.trim() ?? "";
+    if (!orderId) {
+      throw new HttpError(400, "BAD_REQUEST", "orderId is required");
+    }
+
+    const user = requireCustomerTelegramUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+
+    await stopOrderEditSession({
+      orderId,
+      expectedTgUserId: user.id,
+    });
+    return reply.code(200).send(ok({ stopped: true }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Customer stop edit session request failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
+  "/api/orders/:orderId/edit",
+  async (request, reply) => {
+    try {
+      const orderId = request.params.orderId?.trim() ?? "";
+      if (!orderId) {
+        throw new HttpError(400, "BAD_REQUEST", "orderId is required");
+      }
+
+      const body = parseOrderRequestBody(request.body);
+      const verified = requireVerifiedTelegramRequest({
+        headers: request.headers as Record<string, unknown>,
+        initDataFallback: body.initData,
+      });
+
+      const result = await applyOrderEdit({
+        orderId,
+        expectedTgUserId: verified.user.id,
+        payload: {
+          citySlug: body.citySlug,
+          deliveryMethod: body.deliveryMethod,
+          address: body.address,
+          comment: body.comment,
+          deliveryDate: body.deliveryDate,
+          deliveryTimeSlot: body.deliveryTimeSlot,
+          pointsToSpend: body.pointsToSpend,
+          items: body.items,
+        },
+      });
+
+      try {
+        await syncEditedOrderTelegramState({
+          orderId: result.orderId,
+          logger: request.log,
+        });
+      } catch (syncError) {
+        request.log.error(
+          { err: syncError, orderId: result.orderId },
+          "Edited order saved, but Telegram edited order sync failed",
+        );
+      }
+
+      return reply.code(200).send({ ok: true, orderId: result.orderId, notified: true });
+    } catch (e: unknown) {
+      const statusCode = isHttpError(e) ? e.statusCode : 500;
+      const code = isHttpError(e) ? e.code : "INTERNAL";
+      const message = isHttpError(e)
+        ? e.message
+        : e instanceof Error
+          ? e.message
+          : "Unexpected error";
+
+      request.log.error({ err: e }, "Customer edit order request failed");
+      return reply.code(statusCode).send({ ok: false, error: { code, message } });
+    }
+  },
+);
 
 app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
   "/api/order",

@@ -1,11 +1,20 @@
-import { PackageSearch, RefreshCw, XCircle } from "lucide-react";
+import { PackageSearch, Pencil, RefreshCw, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ApiError, apiGet, apiPut } from "../api/client";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { canUseOrderEditing, readTelegramUserId } from "../orderEditAccess";
+import {
+  isOrderEditSessionExpired,
+  useAppState,
+  type CartItem,
+  type CheckoutDraft,
+  type City,
+} from "../state/AppStateProvider";
+import { useTelegram } from "../telegram/TelegramProvider";
 
 type OrderStatus = "new" | "processing" | "done" | "cancelled";
 
@@ -33,6 +42,15 @@ type OrdersResponse = {
 type CancelOrderResponse = {
   changed: boolean;
   status: OrderStatus;
+};
+
+type StartOrderEditResponse = {
+  orderId: string;
+  city: City;
+  expiresAt: string;
+  discountAmount: number;
+  cart: CartItem[];
+  checkoutDraft: CheckoutDraft;
 };
 
 function formatPriceRub(value: number): string {
@@ -110,12 +128,24 @@ function getCancelDisabledMessage(order: CustomerOrder): string {
 }
 
 export function OrdersPage() {
+  const navigate = useNavigate();
+  const { webApp } = useTelegram();
+  const { state, dispatch } = useAppState();
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<"cancel" | "edit" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const currentTgUserId = readTelegramUserId(webApp.initDataUnsafe?.user?.id);
+  const orderEditEnabled = canUseOrderEditing(currentTgUserId);
+  const activeEditSession =
+    orderEditEnabled &&
+    state.orderEditSession &&
+    !isOrderEditSessionExpired(state.orderEditSession)
+      ? state.orderEditSession
+      : null;
 
   async function loadOrders(options?: { silent?: boolean }): Promise<void> {
     const silent = options?.silent ?? false;
@@ -152,12 +182,16 @@ export function OrdersPage() {
     if (!confirmed) return;
 
     setBusyOrderId(orderId);
+    setBusyAction("cancel");
     setError(null);
     setNotice(null);
 
     try {
       const result = await apiPut<CancelOrderResponse>(`/api/orders/${orderId}/cancel`, {});
 
+      if (state.orderEditSession?.orderId === orderId) {
+        dispatch({ type: "order-edit/cancel" });
+      }
       setOrders((prev) => prev.filter((order) => order.id !== orderId));
       setNotice(
         result.status === "cancelled"
@@ -167,6 +201,66 @@ export function OrdersPage() {
     } catch (e: unknown) {
       setError(formatApiErrorMessage(e));
     } finally {
+      setBusyAction(null);
+      setBusyOrderId(null);
+    }
+  }
+
+  async function handleStartEdit(order: CustomerOrder): Promise<void> {
+    if (!orderEditEnabled) {
+      setError("Редактирование заказа временно доступно только для тестового аккаунта.");
+      return;
+    }
+
+    if (activeEditSession?.orderId === order.id) {
+      navigate("/", { replace: false });
+      return;
+    }
+
+    const hasDraftToReplace =
+      state.cart.length > 0 ||
+      state.checkoutDraft.address.trim().length > 0 ||
+      state.checkoutDraft.comment.trim().length > 0 ||
+      state.checkoutDraft.deliveryDate.trim().length > 0 ||
+      state.checkoutDraft.deliveryTimeSlot.trim().length > 0 ||
+      activeEditSession !== null;
+
+    if (hasDraftToReplace) {
+      const confirmed = window.confirm(
+        "Запустить редактирование этого заказа? Текущая корзина и черновик оформления будут заменены.",
+      );
+      if (!confirmed) return;
+    }
+
+    setBusyOrderId(order.id);
+    setBusyAction("edit");
+    setError(null);
+    setNotice(null);
+
+    try {
+      const result = await apiPut<StartOrderEditResponse>(
+        `/api/orders/${order.id}/edit-session`,
+        {},
+      );
+
+      dispatch({
+        type: "order-edit/start",
+        session: {
+          orderId: result.orderId,
+          city: result.city,
+          expiresAt: result.expiresAt,
+          discountAmount: result.discountAmount,
+        },
+        cart: result.cart,
+        checkoutDraft: result.checkoutDraft,
+      });
+
+      setNotice("Режим редактирования включён на 30 минут.");
+      navigate("/", { replace: false });
+    } catch (e: unknown) {
+      setError(formatApiErrorMessage(e));
+    } finally {
+      setBusyAction(null);
       setBusyOrderId(null);
     }
   }
@@ -229,6 +323,9 @@ export function OrdersPage() {
         <div className="space-y-3">
           {orders.map((order) => {
             const badge = getStatusBadge(order.status);
+            const isContinuingEdit = activeEditSession?.orderId === order.id;
+            const editBlockedByOtherSession =
+              activeEditSession !== null && activeEditSession.orderId !== order.id;
 
             return (
               <Card key={order.id} className="border-border/80 bg-card/90">
@@ -283,16 +380,41 @@ export function OrdersPage() {
 
                   <div className="flex flex-wrap items-center gap-2">
                     {order.canCancel ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="destructive"
-                        disabled={busyOrderId === order.id}
-                        onClick={() => void handleCancel(order.id)}
-                      >
-                        <XCircle className="h-4 w-4" />
-                        {busyOrderId === order.id ? "Отменяем..." : "Отменить заказ"}
-                      </Button>
+                      <>
+                        {orderEditEnabled ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={isContinuingEdit ? "secondary" : "outline"}
+                            disabled={
+                              (busyOrderId !== null &&
+                                (busyOrderId !== order.id || busyAction === "cancel")) ||
+                              editBlockedByOtherSession
+                            }
+                            onClick={() => void handleStartEdit(order)}
+                          >
+                          <Pencil className="h-4 w-4" />
+                          {busyOrderId === order.id && busyAction === "edit"
+                            ? "Открываем..."
+                            : isContinuingEdit
+                              ? "Продолжить редактирование"
+                              : "Редактировать заказ"}
+                          </Button>
+                        ) : null}
+
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          disabled={busyOrderId !== null}
+                          onClick={() => void handleCancel(order.id)}
+                        >
+                          <XCircle className="h-4 w-4" />
+                          {busyOrderId === order.id && busyAction === "cancel"
+                            ? "Отменяем..."
+                            : "Отменить заказ"}
+                        </Button>
+                      </>
                     ) : (
                       <div className="text-xs text-muted-foreground">
                         {getCancelDisabledMessage(order)}

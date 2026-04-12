@@ -26,12 +26,47 @@ export type FavoriteItem = {
   inStock: boolean;
 };
 
+export type DeliveryMethod = "pickup" | "delivery";
+
+export type CheckoutDraft = {
+  deliveryMethod: DeliveryMethod;
+  address: string;
+  comment: string;
+  deliveryDate: string;
+  deliveryTimeSlot: string;
+};
+
+export const EMPTY_CHECKOUT_DRAFT: CheckoutDraft = {
+  deliveryMethod: "delivery",
+  address: "",
+  comment: "",
+  deliveryDate: "",
+  deliveryTimeSlot: "",
+};
+
+export type OrderEditRestoreSnapshot = {
+  city: City | null;
+  cartCity: City | null;
+  cart: CartItem[];
+  checkoutDraft: CheckoutDraft;
+};
+
+export type OrderEditSession = {
+  orderId: string;
+  city: City;
+  expiresAt: string;
+  discountAmount: number;
+  restore: OrderEditRestoreSnapshot;
+};
+
 export type AppState = {
   isAdultConfirmed: boolean;
   city: City | null;
   cartCity: City | null;
   cart: CartItem[];
   favorites: FavoriteItem[];
+  checkoutDraft: CheckoutDraft;
+  orderEditSession: OrderEditSession | null;
 };
 
 type Action =
@@ -39,10 +74,21 @@ type Action =
   | { type: "city/set"; city: City }
   | { type: "city/clear" }
   | { type: "cart/add"; item: Omit<CartItem, "qty"> }
+  | { type: "cart/replace"; city: City; items: CartItem[] }
   | { type: "cart/inc"; productId: string }
   | { type: "cart/dec"; productId: string }
   | { type: "cart/remove"; productId: string }
   | { type: "cart/clear" }
+  | { type: "checkout/set"; patch: Partial<CheckoutDraft> }
+  | { type: "checkout/reset"; draft?: Partial<CheckoutDraft> }
+  | {
+      type: "order-edit/start";
+      session: Omit<OrderEditSession, "restore">;
+      cart: CartItem[];
+      checkoutDraft: CheckoutDraft;
+    }
+  | { type: "order-edit/cancel" }
+  | { type: "order-edit/complete" }
   | { type: "favorite/toggle"; item: FavoriteItem }
   | { type: "favorite/remove"; productId: string };
 
@@ -61,6 +107,8 @@ const initialState: AppState = {
   cartCity: null,
   cart: [],
   favorites: [],
+  checkoutDraft: EMPTY_CHECKOUT_DRAFT,
+  orderEditSession: null,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -94,9 +142,72 @@ function isFavoriteItem(value: unknown): value is FavoriteItem {
     typeof value.title === "string" &&
     typeof value.price === "number" &&
     Number.isFinite(value.price) &&
-    typeof value.inStock === "boolean" &&
-    (value.imageUrl === null || typeof value.imageUrl === "string")
+      typeof value.inStock === "boolean" &&
+      (value.imageUrl === null || typeof value.imageUrl === "string")
   );
+}
+
+function isDeliveryMethod(value: unknown): value is DeliveryMethod {
+  return value === "pickup" || value === "delivery";
+}
+
+function sanitizeCheckoutDraft(value: unknown): CheckoutDraft {
+  if (!isRecord(value)) {
+    return EMPTY_CHECKOUT_DRAFT;
+  }
+
+  return {
+    deliveryMethod: isDeliveryMethod(value.deliveryMethod)
+      ? value.deliveryMethod
+      : EMPTY_CHECKOUT_DRAFT.deliveryMethod,
+    address: typeof value.address === "string" ? value.address : EMPTY_CHECKOUT_DRAFT.address,
+    comment: typeof value.comment === "string" ? value.comment : EMPTY_CHECKOUT_DRAFT.comment,
+    deliveryDate:
+      typeof value.deliveryDate === "string"
+        ? value.deliveryDate
+        : EMPTY_CHECKOUT_DRAFT.deliveryDate,
+    deliveryTimeSlot:
+      typeof value.deliveryTimeSlot === "string"
+        ? value.deliveryTimeSlot
+        : EMPTY_CHECKOUT_DRAFT.deliveryTimeSlot,
+  };
+}
+
+function sanitizeRestoreSnapshot(value: unknown): OrderEditRestoreSnapshot | null {
+  if (!isRecord(value)) return null;
+
+  const city = value.city === null || isCity(value.city) ? value.city : null;
+  const cartCity = value.cartCity === null || isCity(value.cartCity) ? value.cartCity : null;
+  const cartRaw = Array.isArray(value.cart) ? value.cart : [];
+  const cart = cartRaw.filter(isCartItem);
+
+  return {
+    city,
+    cartCity: cart.length > 0 ? cartCity : null,
+    cart,
+    checkoutDraft: sanitizeCheckoutDraft(value.checkoutDraft),
+  };
+}
+
+function sanitizeOrderEditSession(value: unknown): OrderEditSession | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.orderId !== "string" || value.orderId.trim().length === 0) return null;
+  if (!isCity(value.city)) return null;
+  if (typeof value.expiresAt !== "string" || value.expiresAt.trim().length === 0) return null;
+  if (typeof value.discountAmount !== "number" || !Number.isFinite(value.discountAmount)) {
+    return null;
+  }
+
+  const restore = sanitizeRestoreSnapshot(value.restore);
+  if (!restore) return null;
+
+  return {
+    orderId: value.orderId,
+    city: value.city,
+    expiresAt: value.expiresAt,
+    discountAmount: Math.max(0, Math.trunc(value.discountAmount)),
+    restore,
+  };
 }
 
 function loadStateFromStorage(): AppState {
@@ -121,6 +232,8 @@ function loadStateFromStorage(): AppState {
       parsedCart.length > 0 && (!cartCity || cartCity !== city) ? [] : parsedCart;
     const favoritesRaw = Array.isArray(parsed.favorites) ? parsed.favorites : [];
     const favorites = favoritesRaw.filter(isFavoriteItem);
+    const checkoutDraft = sanitizeCheckoutDraft(parsed.checkoutDraft);
+    const orderEditSession = sanitizeOrderEditSession(parsed.orderEditSession);
 
     return {
       isAdultConfirmed,
@@ -128,6 +241,8 @@ function loadStateFromStorage(): AppState {
       cartCity: cart.length > 0 ? cartCity : null,
       cart,
       favorites,
+      checkoutDraft,
+      orderEditSession,
     };
   } catch {
     return initialState;
@@ -139,12 +254,30 @@ function reducer(state: AppState, action: Action): AppState {
     case "adult/confirm":
       return { ...state, isAdultConfirmed: true };
     case "city/set":
+      if (state.orderEditSession && state.orderEditSession.city !== action.city) {
+        return state;
+      }
       if (state.city === action.city) {
         return state;
       }
-      return { ...state, city: action.city, cartCity: null, cart: [] };
+      return {
+        ...state,
+        city: action.city,
+        cartCity: null,
+        cart: [],
+        checkoutDraft: EMPTY_CHECKOUT_DRAFT,
+      };
     case "city/clear":
-      return { ...state, city: null, cartCity: null, cart: [] };
+      if (state.orderEditSession) {
+        return state;
+      }
+      return {
+        ...state,
+        city: null,
+        cartCity: null,
+        cart: [],
+        checkoutDraft: EMPTY_CHECKOUT_DRAFT,
+      };
     case "cart/add": {
       const existing = state.cart.find((x) => x.productId === action.item.productId);
       if (existing) {
@@ -171,6 +304,13 @@ function reducer(state: AppState, action: Action): AppState {
         ],
       };
     }
+    case "cart/replace":
+      return {
+        ...state,
+        city: action.city,
+        cartCity: action.city,
+        cart: action.items,
+      };
     case "cart/inc":
       return {
         ...state,
@@ -202,6 +342,63 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "cart/clear":
       return { ...state, cartCity: null, cart: [] };
+    case "checkout/set":
+      return {
+        ...state,
+        checkoutDraft: {
+          ...state.checkoutDraft,
+          ...action.patch,
+        },
+      };
+    case "checkout/reset":
+      return {
+        ...state,
+        checkoutDraft: {
+          ...EMPTY_CHECKOUT_DRAFT,
+          ...(action.draft ?? {}),
+        },
+      };
+    case "order-edit/start": {
+      const restore =
+        state.orderEditSession?.restore ?? {
+          city: state.city,
+          cartCity: state.cartCity,
+          cart: state.cart,
+          checkoutDraft: state.checkoutDraft,
+        };
+
+      return {
+        ...state,
+        city: action.session.city,
+        cartCity: action.session.city,
+        cart: action.cart,
+        checkoutDraft: action.checkoutDraft,
+        orderEditSession: {
+          ...action.session,
+          restore,
+        },
+      };
+    }
+    case "order-edit/cancel":
+      if (!state.orderEditSession) {
+        return state;
+      }
+      return {
+        ...state,
+        city: state.orderEditSession.restore.city,
+        cartCity: state.orderEditSession.restore.cartCity,
+        cart: state.orderEditSession.restore.cart,
+        checkoutDraft: state.orderEditSession.restore.checkoutDraft,
+        orderEditSession: null,
+      };
+    case "order-edit/complete":
+      return {
+        ...state,
+        cartCity: null,
+        cart: [],
+        checkoutDraft: EMPTY_CHECKOUT_DRAFT,
+        orderEditSession: null,
+      };
     case "favorite/toggle": {
       const exists = state.favorites.some((x) => x.productId === action.item.productId);
       if (exists) {
@@ -257,4 +454,20 @@ export function useAppState(): AppStateContextValue {
     throw new Error("useAppState must be used within AppStateProvider");
   }
   return ctx;
+}
+
+export function getOrderEditRemainingMs(
+  session: Pick<OrderEditSession, "expiresAt">,
+  nowMs: number = Date.now(),
+): number {
+  const expiresAtMs = new Date(session.expiresAt).getTime();
+  if (!Number.isFinite(expiresAtMs)) return 0;
+  return Math.max(0, expiresAtMs - nowMs);
+}
+
+export function isOrderEditSessionExpired(
+  session: Pick<OrderEditSession, "expiresAt">,
+  nowMs: number = Date.now(),
+): boolean {
+  return getOrderEditRemainingMs(session, nowMs) <= 0;
 }

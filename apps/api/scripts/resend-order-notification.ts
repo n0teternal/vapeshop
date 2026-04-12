@@ -5,10 +5,9 @@ import {
   type OrderStatus,
 } from "../src/order/telegramMessage.js";
 import { sendOrderNotificationToChats } from "../src/order/sendOrderNotification.js";
+import { isSelfOnlyTestOrderUser } from "../src/order/testOrderAccess.js";
 import { buildNotifyTargetRecords } from "../src/order/telegramFinalStatus.js";
 import { createServiceSupabaseClient } from "../src/supabase/serviceClient.js";
-
-const TEST_ORDER_SELF_CHAT_ID = "1208488286";
 
 type Args = {
   orderId: string;
@@ -29,6 +28,7 @@ type OrderRow = {
   notify_chat_id: number | null;
   notify_message_id: number | null;
   notify_sent_at: string | null;
+  edited_at: string | null;
 };
 
 function parseArgs(argv: string[]): Args {
@@ -96,9 +96,8 @@ function pickTelegramChatIdsForOrder(params: {
   citySlug: CitySlug;
   tgUserId: number;
 }): string[] {
-  const selfChatId = String(params.tgUserId);
-  if (selfChatId === TEST_ORDER_SELF_CHAT_ID) {
-    return [selfChatId];
+  if (isSelfOnlyTestOrderUser(params.tgUserId)) {
+    return [String(params.tgUserId)];
   }
   return pickTelegramChatIds(params.citySlug);
 }
@@ -114,7 +113,7 @@ async function main(): Promise<void> {
   const { data: orderData, error: orderError } = await supabase
     .from("orders")
     .select(
-      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_sent_at",
+      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_sent_at,edited_at",
     )
     .eq("id", args.orderId)
     .maybeSingle();
@@ -197,6 +196,7 @@ async function main(): Promise<void> {
     totalPrice: order.total_price,
     discountApplied: order.discount_amount > 0,
     orderId: order.id,
+    isEdited: typeof order.edited_at === "string" && order.edited_at.trim().length > 0,
   });
 
   const chatIds = pickTelegramChatIdsForOrder({
