@@ -211,11 +211,6 @@ export function CartPage() {
     showBlgDeliverySchedule &&
     checkoutDraft.deliveryDate.trim().length > 0 &&
     availableDeliveryTimeSlots.length === 0;
-  const hasRequiredBlgScheduleSelection =
-    !showBlgDeliverySchedule ||
-    (checkoutDraft.deliveryDate.trim().length > 0 &&
-      checkoutDraft.deliveryTimeSlot.trim().length > 0);
-
   const total = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   }, [state.cart]);
@@ -303,8 +298,7 @@ export function CartPage() {
     !submitting &&
     !editSessionExpired &&
     (checkoutDraft.deliveryMethod !== "delivery" ||
-      checkoutDraft.address.trim().length > 0) &&
-    hasRequiredBlgScheduleSelection;
+      checkoutDraft.address.trim().length > 0);
 
   async function notify(message: string): Promise<void> {
     if (isTelegram) {
@@ -364,12 +358,20 @@ export function CartPage() {
         return;
       }
 
-      if (showBlgDeliverySchedule && checkoutDraft.deliveryDate.trim().length === 0) {
+      if (
+        showBlgDeliverySchedule &&
+        checkoutDraft.deliveryTimeSlot.trim().length > 0 &&
+        checkoutDraft.deliveryDate.trim().length === 0
+      ) {
         setSubmitError("Выберите дату доставки.");
         return;
       }
 
-      if (showBlgDeliverySchedule && checkoutDraft.deliveryTimeSlot.trim().length === 0) {
+      if (
+        showBlgDeliverySchedule &&
+        selectedDateHasNoAvailableSlots &&
+        checkoutDraft.deliveryTimeSlot.trim().length > 0
+      ) {
         setSubmitError(
           selectedDateHasNoAvailableSlots
             ? "На выбранную дату свободных слотов уже нет. Выберите другую дату."
@@ -668,6 +670,9 @@ export function CartPage() {
                         </option>
                       ))}
                     </select>
+                    <span className="text-xs text-muted-foreground">
+                      Дату и время можно не указывать.
+                    </span>
                     {selectedDateHasNoAvailableSlots ? (
                       <span className="text-xs text-muted-foreground">
                         На выбранную дату свободных слотов уже нет. Выберите другую дату.

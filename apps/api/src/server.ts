@@ -151,13 +151,13 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     "deliveryTimeSlot",
   );
 
-  if (citySlug === "blg" && normalizedDeliveryMethod === "delivery") {
-    if (deliveryDate === null) {
-      throw new HttpError(400, "BAD_REQUEST", "Выберите дату доставки.");
-    }
-    if (deliveryTimeSlot === null) {
-      throw new HttpError(400, "BAD_REQUEST", "Выберите время доставки.");
-    }
+  if (
+    citySlug === "blg" &&
+    normalizedDeliveryMethod === "delivery" &&
+    deliveryTimeSlot !== null &&
+    deliveryDate === null
+  ) {
+    throw new HttpError(400, "BAD_REQUEST", "Выберите дату доставки.");
   }
 
   if (deliveryDate !== null && !isValidIsoDate(deliveryDate)) {
