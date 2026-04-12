@@ -115,12 +115,12 @@ export function Layout() {
           <div className="sticky top-[69px] z-20 border-b border-amber-500/25 bg-amber-500/10 backdrop-blur-xl">
             <div className="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-amber-950">
+                <div className="text-sm font-semibold text-white">
                   {editModeExpired
                     ? "Режим редактирования заказа истёк"
                     : `Включен режим редактирования, осталось минут: ${remainingMinutes}`}
                 </div>
-                <div className="mt-1 text-xs text-amber-950/75">
+                <div className="mt-1 text-xs text-white/80">
                   {editModeExpired
                     ? "Можно выйти из режима и запустить редактирование заново из управления заказами."
                     : "Изменения применятся только после повторного оформления заказа."}
