@@ -607,12 +607,12 @@ export function CartPage() {
                     <span className="text-xs font-semibold text-muted-foreground">
                       Дата доставки
                     </span>
-                    <div className="relative">
+                    <div className="flex items-center gap-2">
                       <button
                         type="button"
                         disabled={submitting}
                         onClick={openDeliveryDatePicker}
-                        className={`flex h-10 w-full items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background ${
+                        className={`flex h-10 flex-1 items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background ${
                           checkoutDraft.deliveryDate ? "text-foreground" : "text-muted-foreground"
                         } ${submitting ? "cursor-not-allowed opacity-50" : ""}`}
                       >
@@ -629,13 +629,29 @@ export function CartPage() {
 
                       <Input
                         ref={deliveryDateInputRef}
-                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        className="sr-only"
                         type="date"
                         value={checkoutDraft.deliveryDate}
                         min={minDeliveryDate}
                         disabled={submitting}
                         onChange={(e) => updateCheckoutDraft({ deliveryDate: e.target.value })}
                       />
+                      {checkoutDraft.deliveryDate ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={submitting}
+                          onClick={() =>
+                            updateCheckoutDraft({
+                              deliveryDate: "",
+                              deliveryTimeSlot: "",
+                            })
+                          }
+                        >
+                          Сбросить
+                        </Button>
+                      ) : null}
                     </div>
                   </label>
 
