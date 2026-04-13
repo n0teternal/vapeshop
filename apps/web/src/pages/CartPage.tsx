@@ -108,6 +108,14 @@ function getTodayIsoDateForCity(city: City | null, nowMs: number = Date.now()): 
   return `${year}-${month}-${day}`;
 }
 
+function formatDeliveryDatePickerValue(value: string): string {
+  if (!value) return "";
+
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}.${month}.${year}`;
+}
+
 function getMinutesOfDayForCity(city: City, nowMs: number = Date.now()): number {
   const offsetMinutes = CITY_UTC_OFFSET_MINUTES[city];
   const adjusted = new Date(nowMs + offsetMinutes * 60_000);
@@ -154,20 +162,6 @@ function isDeliveryTimeSlotAvailable(params: {
   const nowMinutes = getMinutesOfDayForCity(params.city, params.nowMs);
   const cutoffMinutes = parsed.startMinutes - 60;
   return nowMinutes < cutoffMinutes;
-}
-
-function formatDeliveryDatePickerValue(value: string): string {
-  const [year, month, day] = value.split("-");
-  if (!year || !month || !day) return value;
-
-  const parsed = new Date(Number(year), Number(month) - 1, Number(day));
-  if (Number.isNaN(parsed.getTime())) return value;
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(parsed);
 }
 
 export function CartPage() {
@@ -225,6 +219,19 @@ export function CartPage() {
       ? maxPointsToSpend
       : 0;
   const totalToPay = Math.max(0, total - pointsToSpend);
+
+  function openDeliveryDatePicker(): void {
+    const input = deliveryDateInputRef.current;
+    if (!input || submitting) return;
+
+    if (typeof input.showPicker === "function") {
+      input.showPicker();
+      return;
+    }
+
+    input.focus();
+    input.click();
+  }
 
   async function loadPointsBalance(): Promise<void> {
     setPointsLoading(true);
@@ -319,19 +326,6 @@ export function CartPage() {
     }>,
   ): void {
     dispatch({ type: "checkout/set", patch });
-  }
-
-  function openDeliveryDatePicker(): void {
-    const input = deliveryDateInputRef.current;
-    if (!input || submitting) return;
-
-    if (typeof input.showPicker === "function") {
-      input.showPicker();
-      return;
-    }
-
-    input.focus();
-    input.click();
   }
 
   async function submitOrder(): Promise<void> {
@@ -612,7 +606,7 @@ export function CartPage() {
                         type="button"
                         disabled={submitting}
                         onClick={openDeliveryDatePicker}
-                        className={`flex h-10 flex-1 items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background ${
+                        className={`hidden h-10 flex-1 items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:flex ${
                           checkoutDraft.deliveryDate ? "text-foreground" : "text-muted-foreground"
                         } ${submitting ? "cursor-not-allowed opacity-50" : ""}`}
                       >
@@ -629,12 +623,19 @@ export function CartPage() {
 
                       <Input
                         ref={deliveryDateInputRef}
-                        className="sr-only"
+                        className="min-w-0 flex-1 sm:sr-only"
                         type="date"
                         value={checkoutDraft.deliveryDate}
                         min={minDeliveryDate}
                         disabled={submitting}
-                        onChange={(e) => updateCheckoutDraft({ deliveryDate: e.target.value })}
+                        onChange={(e) =>
+                          updateCheckoutDraft({
+                            deliveryDate: e.target.value,
+                            deliveryTimeSlot: e.target.value.trim().length
+                              ? checkoutDraft.deliveryTimeSlot
+                              : "",
+                          })
+                        }
                       />
                       {checkoutDraft.deliveryDate ? (
                         <Button
