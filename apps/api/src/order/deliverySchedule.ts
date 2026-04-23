@@ -5,6 +5,7 @@ export const BLG_DELIVERY_TIME_SLOTS = [
   "19:00-20:00",
   "20:00-21:00",
 ] as const;
+const BLG_TODAY_DELIVERY_DATE_CUTOFF_MINUTES = 20 * 60;
 
 const CITY_UTC_OFFSET_MINUTES: Record<DeliveryCitySlug, number> = {
   vvo: 10 * 60,
@@ -22,12 +23,37 @@ export function getTodayIsoDateForCity(
   return `${year}-${month}-${day}`;
 }
 
+function getNextIsoDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return value;
+
+  const next = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + 1),
+  );
+  const year = next.getUTCFullYear();
+  const month = String(next.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(next.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function getMinutesOfDayForCity(
   citySlug: DeliveryCitySlug,
   nowMs: number = Date.now(),
 ): number {
   const adjusted = new Date(nowMs + CITY_UTC_OFFSET_MINUTES[citySlug] * 60_000);
   return adjusted.getUTCHours() * 60 + adjusted.getUTCMinutes();
+}
+
+export function getMinDeliveryDateForCity(
+  citySlug: DeliveryCitySlug,
+  nowMs: number = Date.now(),
+): string {
+  const today = getTodayIsoDateForCity(citySlug, nowMs);
+  if (citySlug !== "blg") return today;
+
+  return getMinutesOfDayForCity(citySlug, nowMs) >= BLG_TODAY_DELIVERY_DATE_CUTOFF_MINUTES
+    ? getNextIsoDate(today)
+    : today;
 }
 
 export function isValidIsoDate(value: string): boolean {

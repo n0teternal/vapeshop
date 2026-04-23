@@ -45,6 +45,9 @@ const BLG_DELIVERY_TIME_SLOTS = [
   "19:00-20:00",
   "20:00-21:00",
 ] as const;
+const BLG_TODAY_DELIVERY_DATE_CUTOFF_MINUTES = 20 * 60;
+const DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME =
+  "border-sky-300/70 focus:ring-sky-200/70 focus-visible:ring-sky-200/70";
 
 const CITY_UTC_OFFSET_MINUTES: Record<City, number> = {
   vvo: 10 * 60,
@@ -108,6 +111,19 @@ function getTodayIsoDateForCity(city: City | null, nowMs: number = Date.now()): 
   return `${year}-${month}-${day}`;
 }
 
+function getNextIsoDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return value;
+
+  const next = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + 1),
+  );
+  const year = next.getUTCFullYear();
+  const month = String(next.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(next.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function formatDeliveryDatePickerValue(value: string): string {
   if (!value) return "";
 
@@ -120,6 +136,15 @@ function getMinutesOfDayForCity(city: City, nowMs: number = Date.now()): number 
   const offsetMinutes = CITY_UTC_OFFSET_MINUTES[city];
   const adjusted = new Date(nowMs + offsetMinutes * 60_000);
   return adjusted.getUTCHours() * 60 + adjusted.getUTCMinutes();
+}
+
+function getMinDeliveryDateForCity(city: City | null, nowMs: number = Date.now()): string {
+  const today = getTodayIsoDateForCity(city, nowMs);
+  if (city !== "blg") return today;
+
+  return getMinutesOfDayForCity(city, nowMs) >= BLG_TODAY_DELIVERY_DATE_CUTOFF_MINUTES
+    ? getNextIsoDate(today)
+    : today;
 }
 
 function parseDeliveryTimeSlot(slot: string): { startMinutes: number; endMinutes: number } | null {
@@ -175,8 +200,9 @@ export function CartPage() {
   const [pointsLoading, setPointsLoading] = useState(false);
   const [pointsError, setPointsError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const cityToday = useMemo(() => getTodayIsoDateForCity(state.city, nowMs), [state.city, nowMs]);
   const minDeliveryDate = useMemo(
-    () => getTodayIsoDateForCity(state.city, nowMs),
+    () => getMinDeliveryDateForCity(state.city, nowMs),
     [state.city, nowMs],
   );
   const checkoutDraft = state.checkoutDraft;
@@ -202,6 +228,10 @@ export function CartPage() {
     showBlgDeliverySchedule &&
     checkoutDraft.deliveryDate.trim().length > 0 &&
     availableDeliveryTimeSlots.length === 0;
+  const selectedDeliveryDateIsBeforeMin =
+    showBlgDeliverySchedule &&
+    checkoutDraft.deliveryDate.trim().length > 0 &&
+    checkoutDraft.deliveryDate < minDeliveryDate;
   const total = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   }, [state.cart]);
@@ -296,11 +326,30 @@ export function CartPage() {
     });
   }, [availableDeliveryTimeSlots, checkoutDraft.deliveryTimeSlot, dispatch]);
 
+  useEffect(() => {
+    if (!showBlgDeliverySchedule) return;
+    if (!checkoutDraft.deliveryDate) return;
+    if (checkoutDraft.deliveryDate >= minDeliveryDate) return;
+
+    dispatch({
+      type: "checkout/set",
+      patch: { deliveryDate: "", deliveryTimeSlot: "" },
+    });
+  }, [checkoutDraft.deliveryDate, dispatch, minDeliveryDate, showBlgDeliverySchedule]);
+
+  const hasRequiredBlgDeliverySchedule =
+    !showBlgDeliverySchedule ||
+    (checkoutDraft.deliveryDate.trim().length > 0 &&
+      checkoutDraft.deliveryTimeSlot.trim().length > 0 &&
+      !selectedDateHasNoAvailableSlots &&
+      !selectedDeliveryDateIsBeforeMin);
+
   const canSubmit =
     state.cart.length > 0 &&
     state.city !== null &&
     !submitting &&
     !editSessionExpired &&
+    hasRequiredBlgDeliverySchedule &&
     (checkoutDraft.deliveryMethod !== "delivery" ||
       checkoutDraft.address.trim().length > 0);
 
@@ -344,6 +393,31 @@ export function CartPage() {
       }
 
       const trimmedAddress = checkoutDraft.address.trim();
+      if (showBlgDeliverySchedule && checkoutDraft.deliveryDate.trim().length === 0) {
+        setSubmitError("Р’С‹Р±РµСЂРёС‚Рµ РґР°С‚Сѓ РґРѕСЃС‚Р°РІРєРё.");
+        return;
+      }
+
+      if (showBlgDeliverySchedule && checkoutDraft.deliveryDate < minDeliveryDate) {
+        setSubmitError(
+          minDeliveryDate > cityToday
+            ? "РџРѕСЃР»Рµ 20:00 РїРѕ Р‘Р»Р°РіРѕРІРµС‰РµРЅСЃРєСѓ РґРѕСЃС‚Р°РІРєР° РЅР° СЃРµРіРѕРґРЅСЏ РЅРµРґРѕСЃС‚СѓРїРЅР°."
+            : "Р’С‹Р±РµСЂРёС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ РґР°С‚Сѓ РґРѕСЃС‚Р°РІРєРё.",
+        );
+        return;
+      }
+
+      if (showBlgDeliverySchedule && selectedDateHasNoAvailableSlots) {
+        setSubmitError(
+          "РќР° РІС‹Р±СЂР°РЅРЅСѓСЋ РґР°С‚Сѓ СЃРІРѕР±РѕРґРЅС‹С… СЃР»РѕС‚РѕРІ СѓР¶Рµ РЅРµС‚. Р’С‹Р±РµСЂРёС‚Рµ РґСЂСѓРіСѓСЋ РґР°С‚Сѓ.",
+        );
+        return;
+      }
+
+      if (showBlgDeliverySchedule && checkoutDraft.deliveryTimeSlot.trim().length === 0) {
+        setSubmitError("Р’С‹Р±РµСЂРёС‚Рµ РІСЂРµРјСЏ РґРѕСЃС‚Р°РІРєРё.");
+        return;
+      }
       if (checkoutDraft.deliveryMethod === "delivery" && !trimmedAddress) {
         setSubmitError("Укажите адрес для доставки.");
         return;
@@ -587,7 +661,7 @@ export function CartPage() {
                   Ваш адрес <span className="text-destructive">*</span>
                 </span>
                 <Input
-                  className="border-sky-300/70 focus-visible:ring-sky-200/70"
+                  className={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
                   value={checkoutDraft.address}
                   disabled={submitting}
                   onChange={(e) => updateCheckoutDraft({ address: e.target.value })}
@@ -606,7 +680,7 @@ export function CartPage() {
                         type="button"
                         disabled={submitting}
                         onClick={openDeliveryDatePicker}
-                        className={`hidden h-10 flex-1 items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:flex ${
+                        className={`hidden h-10 flex-1 items-center gap-2 rounded-md border border-input bg-background px-3 text-left text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background sm:flex ${DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME} ${
                           checkoutDraft.deliveryDate ? "text-foreground" : "text-muted-foreground"
                         } ${submitting ? "cursor-not-allowed opacity-50" : ""}`}
                       >
@@ -623,10 +697,11 @@ export function CartPage() {
 
                       <Input
                         ref={deliveryDateInputRef}
-                        className="min-w-0 flex-1 sm:sr-only"
+                        className={`min-w-0 flex-1 sm:sr-only ${DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}`}
                         type="date"
                         value={checkoutDraft.deliveryDate}
                         min={minDeliveryDate}
+                        required={showBlgDeliverySchedule}
                         disabled={submitting}
                         onChange={(e) =>
                           updateCheckoutDraft({
@@ -661,10 +736,13 @@ export function CartPage() {
                       Время доставки
                     </span>
                     <select
-                      className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                      className={`h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background ${DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}`}
                       value={checkoutDraft.deliveryTimeSlot}
+                      required={showBlgDeliverySchedule}
                       disabled={
-                        submitting || selectedDateHasNoAvailableSlots
+                        submitting ||
+                        checkoutDraft.deliveryDate.trim().length === 0 ||
+                        selectedDateHasNoAvailableSlots
                       }
                       onChange={(e) =>
                         updateCheckoutDraft({ deliveryTimeSlot: e.target.value })

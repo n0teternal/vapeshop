@@ -16,6 +16,7 @@ import { listCustomerOrders } from "./order/customerOrders.js";
 import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
 import {
   BLG_DELIVERY_TIME_SLOTS,
+  getMinDeliveryDateForCity,
   getTodayIsoDateForCity,
   isDeliveryTimeSlotOpen,
   isValidIsoDate,
@@ -150,6 +151,18 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     "deliveryTimeSlot",
   );
 
+  if (citySlug === "blg" && normalizedDeliveryMethod === "delivery" && deliveryDate === null) {
+    throw new HttpError(400, "BAD_REQUEST", "Р’С‹Р±РµСЂРёС‚Рµ РґР°С‚Сѓ РґРѕСЃС‚Р°РІРєРё.");
+  }
+
+  if (
+    citySlug === "blg" &&
+    normalizedDeliveryMethod === "delivery" &&
+    deliveryTimeSlot === null
+  ) {
+    throw new HttpError(400, "BAD_REQUEST", "Р’С‹Р±РµСЂРёС‚Рµ РІСЂРµРјСЏ РґРѕСЃС‚Р°РІРєРё.");
+  }
+
   if (
     citySlug === "blg" &&
     normalizedDeliveryMethod === "delivery" &&
@@ -165,6 +178,23 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
 
   if (deliveryDate !== null) {
     const cityToday = getTodayIsoDateForCity(citySlug);
+    const minDeliveryDate =
+      citySlug === "blg" && normalizedDeliveryMethod === "delivery"
+        ? getMinDeliveryDateForCity(citySlug)
+        : cityToday;
+
+    if (deliveryDate < minDeliveryDate) {
+      throw new HttpError(
+        400,
+        minDeliveryDate > cityToday
+          ? "DELIVERY_DATE_CLOSED_FOR_TODAY"
+          : "DELIVERY_DATE_IN_PAST",
+        minDeliveryDate > cityToday
+          ? "РџРѕСЃР»Рµ 20:00 РїРѕ Р‘Р»Р°РіРѕРІРµС‰РµРЅСЃРєСѓ РґРѕСЃС‚Р°РІРєР° РЅР° СЃРµРіРѕРґРЅСЏ РЅРµРґРѕСЃС‚СѓРїРЅР°. Р’С‹Р±РµСЂРёС‚Рµ РґСЂСѓРіСѓСЋ РґР°С‚Сѓ."
+          : "РќРµР»СЊР·СЏ РІС‹Р±СЂР°С‚СЊ РґР°С‚Сѓ СЂР°РЅСЊС€Рµ СЃРµРіРѕРґРЅСЏС€РЅРµР№ РїРѕ РјРµСЃС‚РЅРѕРјСѓ РІСЂРµРјРµРЅРё РіРѕСЂРѕРґР°.",
+      );
+    }
+
     if (deliveryDate < cityToday) {
       throw new HttpError(
         400,
