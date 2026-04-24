@@ -16,6 +16,7 @@ import { listCustomerOrders } from "./order/customerOrders.js";
 import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
 import {
   BLG_DELIVERY_TIME_SLOTS,
+  BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES,
   getMinDeliveryDateForCity,
   getTodayIsoDateForCity,
   isDeliveryTimeSlotOpen,
@@ -190,8 +191,8 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
           ? "DELIVERY_DATE_CLOSED_FOR_TODAY"
           : "DELIVERY_DATE_IN_PAST",
         minDeliveryDate > cityToday
-          ? "РџРѕСЃР»Рµ 20:00 РїРѕ Р‘Р»Р°РіРѕРІРµС‰РµРЅСЃРєСѓ РґРѕСЃС‚Р°РІРєР° РЅР° СЃРµРіРѕРґРЅСЏ РЅРµРґРѕСЃС‚СѓРїРЅР°. Р’С‹Р±РµСЂРёС‚Рµ РґСЂСѓРіСѓСЋ РґР°С‚Сѓ."
-          : "РќРµР»СЊР·СЏ РІС‹Р±СЂР°С‚СЊ РґР°С‚Сѓ СЂР°РЅСЊС€Рµ СЃРµРіРѕРґРЅСЏС€РЅРµР№ РїРѕ РјРµСЃС‚РЅРѕРјСѓ РІСЂРµРјРµРЅРё РіРѕСЂРѕРґР°.",
+          ? "На сегодня свободных слотов уже нет. Выберите другую дату."
+          : "Нельзя выбрать дату раньше сегодняшней по местному времени города.",
       );
     }
 
@@ -221,20 +222,19 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
       );
     }
 
-    if (deliveryDate === getTodayIsoDateForCity(citySlug)) {
-      if (
-        !isDeliveryTimeSlotOpen({
-          citySlug,
-          deliveryDate,
-          deliveryTimeSlot,
-        })
-      ) {
-        throw new HttpError(
-          400,
-          "DELIVERY_TIME_SLOT_UNAVAILABLE",
-          "Этот слот уже недоступен. Выберите более позднее время или другую дату.",
-        );
-      }
+    if (
+      !isDeliveryTimeSlotOpen({
+        citySlug,
+        deliveryDate,
+        deliveryTimeSlot,
+        cutoffMinutesBeforeStart: BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES,
+      })
+    ) {
+      throw new HttpError(
+        400,
+        "DELIVERY_TIME_SLOT_UNAVAILABLE",
+        "Этот слот уже недоступен. Выберите более позднее время или другую дату.",
+      );
     }
   }
 

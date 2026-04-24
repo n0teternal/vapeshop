@@ -1,6 +1,7 @@
 import { HttpError } from "../httpError.js";
 import { spendPointsForOrder } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import { getBlgDeliveryFeeRub } from "./deliverySchedule.js";
 import { buildOrderComment } from "./orderComment.js";
 import {
   buildOrderTelegramMessage,
@@ -19,6 +20,16 @@ export type CreateOrderPayload = {
   pointsToSpend: number;
   items: Array<{ productId: string; qty: number }>;
 };
+
+function getDeliveryFeeRub(params: {
+  citySlug: CreateOrderPayload["citySlug"];
+  deliveryMethod: CreateOrderPayload["deliveryMethod"];
+  itemsSubtotalRub: number;
+}): number {
+  return params.citySlug === "blg" && params.deliveryMethod === "delivery"
+    ? getBlgDeliveryFeeRub(params.itemsSubtotalRub)
+    : 0;
+}
 
 type TgUser = { id: number; username: string | null };
 
@@ -276,6 +287,12 @@ export async function createOrder(params: {
     lines.push({ productId, title: product.title, qty, unitPrice });
     totalBeforeDiscount += unitPrice * qty;
   }
+
+  totalBeforeDiscount += getDeliveryFeeRub({
+    citySlug: params.payload.citySlug,
+    deliveryMethod: params.payload.deliveryMethod,
+    itemsSubtotalRub: totalBeforeDiscount,
+  });
 
   const requestedPointsToSpend = Math.max(0, Math.trunc(params.payload.pointsToSpend));
   const maxPointsByOrderTotal = Math.max(0, Math.floor(totalBeforeDiscount));

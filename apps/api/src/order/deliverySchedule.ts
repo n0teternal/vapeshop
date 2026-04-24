@@ -1,11 +1,19 @@
 export type DeliveryCitySlug = "vvo" | "blg";
 
 export const BLG_DELIVERY_TIME_SLOTS = [
-  "18:00-19:00",
-  "19:00-20:00",
-  "20:00-21:00",
+  "14:00-16:00",
+  "16:00-18:00",
+  "18:00-20:00",
+  "20:00-22:00",
+  "22:00-00:00",
 ] as const;
-const BLG_TODAY_DELIVERY_DATE_CUTOFF_MINUTES = 20 * 60;
+export const BLG_DELIVERY_FEE_RUB = 150;
+export const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
+export const BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES = 12 * 60;
+
+export function getBlgDeliveryFeeRub(orderSubtotalRub: number): number {
+  return orderSubtotalRub >= BLG_FREE_DELIVERY_THRESHOLD_RUB ? 0 : BLG_DELIVERY_FEE_RUB;
+}
 
 const CITY_UTC_OFFSET_MINUTES: Record<DeliveryCitySlug, number> = {
   vvo: 10 * 60,
@@ -36,6 +44,17 @@ function getNextIsoDate(value: string): string {
   return `${year}-${month}-${day}`;
 }
 
+function parseIsoDate(value: string): { year: number; month: number; day: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
+}
+
 export function getMinutesOfDayForCity(
   citySlug: DeliveryCitySlug,
   nowMs: number = Date.now(),
@@ -51,9 +70,17 @@ export function getMinDeliveryDateForCity(
   const today = getTodayIsoDateForCity(citySlug, nowMs);
   if (citySlug !== "blg") return today;
 
-  return getMinutesOfDayForCity(citySlug, nowMs) >= BLG_TODAY_DELIVERY_DATE_CUTOFF_MINUTES
-    ? getNextIsoDate(today)
-    : today;
+  const hasOpenSlotsToday = BLG_DELIVERY_TIME_SLOTS.some((deliveryTimeSlot) =>
+    isDeliveryTimeSlotOpen({
+      citySlug,
+      deliveryDate: today,
+      deliveryTimeSlot,
+      cutoffMinutesBeforeStart: BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES,
+      nowMs,
+    }),
+  );
+
+  return hasOpenSlotsToday ? today : getNextIsoDate(today);
 }
 
 export function isValidIsoDate(value: string): boolean {
@@ -108,17 +135,24 @@ export function isDeliveryTimeSlotOpen(params: {
   if (params.citySlug !== "blg") return true;
 
   const nowMs = params.nowMs ?? Date.now();
-  if (params.deliveryDate !== getTodayIsoDateForCity(params.citySlug, nowMs)) {
-    return true;
-  }
-
   const parsedSlot = parseDeliveryTimeSlot(params.deliveryTimeSlot);
-  if (!parsedSlot) return false;
+  const parsedDate = parseIsoDate(params.deliveryDate);
+  if (!parsedSlot || !parsedDate) return false;
 
   const cutoffMinutesBeforeStart = params.cutoffMinutesBeforeStart ?? 60;
-  const nowMinutes = getMinutesOfDayForCity(params.citySlug, nowMs);
-  const cutoffMinutes = parsedSlot.startMinutes - cutoffMinutesBeforeStart;
-  return nowMinutes < cutoffMinutes;
+  const slotStartHours = Math.floor(parsedSlot.startMinutes / 60);
+  const slotStartMinutes = parsedSlot.startMinutes % 60;
+  const slotStartMs =
+    Date.UTC(
+      parsedDate.year,
+      parsedDate.month - 1,
+      parsedDate.day,
+      slotStartHours,
+      slotStartMinutes,
+    ) - CITY_UTC_OFFSET_MINUTES[params.citySlug] * 60_000;
+  const cutoffMs = slotStartMs - cutoffMinutesBeforeStart * 60_000;
+
+  return nowMs < cutoffMs;
 }
 
 export function extractDeliveryScheduleFromComment(comment: string | null): {

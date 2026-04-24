@@ -41,11 +41,15 @@ type ReferralOverviewBalance = {
 };
 
 const BLG_DELIVERY_TIME_SLOTS = [
-  "18:00-19:00",
-  "19:00-20:00",
-  "20:00-21:00",
+  "14:00-16:00",
+  "16:00-18:00",
+  "18:00-20:00",
+  "20:00-22:00",
+  "22:00-00:00",
 ] as const;
-const BLG_TODAY_DELIVERY_DATE_CUTOFF_MINUTES = 20 * 60;
+const BLG_DELIVERY_FEE_RUB = 150;
+const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
+const BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES = 12 * 60;
 const DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME =
   "border-sky-300/70 focus:ring-sky-200/70 focus-visible:ring-sky-200/70";
 
@@ -124,6 +128,17 @@ function getNextIsoDate(value: string): string {
   return `${year}-${month}-${day}`;
 }
 
+function parseIsoDate(value: string): { year: number; month: number; day: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
+}
+
 function formatDeliveryDatePickerValue(value: string): string {
   if (!value) return "";
 
@@ -132,19 +147,20 @@ function formatDeliveryDatePickerValue(value: string): string {
   return `${day}.${month}.${year}`;
 }
 
-function getMinutesOfDayForCity(city: City, nowMs: number = Date.now()): number {
-  const offsetMinutes = CITY_UTC_OFFSET_MINUTES[city];
-  const adjusted = new Date(nowMs + offsetMinutes * 60_000);
-  return adjusted.getUTCHours() * 60 + adjusted.getUTCMinutes();
-}
-
 function getMinDeliveryDateForCity(city: City | null, nowMs: number = Date.now()): string {
   const today = getTodayIsoDateForCity(city, nowMs);
   if (city !== "blg") return today;
 
-  return getMinutesOfDayForCity(city, nowMs) >= BLG_TODAY_DELIVERY_DATE_CUTOFF_MINUTES
-    ? getNextIsoDate(today)
-    : today;
+  const hasOpenSlotsToday = BLG_DELIVERY_TIME_SLOTS.some((slot) =>
+    isDeliveryTimeSlotAvailable({
+      city,
+      deliveryDate: today,
+      slot,
+      nowMs,
+    }),
+  );
+
+  return hasOpenSlotsToday ? today : getNextIsoDate(today);
 }
 
 function parseDeliveryTimeSlot(slot: string): { startMinutes: number; endMinutes: number } | null {
@@ -179,14 +195,28 @@ function isDeliveryTimeSlotAvailable(params: {
 }): boolean {
   if (params.city !== "blg") return true;
   if (params.deliveryDate.trim().length === 0) return true;
-  if (params.deliveryDate !== getTodayIsoDateForCity(params.city, params.nowMs)) return true;
 
   const parsed = parseDeliveryTimeSlot(params.slot);
-  if (!parsed) return false;
+  const parsedDate = parseIsoDate(params.deliveryDate);
+  if (!parsed || !parsedDate) return false;
 
-  const nowMinutes = getMinutesOfDayForCity(params.city, params.nowMs);
-  const cutoffMinutes = parsed.startMinutes - 60;
-  return nowMinutes < cutoffMinutes;
+  const startHours = Math.floor(parsed.startMinutes / 60);
+  const startMinutes = parsed.startMinutes % 60;
+  const slotStartMs =
+    Date.UTC(
+      parsedDate.year,
+      parsedDate.month - 1,
+      parsedDate.day,
+      startHours,
+      startMinutes,
+    ) - CITY_UTC_OFFSET_MINUTES[params.city] * 60_000;
+  const cutoffMs = slotStartMs - BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES * 60_000;
+
+  return params.nowMs < cutoffMs;
+}
+
+function getBlgDeliveryFeeRub(itemsSubtotalRub: number): number {
+  return itemsSubtotalRub >= BLG_FREE_DELIVERY_THRESHOLD_RUB ? 0 : BLG_DELIVERY_FEE_RUB;
 }
 
 export function CartPage() {
@@ -232,9 +262,16 @@ export function CartPage() {
     showBlgDeliverySchedule &&
     checkoutDraft.deliveryDate.trim().length > 0 &&
     checkoutDraft.deliveryDate < minDeliveryDate;
-  const total = useMemo(() => {
+  const itemsTotal = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   }, [state.cart]);
+  const showBlgDeliveryFeeCard =
+    state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
+  const deliveryFee =
+    showBlgDeliveryFeeCard
+      ? getBlgDeliveryFeeRub(itemsTotal)
+      : 0;
+  const total = itemsTotal + deliveryFee;
 
   const maxPointsToSpend = useMemo(() => {
     return Math.max(0, Math.min(pointsBalance, Math.floor(total)));
@@ -401,8 +438,8 @@ export function CartPage() {
       if (showBlgDeliverySchedule && checkoutDraft.deliveryDate < minDeliveryDate) {
         setSubmitError(
           minDeliveryDate > cityToday
-            ? "РџРѕСЃР»Рµ 20:00 РїРѕ Р‘Р»Р°РіРѕРІРµС‰РµРЅСЃРєСѓ РґРѕСЃС‚Р°РІРєР° РЅР° СЃРµРіРѕРґРЅСЏ РЅРµРґРѕСЃС‚СѓРїРЅР°."
-            : "Р’С‹Р±РµСЂРёС‚Рµ РєРѕСЂСЂРµРєС‚РЅСѓСЋ РґР°С‚Сѓ РґРѕСЃС‚Р°РІРєРё.",
+            ? "На выбранную дату свободных слотов уже нет. Выберите другую дату."
+            : "Выберите корректную дату доставки.",
         );
         return;
       }
@@ -619,6 +656,24 @@ export function CartPage() {
             </CardContent>
           </Card>
         ))}
+
+        {showBlgDeliveryFeeCard ? (
+          <Card className="border-border/70 bg-card">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">Доставка</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Бесплатно от 1 500 ₽, иначе 150 ₽
+                  </div>
+                </div>
+                <div className="text-sm font-semibold">
+                  {deliveryFee === 0 ? "Бесплатно" : formatPriceRub(deliveryFee)}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <Card className="border-border/70 bg-card">
