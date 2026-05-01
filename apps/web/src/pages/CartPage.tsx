@@ -41,15 +41,26 @@ type ReferralOverviewBalance = {
 };
 
 const BLG_DELIVERY_TIME_SLOTS = [
-  "14:00-16:00",
-  "16:00-18:00",
-  "18:00-20:00",
-  "20:00-22:00",
-  "22:00-00:00",
+  "13:00-15:00",
+  "15:00-17:00",
+  "17:00-19:00",
+  "19:00-21:00",
+  "21:00-00:00",
 ] as const;
+type DeliveryTimeSlot = (typeof BLG_DELIVERY_TIME_SLOTS)[number];
+
+const BLG_ORDER_CUTOFF_BY_TIME_SLOT: Record<
+  DeliveryTimeSlot,
+  { dayOffset: number; minutesOfDay: number }
+> = {
+  "13:00-15:00": { dayOffset: 0, minutesOfDay: 0 },
+  "15:00-17:00": { dayOffset: 0, minutesOfDay: 15 * 60 },
+  "17:00-19:00": { dayOffset: 0, minutesOfDay: 16 * 60 },
+  "19:00-21:00": { dayOffset: 0, minutesOfDay: 19 * 60 },
+  "21:00-00:00": { dayOffset: 0, minutesOfDay: 21 * 60 },
+};
 const BLG_DELIVERY_FEE_RUB = 150;
 const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
-const BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES = 12 * 60;
 const DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME =
   "border-sky-300/70 focus:ring-sky-200/70 focus-visible:ring-sky-200/70";
 
@@ -57,8 +68,6 @@ const CITY_UTC_OFFSET_MINUTES: Record<City, number> = {
   vvo: 10 * 60,
   blg: 9 * 60,
 };
-
-type DeliveryTimeSlot = (typeof BLG_DELIVERY_TIME_SLOTS)[number];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -139,6 +148,27 @@ function parseIsoDate(value: string): { year: number; month: number; day: number
   };
 }
 
+function getCityLocalDateTimeMs(params: {
+  city: City;
+  parsedDate: { year: number; month: number; day: number };
+  dayOffset?: number;
+  minutesOfDay: number;
+}): number {
+  const hours = Math.floor(params.minutesOfDay / 60);
+  const minutes = params.minutesOfDay % 60;
+
+  return (
+    Date.UTC(
+      params.parsedDate.year,
+      params.parsedDate.month - 1,
+      params.parsedDate.day + (params.dayOffset ?? 0),
+      hours,
+      minutes,
+    ) -
+    CITY_UTC_OFFSET_MINUTES[params.city] * 60_000
+  );
+}
+
 function formatDeliveryDatePickerValue(value: string): string {
   if (!value) return "";
 
@@ -163,30 +193,6 @@ function getMinDeliveryDateForCity(city: City | null, nowMs: number = Date.now()
   return hasOpenSlotsToday ? today : getNextIsoDate(today);
 }
 
-function parseDeliveryTimeSlot(slot: string): { startMinutes: number; endMinutes: number } | null {
-  const match = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(slot);
-  if (!match) return null;
-
-  const startHours = Number(match[1]);
-  const startMinutes = Number(match[2]);
-  const endHours = Number(match[3]);
-  const endMinutes = Number(match[4]);
-
-  if (
-    !Number.isInteger(startHours) ||
-    !Number.isInteger(startMinutes) ||
-    !Number.isInteger(endHours) ||
-    !Number.isInteger(endMinutes)
-  ) {
-    return null;
-  }
-
-  return {
-    startMinutes: startHours * 60 + startMinutes,
-    endMinutes: endHours * 60 + endMinutes,
-  };
-}
-
 function isDeliveryTimeSlotAvailable(params: {
   city: City | null;
   deliveryDate: string;
@@ -196,21 +202,16 @@ function isDeliveryTimeSlotAvailable(params: {
   if (params.city !== "blg") return true;
   if (params.deliveryDate.trim().length === 0) return true;
 
-  const parsed = parseDeliveryTimeSlot(params.slot);
   const parsedDate = parseIsoDate(params.deliveryDate);
-  if (!parsed || !parsedDate) return false;
+  const cutoff = BLG_ORDER_CUTOFF_BY_TIME_SLOT[params.slot];
+  if (!parsedDate || !cutoff) return false;
 
-  const startHours = Math.floor(parsed.startMinutes / 60);
-  const startMinutes = parsed.startMinutes % 60;
-  const slotStartMs =
-    Date.UTC(
-      parsedDate.year,
-      parsedDate.month - 1,
-      parsedDate.day,
-      startHours,
-      startMinutes,
-    ) - CITY_UTC_OFFSET_MINUTES[params.city] * 60_000;
-  const cutoffMs = slotStartMs - BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES * 60_000;
+  const cutoffMs = getCityLocalDateTimeMs({
+    city: params.city,
+    parsedDate,
+    dayOffset: cutoff.dayOffset,
+    minutesOfDay: cutoff.minutesOfDay,
+  });
 
   return params.nowMs < cutoffMs;
 }

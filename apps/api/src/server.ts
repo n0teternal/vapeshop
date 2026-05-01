@@ -16,10 +16,9 @@ import { listCustomerOrders } from "./order/customerOrders.js";
 import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
 import {
   BLG_DELIVERY_TIME_SLOTS,
-  BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES,
   getMinDeliveryDateForCity,
   getTodayIsoDateForCity,
-  isDeliveryTimeSlotOpen,
+  isBlgDeliveryTimeSlotOrderOpen,
   isValidIsoDate,
 } from "./order/deliverySchedule.js";
 import { sendOrderNotificationToChats } from "./order/sendOrderNotification.js";
@@ -223,11 +222,9 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     }
 
     if (
-      !isDeliveryTimeSlotOpen({
-        citySlug,
+      !isBlgDeliveryTimeSlotOrderOpen({
         deliveryDate,
         deliveryTimeSlot,
-        cutoffMinutesBeforeStart: BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES,
       })
     ) {
       throw new HttpError(

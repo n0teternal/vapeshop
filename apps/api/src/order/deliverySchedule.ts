@@ -1,15 +1,26 @@
 export type DeliveryCitySlug = "vvo" | "blg";
 
 export const BLG_DELIVERY_TIME_SLOTS = [
-  "14:00-16:00",
-  "16:00-18:00",
-  "18:00-20:00",
-  "20:00-22:00",
-  "22:00-00:00",
+  "13:00-15:00",
+  "15:00-17:00",
+  "17:00-19:00",
+  "19:00-21:00",
+  "21:00-00:00",
 ] as const;
+type BlgDeliveryTimeSlot = (typeof BLG_DELIVERY_TIME_SLOTS)[number];
+
+const BLG_ORDER_CUTOFF_BY_TIME_SLOT: Record<
+  BlgDeliveryTimeSlot,
+  { dayOffset: number; minutesOfDay: number }
+> = {
+  "13:00-15:00": { dayOffset: 0, minutesOfDay: 0 },
+  "15:00-17:00": { dayOffset: 0, minutesOfDay: 15 * 60 },
+  "17:00-19:00": { dayOffset: 0, minutesOfDay: 16 * 60 },
+  "19:00-21:00": { dayOffset: 0, minutesOfDay: 19 * 60 },
+  "21:00-00:00": { dayOffset: 0, minutesOfDay: 21 * 60 },
+};
 export const BLG_DELIVERY_FEE_RUB = 150;
 export const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
-export const BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES = 12 * 60;
 
 export function getBlgDeliveryFeeRub(orderSubtotalRub: number): number {
   return orderSubtotalRub >= BLG_FREE_DELIVERY_THRESHOLD_RUB ? 0 : BLG_DELIVERY_FEE_RUB;
@@ -55,6 +66,27 @@ function parseIsoDate(value: string): { year: number; month: number; day: number
   };
 }
 
+function getCityLocalDateTimeMs(params: {
+  citySlug: DeliveryCitySlug;
+  parsedDate: { year: number; month: number; day: number };
+  dayOffset?: number;
+  minutesOfDay: number;
+}): number {
+  const hours = Math.floor(params.minutesOfDay / 60);
+  const minutes = params.minutesOfDay % 60;
+
+  return (
+    Date.UTC(
+      params.parsedDate.year,
+      params.parsedDate.month - 1,
+      params.parsedDate.day + (params.dayOffset ?? 0),
+      hours,
+      minutes,
+    ) -
+    CITY_UTC_OFFSET_MINUTES[params.citySlug] * 60_000
+  );
+}
+
 export function getMinutesOfDayForCity(
   citySlug: DeliveryCitySlug,
   nowMs: number = Date.now(),
@@ -71,11 +103,9 @@ export function getMinDeliveryDateForCity(
   if (citySlug !== "blg") return today;
 
   const hasOpenSlotsToday = BLG_DELIVERY_TIME_SLOTS.some((deliveryTimeSlot) =>
-    isDeliveryTimeSlotOpen({
-      citySlug,
+    isBlgDeliveryTimeSlotOrderOpen({
       deliveryDate: today,
       deliveryTimeSlot,
-      cutoffMinutesBeforeStart: BLG_ORDER_TIME_SLOT_CUTOFF_MINUTES,
       nowMs,
     }),
   );
@@ -140,19 +170,34 @@ export function isDeliveryTimeSlotOpen(params: {
   if (!parsedSlot || !parsedDate) return false;
 
   const cutoffMinutesBeforeStart = params.cutoffMinutesBeforeStart ?? 60;
-  const slotStartHours = Math.floor(parsedSlot.startMinutes / 60);
-  const slotStartMinutes = parsedSlot.startMinutes % 60;
-  const slotStartMs =
-    Date.UTC(
-      parsedDate.year,
-      parsedDate.month - 1,
-      parsedDate.day,
-      slotStartHours,
-      slotStartMinutes,
-    ) - CITY_UTC_OFFSET_MINUTES[params.citySlug] * 60_000;
+  const slotStartMs = getCityLocalDateTimeMs({
+    citySlug: params.citySlug,
+    parsedDate,
+    minutesOfDay: parsedSlot.startMinutes,
+  });
   const cutoffMs = slotStartMs - cutoffMinutesBeforeStart * 60_000;
 
   return nowMs < cutoffMs;
+}
+
+export function isBlgDeliveryTimeSlotOrderOpen(params: {
+  deliveryDate: string;
+  deliveryTimeSlot: string;
+  nowMs?: number;
+}): boolean {
+  const deliveryTimeSlot = params.deliveryTimeSlot as BlgDeliveryTimeSlot;
+  const cutoff = BLG_ORDER_CUTOFF_BY_TIME_SLOT[deliveryTimeSlot];
+  const parsedDate = parseIsoDate(params.deliveryDate);
+  if (!cutoff || !parsedDate) return false;
+
+  const cutoffMs = getCityLocalDateTimeMs({
+    citySlug: "blg",
+    parsedDate,
+    dayOffset: cutoff.dayOffset,
+    minutesOfDay: cutoff.minutesOfDay,
+  });
+
+  return (params.nowMs ?? Date.now()) < cutoffMs;
 }
 
 export function extractDeliveryScheduleFromComment(comment: string | null): {
