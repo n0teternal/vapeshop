@@ -21,6 +21,12 @@ type ImportProductsCsvResult = {
   rows: { total: number; valid: number; invalid: number };
   products: { inserted: number; updated: number };
   inventoryRows: number;
+  sync: {
+    citySlug: string | null;
+    inventoryDeleted: number;
+    productsDeleted: number;
+    productsArchived: number;
+  };
   generatedIds: boolean;
   outputXlsxBase64: string | null;
   errors: Array<{
@@ -391,6 +397,11 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
             Products: inserted={result.products.inserted} updated={result.products.updated}
           </div>
           <div>Inventory rows: {result.inventoryRows}</div>
+          <div>
+            Sync cleanup: city={result.sync.citySlug?.toUpperCase() ?? "ALL"}{" "}
+            inventory deleted={result.sync.inventoryDeleted} products deleted=
+            {result.sync.productsDeleted} archived={result.sync.productsArchived}
+          </div>
           {downloadUrl ? (
             <div>
               <a

@@ -41,6 +41,14 @@ function toCount(value: number | null): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
 function stringifyDelimitedRow(values: string[], delimiter: string): string {
   const out: string[] = [];
   for (const v of values) {
@@ -735,36 +743,6 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       const productList = products ?? [];
       const productIds = productList.map((p) => p.id);
 
-      const [
-        { data: inventory, error: inventoryError },
-        { data: soldOrderItems, error: soldOrderItemsError },
-      ] = await Promise.all([
-        productIds.length > 0
-          ? supabase
-              .from("inventory")
-              .select("product_id,city_id,in_stock,stock_qty,price_override")
-              .in("product_id", productIds)
-          : Promise.resolve({ data: [], error: null }),
-        selectedCity && productIds.length > 0
-          ? supabase
-              .from("order_items")
-              .select("product_id,orders!inner(city_id)")
-              .in("product_id", productIds)
-              .eq("orders.city_id", selectedCity.id)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-
-      if (inventoryError) {
-        throw new HttpError(500, "DB", `Failed to load inventory: ${inventoryError.message}`);
-      }
-      if (soldOrderItemsError) {
-        throw new HttpError(
-          500,
-          "DB",
-          `Failed to load order history for export: ${soldOrderItemsError.message}`,
-        );
-      }
-
       type ExportInventoryRow = {
         product_id: string;
         city_id: number;
@@ -772,7 +750,46 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         stock_qty: number | null;
         price_override: number | null;
       };
-      const invRows = (inventory ?? []) as unknown as ExportInventoryRow[];
+      const invRows: ExportInventoryRow[] = [];
+      const soldOrderItems: Array<{ product_id: string | null }> = [];
+
+      await Promise.all(
+        chunk(productIds, 100).map(async (part) => {
+          const { data, error } = await supabase
+            .from("inventory")
+            .select("product_id,city_id,in_stock,stock_qty,price_override")
+            .in("product_id", part);
+
+          if (error) {
+            throw new HttpError(500, "DB", `Failed to load inventory: ${error.message}`);
+          }
+
+          invRows.push(...((data ?? []) as unknown as ExportInventoryRow[]));
+        }),
+      );
+
+      if (selectedCity) {
+        await Promise.all(
+          chunk(productIds, 100).map(async (part) => {
+            const { data, error } = await supabase
+              .from("order_items")
+              .select("product_id,orders!inner(city_id)")
+              .in("product_id", part)
+              .eq("orders.city_id", selectedCity.id);
+
+            if (error) {
+              throw new HttpError(
+                500,
+                "DB",
+                `Failed to load order history for export: ${error.message}`,
+              );
+            }
+
+            soldOrderItems.push(...((data ?? []) as Array<{ product_id: string | null }>));
+          }),
+        );
+      }
+
       const invByKey = new Map<string, ExportInventoryRow>();
       for (const row of invRows) {
         invByKey.set(`${row.product_id}:${row.city_id}`, row);

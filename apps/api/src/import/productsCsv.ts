@@ -25,6 +25,12 @@ export type ImportProductsCsvResult = {
     updated: number;
   };
   inventoryRows: number;
+  sync: {
+    citySlug: string | null;
+    inventoryDeleted: number;
+    productsDeleted: number;
+    productsArchived: number;
+  };
   generatedIds: boolean;
   outputXlsxBase64: string | null;
   errors: CsvRowError[];
@@ -233,6 +239,86 @@ async function fetchExistingProductIds(
     }
   }
   return existing;
+}
+
+async function fetchInventoryProductIdsForCity(
+  supabase: SupabaseClient<Database>,
+  cityId: number,
+): Promise<Set<string>> {
+  const productIds = new Set<string>();
+  const pageSize = 1000;
+  let offset = 0;
+
+  for (;;) {
+    const { data, error } = await supabase
+      .from("inventory")
+      .select("id,product_id")
+      .eq("city_id", cityId)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) throw new Error(`Failed to query city inventory: ${error.message}`);
+
+    const rows = (data ?? []) as Array<{ product_id: string }>;
+    for (const row of rows) {
+      if (typeof row.product_id === "string") {
+        productIds.add(row.product_id);
+      }
+    }
+
+    if (rows.length < pageSize) break;
+    offset += rows.length;
+  }
+
+  return productIds;
+}
+
+async function fetchProductIdsWithInventory(
+  supabase: SupabaseClient<Database>,
+  ids: string[],
+): Promise<Set<string>> {
+  const productIds = new Set<string>();
+
+  for (const part of chunk(ids, 500)) {
+    const { data, error } = await supabase
+      .from("inventory")
+      .select("product_id")
+      .in("product_id", part);
+
+    if (error) throw new Error(`Failed to query product inventory usage: ${error.message}`);
+
+    for (const row of (data ?? []) as Array<{ product_id: string }>) {
+      if (typeof row.product_id === "string") {
+        productIds.add(row.product_id);
+      }
+    }
+  }
+
+  return productIds;
+}
+
+async function fetchProductIdsWithOrderItems(
+  supabase: SupabaseClient<Database>,
+  ids: string[],
+): Promise<Set<string>> {
+  const productIds = new Set<string>();
+
+  for (const part of chunk(ids, 500)) {
+    const { data, error } = await supabase
+      .from("order_items")
+      .select("product_id")
+      .in("product_id", part);
+
+    if (error) throw new Error(`Failed to query product order usage: ${error.message}`);
+
+    for (const row of (data ?? []) as Array<{ product_id: string | null }>) {
+      if (typeof row.product_id === "string") {
+        productIds.add(row.product_id);
+      }
+    }
+  }
+
+  return productIds;
 }
 
 type ExistingProductUsage = {
@@ -698,6 +784,12 @@ export async function importProductsCsv(params: {
   );
   const inserted = parsedProducts.filter((p) => !existingIds.has(p.id)).length;
   const updated = parsedProducts.length - inserted;
+  const sync = {
+    citySlug: targetCity?.slug ?? null,
+    inventoryDeleted: 0,
+    productsDeleted: 0,
+    productsArchived: 0,
+  };
 
   if (!dryRun) {
     if (targetCity && detachedSourceProductIds.size > 0) {
@@ -725,6 +817,58 @@ export async function importProductsCsv(params: {
         .upsert(part, { onConflict: "product_id,city_id" });
       if (error) throw new Error(`Failed to upsert inventory: ${error.message}`);
     }
+
+    if (targetCity) {
+      const importedProductIds = new Set(parsedProducts.map((product) => product.id));
+      const cityProductIds = await fetchInventoryProductIdsForCity(params.supabase, targetCity.id);
+      const obsoleteProductIds = Array.from(cityProductIds).filter(
+        (productId) => !importedProductIds.has(productId),
+      );
+
+      if (obsoleteProductIds.length > 0) {
+        for (const part of chunk(obsoleteProductIds, 500)) {
+          const { error } = await params.supabase
+            .from("inventory")
+            .delete()
+            .eq("city_id", targetCity.id)
+            .in("product_id", part);
+
+          if (error) {
+            throw new Error(`Failed to delete obsolete city inventory: ${error.message}`);
+          }
+        }
+        sync.inventoryDeleted = obsoleteProductIds.length;
+
+        const [idsWithRemainingInventory, idsWithOrderItems] = await Promise.all([
+          fetchProductIdsWithInventory(params.supabase, obsoleteProductIds),
+          fetchProductIdsWithOrderItems(params.supabase, obsoleteProductIds),
+        ]);
+        const orphanProductIds = obsoleteProductIds.filter(
+          (productId) => !idsWithRemainingInventory.has(productId),
+        );
+        const deletableProductIds = orphanProductIds.filter(
+          (productId) => !idsWithOrderItems.has(productId),
+        );
+        const archivableProductIds = orphanProductIds.filter((productId) =>
+          idsWithOrderItems.has(productId),
+        );
+
+        for (const part of chunk(deletableProductIds, 500)) {
+          const { error } = await params.supabase.from("products").delete().in("id", part);
+          if (error) throw new Error(`Failed to delete obsolete products: ${error.message}`);
+        }
+        sync.productsDeleted = deletableProductIds.length;
+
+        for (const part of chunk(archivableProductIds, 500)) {
+          const { error } = await params.supabase
+            .from("products")
+            .update({ is_active: false })
+            .in("id", part);
+          if (error) throw new Error(`Failed to archive obsolete products: ${error.message}`);
+        }
+        sync.productsArchived = archivableProductIds.length;
+      }
+    }
   }
 
   let outputXlsxBase64: string | null = null;
@@ -746,6 +890,7 @@ export async function importProductsCsv(params: {
     rows: { total: inputRecords.length, valid: parsedProducts.length, invalid: errors.length },
     products: { inserted, updated },
     inventoryRows: parsedInventory.length,
+    sync,
     generatedIds,
     outputXlsxBase64,
     errors,

@@ -16,7 +16,7 @@
     "build": "pnpm build:web && pnpm build:api",
     "preview:web:local": "pnpm build:web:local && pnpm -C apps/web preview -- --host localhost --port 4173",
     "preview": "pnpm -C apps/web preview",
-    "preview:local": "concurrently -n api,web -c auto \"pnpm dev:api\" \"pnpm preview:web:local\"",
+    "preview:local": "concurrently -n api,web -c auto \"pnpm -C apps/api dev:preview\" \"pnpm preview:web:local\"",
     "lint": "pnpm -C apps/web lint"
   },
   "devDependencies": {
