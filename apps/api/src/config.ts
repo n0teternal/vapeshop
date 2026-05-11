@@ -31,6 +31,8 @@ export type AppConfig = {
     pointsInviter: number;
     pointsInvitee: number;
     minFirstOrderTotalRub: number;
+    pointsExpireAfterMonths: number;
+    pointsMaxSpendPercent: number;
   };
   productImagesBaseUrl: string | null;
   dev: {
@@ -110,6 +112,14 @@ function parsePositiveIntEnv(key: string, defaultValue: number): number {
   const n = Number(raw);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
     throw new Error(`Invalid env ${key}: expected positive integer`);
+  }
+  return n;
+}
+
+function parsePercentIntEnv(key: string, defaultValue: number): number {
+  const n = parsePositiveIntEnv(key, defaultValue);
+  if (n > 100) {
+    throw new Error(`Invalid env ${key}: expected integer in range 1..100`);
   }
   return n;
 }
@@ -199,6 +209,8 @@ export const config: AppConfig = (() => {
       pointsInviter: parsePositiveIntEnv("REFERRAL_POINTS_INVITER", 100),
       pointsInvitee: parsePositiveIntEnv("REFERRAL_POINTS_INVITEE", 100),
       minFirstOrderTotalRub: parsePositiveIntEnv("REFERRAL_MIN_FIRST_ORDER_TOTAL", 1200),
+      pointsExpireAfterMonths: parsePositiveIntEnv("REFERRAL_POINTS_EXPIRE_AFTER_MONTHS", 3),
+      pointsMaxSpendPercent: parsePercentIntEnv("REFERRAL_POINTS_MAX_SPEND_PERCENT", 50),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {

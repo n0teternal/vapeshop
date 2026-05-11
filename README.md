@@ -72,6 +72,8 @@ copy .env.example .env.local
 - `REFERRAL_POINTS_INVITER` — баллы пригласившему при `done` первого заказа реферала (default `100`)
 - `REFERRAL_POINTS_INVITEE` — баллы приглашенному при `done` первого заказа (default `100`)
 - `REFERRAL_MIN_FIRST_ORDER_TOTAL` — минимальная сумма первого `done` заказа реферала для начисления бонусов (default `1200`)
+- `REFERRAL_POINTS_EXPIRE_AFTER_MONTHS` — срок действия начисленных баллов в месяцах (default `3`)
+- `REFERRAL_POINTS_MAX_SPEND_PERCENT` — максимум корзины, который можно оплатить баллами (default `50`)
 - `PRODUCT_IMAGES_BASE_URL` — базовый публичный URL для картинок товаров (рекомендуется Supabase Storage URL)
 - `CORS_ORIGINS` — **только для production**, список origin через запятую
 

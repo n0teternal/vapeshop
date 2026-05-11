@@ -38,8 +38,14 @@ type OrderApiError = {
 
 type ReferralOverviewBalance = {
   pointsBalance: number;
+  rewardPoints?: {
+    pointsExpireAfterMonths?: number;
+    pointsMaxSpendPercent?: number;
+  };
 };
 
+const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
+const DEFAULT_POINTS_MAX_SPEND_PERCENT = 50;
 const BLG_DELIVERY_TIME_SLOTS = [
   "13:00-15:00",
   "15:00-17:00",
@@ -230,6 +236,12 @@ export function CartPage() {
   const [pointsEnabled, setPointsEnabled] = useState(false);
   const [pointsLoading, setPointsLoading] = useState(false);
   const [pointsError, setPointsError] = useState<string | null>(null);
+  const [pointsExpireAfterMonths, setPointsExpireAfterMonths] = useState(
+    DEFAULT_POINTS_EXPIRE_AFTER_MONTHS,
+  );
+  const [pointsMaxSpendPercent, setPointsMaxSpendPercent] = useState(
+    DEFAULT_POINTS_MAX_SPEND_PERCENT,
+  );
   const [nowMs, setNowMs] = useState(() => Date.now());
   const cityToday = useMemo(() => getTodayIsoDateForCity(state.city, nowMs), [state.city, nowMs]);
   const minDeliveryDate = useMemo(
@@ -274,12 +286,16 @@ export function CartPage() {
       : 0;
   const total = itemsTotal + deliveryFee;
 
+  const maxPointsByOrderTotal = useMemo(() => {
+    return Math.max(0, Math.floor((total * pointsMaxSpendPercent) / 100));
+  }, [pointsMaxSpendPercent, total]);
+
   const maxPointsToSpend = useMemo(() => {
-    return Math.max(0, Math.min(pointsBalance, Math.floor(total)));
-  }, [pointsBalance, total]);
+    return Math.max(0, Math.min(pointsBalance, maxPointsByOrderTotal));
+  }, [maxPointsByOrderTotal, pointsBalance]);
 
   const fixedEditPointsToSpend = orderEditSession
-    ? Math.max(0, Math.min(orderEditSession.discountAmount, Math.floor(total)))
+    ? Math.max(0, Math.min(orderEditSession.discountAmount, maxPointsByOrderTotal))
     : 0;
   const pointsToSpend = orderEditSession
     ? fixedEditPointsToSpend
@@ -309,6 +325,25 @@ export function CartPage() {
         "/api/referrals/overview?limit=1&offset=0",
       );
       setPointsBalance(Math.max(0, Math.trunc(data.pointsBalance)));
+
+      const nextExpireAfterMonths = data.rewardPoints?.pointsExpireAfterMonths;
+      if (
+        typeof nextExpireAfterMonths === "number" &&
+        Number.isFinite(nextExpireAfterMonths) &&
+        nextExpireAfterMonths > 0
+      ) {
+        setPointsExpireAfterMonths(Math.trunc(nextExpireAfterMonths));
+      }
+
+      const nextMaxSpendPercent = data.rewardPoints?.pointsMaxSpendPercent;
+      if (
+        typeof nextMaxSpendPercent === "number" &&
+        Number.isFinite(nextMaxSpendPercent) &&
+        nextMaxSpendPercent > 0 &&
+        nextMaxSpendPercent <= 100
+      ) {
+        setPointsMaxSpendPercent(Math.trunc(nextMaxSpendPercent));
+      }
     } catch (e: unknown) {
       if (e instanceof ApiError) {
         if (
@@ -484,7 +519,7 @@ export function CartPage() {
       }
 
       const pointsToSpendForOrder = orderEditSession
-        ? orderEditSession.discountAmount
+        ? fixedEditPointsToSpend
         : pointsEnabled
           ? maxPointsToSpend
           : 0;
@@ -845,11 +880,11 @@ export function CartPage() {
             orderEditSession.discountAmount > 0 ? (
               <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
                 <div className="text-sm font-medium">
-                  Скидка баллами из исходного заказа: -{formatPriceRub(pointsToSpend)}
+                  Скидка баллами при сохранении: -{formatPriceRub(pointsToSpend)}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  Если сумма заказа станет меньше, лишние баллы автоматически вернутся на
-                  баланс.
+                  Если сумма заказа станет меньше или сработает лимит {pointsMaxSpendPercent}%,
+                  лишние баллы автоматически вернутся на баланс.
                 </div>
               </div>
             ) : null
@@ -870,6 +905,10 @@ export function CartPage() {
                     : ""}
                 </span>
               </label>
+              <div className="text-xs text-muted-foreground">
+                Можно оплатить до {pointsMaxSpendPercent}% корзины. Баллы действуют{" "}
+                {pointsExpireAfterMonths} мес.
+              </div>
               {pointsToSpend > 0 ? (
                 <div className="text-xs text-muted-foreground">
                   Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате:{" "}

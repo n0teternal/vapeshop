@@ -1,5 +1,5 @@
 import { HttpError } from "../httpError.js";
-import { spendPointsForOrder } from "../referral/service.js";
+import { getMaxPointsDiscountForTotal, spendPointsForOrder } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { getBlgDeliveryFeeRub } from "./deliverySchedule.js";
 import { buildOrderComment } from "./orderComment.js";
@@ -295,7 +295,7 @@ export async function createOrder(params: {
   });
 
   const requestedPointsToSpend = Math.max(0, Math.trunc(params.payload.pointsToSpend));
-  const maxPointsByOrderTotal = Math.max(0, Math.floor(totalBeforeDiscount));
+  const maxPointsByOrderTotal = getMaxPointsDiscountForTotal(totalBeforeDiscount);
   const discountAmount = Math.min(requestedPointsToSpend, maxPointsByOrderTotal);
   const totalAfterDiscount = Math.max(0, totalBeforeDiscount - discountAmount);
 

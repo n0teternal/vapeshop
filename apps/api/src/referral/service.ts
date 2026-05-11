@@ -8,6 +8,7 @@ const REFERRAL_CODE_PREFIX = "ref_";
 const REFERRAL_CODE_LENGTH = 8;
 const REFERRALS_MAX_PAGE_LIMIT = 100;
 const POINTS_HISTORY_LIMIT = 30;
+const POINTS_BALANCE_PAGE_SIZE = 1000;
 
 const REFERRAL_INVITER_BONUS_KIND = "referral_inviter_bonus";
 const REFERRAL_INVITEE_BONUS_KIND = "referral_invitee_bonus";
@@ -46,6 +47,15 @@ type InviteeFirstOrderRow = {
   created_at: string;
 };
 
+type LoyaltyTransactionRow = {
+  id: number;
+  delta_points: number;
+  kind: string;
+  order_id: string | null;
+  referral_id: number | null;
+  created_at: string;
+};
+
 export type ReferralInviteeStatus =
   | "joined_no_order"
   | "first_order_created_not_paid"
@@ -54,7 +64,13 @@ export type ReferralInviteeStatus =
 export type ReferralOverview = {
   referralCode: string;
   referralLink: string;
-  rewardPoints: { inviter: number; invitee: number; minFirstOrderTotalRub: number };
+  rewardPoints: {
+    inviter: number;
+    invitee: number;
+    minFirstOrderTotalRub: number;
+    pointsExpireAfterMonths: number;
+    pointsMaxSpendPercent: number;
+  };
   pointsBalance: number;
   pointsHistory: Array<{
     id: number;
@@ -63,6 +79,7 @@ export type ReferralOverview = {
     orderId: string | null;
     referralId: number | null;
     createdAt: string;
+    expiresAt: string | null;
   }>;
   referrals: Array<{
     id: number;
@@ -138,6 +155,108 @@ function numberFromUnknown(value: unknown): number {
   }
 
   return parsed;
+}
+
+function parseTimestampMs(value: string, fieldName: string): number {
+  const ms = new Date(value).getTime();
+  if (!Number.isFinite(ms)) {
+    throw new HttpError(500, "DB", `Invalid timestamp ${fieldName}: ${value}`);
+  }
+  return ms;
+}
+
+function addUtcMonths(date: Date, months: number): Date {
+  const target = new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth() + months,
+      1,
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+      date.getUTCMilliseconds(),
+    ),
+  );
+  const lastDayOfTargetMonth = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+
+  target.setUTCDate(Math.min(date.getUTCDate(), lastDayOfTargetMonth));
+  return target;
+}
+
+function getPointsExpiresAt(createdAt: string): Date {
+  return addUtcMonths(
+    new Date(parseTimestampMs(createdAt, "loyalty_transactions.created_at")),
+    config.referrals.pointsExpireAfterMonths,
+  );
+}
+
+function getPointsExpiresAtIso(row: Pick<LoyaltyTransactionRow, "delta_points" | "created_at">): string | null {
+  if (row.delta_points <= 0) return null;
+  return getPointsExpiresAt(row.created_at).toISOString();
+}
+
+function calculateAvailablePointsBalance(params: {
+  rows: LoyaltyTransactionRow[];
+  nowMs: number;
+}): number {
+  const sortedRows = [...params.rows].sort((left, right) => {
+    const leftMs = parseTimestampMs(left.created_at, "loyalty_transactions.created_at");
+    const rightMs = parseTimestampMs(right.created_at, "loyalty_transactions.created_at");
+    return leftMs - rightMs || left.id - right.id;
+  });
+  const credits: Array<{ remaining: number; expiresAtMs: number }> = [];
+
+  for (const row of sortedRows) {
+    const rowMs = parseTimestampMs(row.created_at, "loyalty_transactions.created_at");
+
+    for (const credit of credits) {
+      if (credit.expiresAtMs <= rowMs) {
+        credit.remaining = 0;
+      }
+    }
+
+    const delta = Number(row.delta_points);
+    if (!Number.isFinite(delta)) {
+      throw new HttpError(500, "DB", `Invalid numeric value: ${String(row.delta_points)}`);
+    }
+
+    const points = Math.trunc(delta);
+    if (points > 0) {
+      credits.push({
+        remaining: points,
+        expiresAtMs: getPointsExpiresAt(row.created_at).getTime(),
+      });
+      continue;
+    }
+
+    if (points >= 0) continue;
+
+    let pointsToAllocate = Math.abs(points);
+    for (const credit of credits) {
+      if (pointsToAllocate <= 0) break;
+      if (credit.remaining <= 0 || credit.expiresAtMs <= rowMs) continue;
+
+      const used = Math.min(credit.remaining, pointsToAllocate);
+      credit.remaining -= used;
+      pointsToAllocate -= used;
+    }
+  }
+
+  let total = 0;
+  for (const credit of credits) {
+    if (credit.remaining > 0 && credit.expiresAtMs > params.nowMs) {
+      total += credit.remaining;
+    }
+  }
+
+  return total;
+}
+
+export function getMaxPointsDiscountForTotal(totalRub: number): number {
+  if (!Number.isFinite(totalRub) || totalRub <= 0) return 0;
+  return Math.max(0, Math.floor((totalRub * config.referrals.pointsMaxSpendPercent) / 100));
 }
 
 async function resolveBotUsername(): Promise<string | null> {
@@ -377,32 +496,33 @@ export async function getCustomerReferralShare(params: {
 
 export async function getPointsBalance(tgUserId: number): Promise<number> {
   const supabase = createServiceSupabaseClient();
-  const pageSize = 1000;
   let offset = 0;
-  let total = 0;
+  const rows: LoyaltyTransactionRow[] = [];
 
   for (;;) {
     const { data, error } = await supabase
       .from("loyalty_transactions")
-      .select("delta_points")
+      .select("id,delta_points,kind,order_id,referral_id,created_at")
       .eq("tg_user_id", tgUserId)
-      .range(offset, offset + pageSize - 1);
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + POINTS_BALANCE_PAGE_SIZE - 1);
 
     if (error) {
       throw new HttpError(500, "DB", `Failed to load points balance: ${error.message}`);
     }
 
-    const rows = data ?? [];
-    for (const row of rows) {
-      const delta = Number((row as { delta_points?: unknown }).delta_points ?? 0);
-      total += Number.isFinite(delta) ? delta : 0;
-    }
+    const pageRows = (data ?? []) as LoyaltyTransactionRow[];
+    rows.push(...pageRows);
 
-    if (rows.length < pageSize) break;
-    offset += rows.length;
+    if (pageRows.length < POINTS_BALANCE_PAGE_SIZE) break;
+    offset += pageRows.length;
   }
 
-  return total;
+  return calculateAvailablePointsBalance({
+    rows,
+    nowMs: Date.now(),
+  });
 }
 
 export async function spendPointsForOrder(params: {
@@ -543,15 +663,18 @@ export async function getReferralOverview(params: {
       inviter: config.referrals.pointsInviter,
       invitee: config.referrals.pointsInvitee,
       minFirstOrderTotalRub: config.referrals.minFirstOrderTotalRub,
+      pointsExpireAfterMonths: config.referrals.pointsExpireAfterMonths,
+      pointsMaxSpendPercent: config.referrals.pointsMaxSpendPercent,
     },
     pointsBalance,
-    pointsHistory: (historyRows ?? []).map((row) => ({
+    pointsHistory: ((historyRows ?? []) as LoyaltyTransactionRow[]).map((row) => ({
       id: row.id,
       deltaPoints: row.delta_points,
       kind: row.kind,
       orderId: row.order_id,
       referralId: row.referral_id,
       createdAt: row.created_at,
+      expiresAt: getPointsExpiresAtIso(row),
     })),
     referrals: referralRows.map((row) => {
       const firstOrder = firstOrderByInviteeId.get(row.invitee_tg_user_id) ?? null;

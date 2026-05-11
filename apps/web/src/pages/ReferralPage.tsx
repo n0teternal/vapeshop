@@ -17,7 +17,13 @@ type ReferralStatus =
 type ReferralOverview = {
   referralCode: string;
   referralLink: string;
-  rewardPoints: { inviter: number; invitee: number; minFirstOrderTotalRub: number };
+  rewardPoints: {
+    inviter: number;
+    invitee: number;
+    minFirstOrderTotalRub: number;
+    pointsExpireAfterMonths: number;
+    pointsMaxSpendPercent: number;
+  };
   pointsBalance: number;
   pointsHistory: Array<{
     id: number;
@@ -26,6 +32,7 @@ type ReferralOverview = {
     orderId: string | null;
     referralId: number | null;
     createdAt: string;
+    expiresAt: string | null;
   }>;
   referrals: Array<{
     id: number;
@@ -60,6 +67,16 @@ function formatDate(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function monthLabel(value: number): string {
+  const abs = Math.abs(value);
+  const lastTwo = abs % 100;
+  const lastOne = abs % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return `${value} месяцев`;
+  if (lastOne === 1) return `${value} месяц`;
+  if (lastOne >= 2 && lastOne <= 4) return `${value} месяца`;
+  return `${value} месяцев`;
 }
 
 function statusLabel(status: ReferralStatus): string {
@@ -115,6 +132,7 @@ async function copyToClipboard(value: string): Promise<void> {
 export function ReferralPage() {
   const { webApp } = useTelegram();
   const [copyState, setCopyState] = useState<"idle" | "ok" | "error">("idle");
+  const [historyNowMs] = useState(() => Date.now());
 
   const overviewQuery = useInfiniteQuery({
     queryKey: ["referrals-overview"],
@@ -196,6 +214,7 @@ export function ReferralPage() {
   }
 
   const hasPublicReferralLink = isAbsoluteHttpUrl(firstPage.referralLink);
+  const reward = firstPage.rewardPoints;
 
   return (
     <div className="space-y-4">
@@ -208,9 +227,13 @@ export function ReferralPage() {
         <CardContent className="p-4">
           <div className="text-sm font-semibold leading-6 text-foreground">
             Если приглашенный оформит заказ от{" "}
-            <span className="text-primary">1200 ₽</span> и оплатит его:{" "}
-            <span className="text-primary">+100</span> пригласившему,{" "}
-            <span className="text-primary">+100</span> приглашенному.
+            <span className="text-primary">{reward.minFirstOrderTotalRub} ₽</span> и оплатит его:{" "}
+            <span className="text-primary">+{reward.inviter}</span> пригласившему,{" "}
+            <span className="text-primary">+{reward.invitee}</span> приглашенному.
+          </div>
+          <div className="mt-2 text-xs leading-5 text-muted-foreground">
+            Баллы действуют {monthLabel(reward.pointsExpireAfterMonths)}. Ими можно оплатить до{" "}
+            {reward.pointsMaxSpendPercent}% корзины.
           </div>
         </CardContent>
       </Card>
@@ -267,6 +290,12 @@ export function ReferralPage() {
                 <div>
                   <div className="text-sm font-medium">{pointsKindLabel(row.kind)}</div>
                   <div className="text-xs text-muted-foreground">{formatDate(row.createdAt)}</div>
+                  {row.expiresAt ? (
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(row.expiresAt).getTime() <= historyNowMs ? "Сгорели" : "Сгорят"}{" "}
+                      {formatDate(row.expiresAt)}
+                    </div>
+                  ) : null}
                 </div>
                 <div className={row.deltaPoints >= 0 ? "text-emerald-500" : "text-rose-500"}>
                   {row.deltaPoints >= 0 ? "+" : ""}

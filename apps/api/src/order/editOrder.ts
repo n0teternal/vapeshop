@@ -1,4 +1,5 @@
 import { HttpError } from "../httpError.js";
+import { getMaxPointsDiscountForTotal } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
   getBlgDeliveryFeeRub,
@@ -627,7 +628,10 @@ export async function applyOrderEdit(params: {
     order.discount_amount === null || order.discount_amount === undefined
       ? 0
       : Math.max(0, Math.trunc(numberFromUnknown(order.discount_amount, "orders.discount_amount")));
-  const nextDiscountAmount = Math.min(previousDiscountAmount, Math.floor(totalBeforeDiscount));
+  const nextDiscountAmount = Math.min(
+    previousDiscountAmount,
+    getMaxPointsDiscountForTotal(totalBeforeDiscount),
+  );
   const totalAfterDiscount = Math.max(0, totalBeforeDiscount - nextDiscountAmount);
 
   const inventoryUpdates: RestorableInventoryUpdate[] = [];
