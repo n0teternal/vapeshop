@@ -52,11 +52,18 @@ type CatalogApiResponse = {
   promoItems?: PromoCatalogItem[];
 };
 
-export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogData> {
+export async function fetchCatalog(
+  citySlug: CitySlug,
+  options?: { includePromos?: boolean },
+): Promise<CatalogData> {
+  const includePromos = options?.includePromos === true;
+  const query = new URLSearchParams({ citySlug });
+  if (includePromos) query.set("includePromos", "1");
+
   try {
     const data = await apiGet<CatalogApiResponse>(
-      `/api/catalog?citySlug=${encodeURIComponent(citySlug)}`,
-      { withTelegramAuth: false },
+      `/api/catalog?${query.toString()}`,
+      { withTelegramAuth: includePromos },
     );
     return {
       items: data.items,

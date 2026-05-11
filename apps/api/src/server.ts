@@ -29,6 +29,7 @@ import {
 } from "./order/telegramFinalStatus.js";
 import { HttpError, isHttpError } from "./httpError.js";
 import { registerAdminRoutes } from "./admin/routes.js";
+import { requireAdmin } from "./admin/requireAdmin.js";
 import {
   fetchCatalogByCity,
   type CatalogCitySlug,
@@ -303,6 +304,15 @@ function pickTelegramChatIdsForOrder(params: {
   return pickTelegramChatIds(params.citySlug);
 }
 
+async function isAdminRequest(request: Parameters<typeof requireAdmin>[0]): Promise<boolean> {
+  try {
+    await requireAdmin(request);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseUrlHost(rawUrl: string | null | undefined): string | null {
   if (!rawUrl) return null;
   try {
@@ -447,7 +457,7 @@ app.get<{
 });
 
 app.get<{
-  Querystring: { citySlug?: string };
+  Querystring: { citySlug?: string; includePromos?: string };
   Reply:
     | ApiSuccess<{
         citySlug: CatalogCitySlug;
@@ -462,7 +472,9 @@ app.get<{
       throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
     }
 
-    const catalog = await fetchCatalogByCity(citySlug);
+    const includePromos =
+      request.query.includePromos === "1" ? await isAdminRequest(request) : false;
+    const catalog = await fetchCatalogByCity({ citySlug, includePromos });
 
     return reply
       .header("Cache-Control", "public, max-age=30, s-maxage=120, stale-while-revalidate=300")
@@ -645,6 +657,7 @@ app.put<{
     const result = await startOrderEditSession({
       orderId,
       expectedTgUserId: user.id,
+      allowPromoPrices: await isAdminRequest(request),
     });
     return reply.code(200).send(ok(result));
   } catch (e: unknown) {
@@ -712,6 +725,7 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
       const result = await applyOrderEdit({
         orderId,
         expectedTgUserId: verified.user.id,
+        allowPromoPrices: await isAdminRequest(request),
         payload: {
           citySlug: body.citySlug,
           deliveryMethod: body.deliveryMethod,
@@ -789,6 +803,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           id: verified.user.id,
           username: verified.user.username,
         },
+        allowPromoPrices: await isAdminRequest(request),
       });
 
       const chatIds = pickTelegramChatIdsForOrder({

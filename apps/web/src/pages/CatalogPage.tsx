@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BadgePercent } from "lucide-react";
+import { apiGet } from "../api/client";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
@@ -869,6 +870,7 @@ type CatalogSortMode =
   | "title_desc";
 type CatalogToast = { key: number; message: string };
 type CatalogLoadError = { message: string; devDetails?: string };
+type AdminMe = { tgUserId: number; username: string | null; role: string };
 
 function mapCatalogLoadError(error: unknown): CatalogLoadError {
   if (error instanceof SupabaseQueryError) {
@@ -948,14 +950,21 @@ export function CatalogPage() {
 
   const mockItems = useMemo(() => mapMockCatalog(), []);
   const supabaseEnabled = isSupabaseConfigured();
+  const adminQuery = useQuery({
+    queryKey: ["admin-me"],
+    queryFn: () => apiGet<AdminMe>("/api/admin/me"),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const isAdmin = adminQuery.isSuccess;
   const catalogQuery = useQuery({
-    queryKey: ["catalog", state.city] as const,
+    queryKey: ["catalog", state.city, isAdmin] as const,
     queryFn: ({ queryKey }) => {
-      const [, citySlug] = queryKey;
+      const [, citySlug, includePromos] = queryKey;
       if (!citySlug) {
         throw new Error("City is not selected");
       }
-      return fetchCatalog(citySlug);
+      return fetchCatalog(citySlug, { includePromos });
     },
     enabled: supabaseEnabled && state.city !== null,
   });

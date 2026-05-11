@@ -139,7 +139,7 @@ grant usage on schema public to anon, authenticated;
 grant select on public.cities to anon, authenticated;
 grant select on public.products to anon, authenticated;
 grant select on public.inventory to anon, authenticated;
-grant select on public.promo_products to anon, authenticated;
+revoke all on public.promo_products from anon, authenticated;
 
 -- ===== RLS =====
 
@@ -182,19 +182,6 @@ create policy "Public read inventory for active products"
   );
 
 drop policy if exists "Public read active promo products" on public.promo_products;
-create policy "Public read active promo products"
-  on public.promo_products
-  for select
-  to anon, authenticated
-  using (
-    is_active = true
-    and exists (
-      select 1
-      from public.products p
-      where p.id = promo_products.product_id
-        and p.is_active = true
-    )
-  );
 
 -- IMPORTANT:
 -- - orders/order_items/admins have RLS enabled and NO public policies.

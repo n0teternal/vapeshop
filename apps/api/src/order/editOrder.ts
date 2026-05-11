@@ -474,6 +474,7 @@ function ensureOrderEditableByWindow(params: {
 export async function startOrderEditSession(params: {
   orderId: string;
   expectedTgUserId?: number;
+  allowPromoPrices?: boolean;
 }): Promise<StartOrderEditSessionResult> {
   const supabase = createServiceSupabaseClient();
   const order = await loadOrder(params);
@@ -504,7 +505,9 @@ export async function startOrderEditSession(params: {
   const [productsById, inventoryByProductId, promoPriceByProductId] = await Promise.all([
     loadProductsById(productIds),
     loadInventoryByProductId({ cityId: city.id, productIds }),
-    loadActivePromoPricesByProductId({ cityId: city.id, productIds }),
+    params.allowPromoPrices === true
+      ? loadActivePromoPricesByProductId({ cityId: city.id, productIds })
+      : Promise.resolve(new Map<string, number>()),
   ]);
 
   const cart = orderItems
@@ -570,6 +573,7 @@ export async function applyOrderEdit(params: {
   orderId: string;
   expectedTgUserId?: number;
   payload: CreateOrderPayload;
+  allowPromoPrices?: boolean;
 }): Promise<{ orderId: string }> {
   const supabase = createServiceSupabaseClient();
   const order = await loadOrder({
@@ -619,7 +623,9 @@ export async function applyOrderEdit(params: {
   const [productsById, inventoryByProductId, promoPriceByProductId] = await Promise.all([
     loadProductsById(productIds),
     loadInventoryByProductId({ cityId: city.id, productIds }),
-    loadActivePromoPricesByProductId({ cityId: city.id, productIds }),
+    params.allowPromoPrices === true
+      ? loadActivePromoPricesByProductId({ cityId: city.id, productIds })
+      : Promise.resolve(new Map<string, number>()),
   ]);
 
   const lines: Array<{ productId: string; title: string; qty: number; unitPrice: number }> = [];

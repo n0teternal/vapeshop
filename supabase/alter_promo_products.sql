@@ -22,23 +22,11 @@ create index if not exists promo_products_city_active_sort_idx
 create index if not exists promo_products_product_idx
   on public.promo_products (product_id);
 
-grant select on public.promo_products to anon, authenticated;
+-- Promo feature is admin-only for now. Backend admin routes use service_role.
+revoke all on public.promo_products from anon, authenticated;
 
 alter table public.promo_products enable row level security;
 
 drop policy if exists "Public read active promo products" on public.promo_products;
-create policy "Public read active promo products"
-  on public.promo_products
-  for select
-  to anon, authenticated
-  using (
-    is_active = true
-    and exists (
-      select 1
-      from public.products p
-      where p.id = promo_products.product_id
-        and p.is_active = true
-    )
-  );
 
 notify pgrst, 'reload schema';

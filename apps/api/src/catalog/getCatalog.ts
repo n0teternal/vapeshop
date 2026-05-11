@@ -102,12 +102,16 @@ function parseJoinedProduct(value: unknown): JoinedProduct | null {
   };
 }
 
-export async function fetchCatalogByCity(citySlug: CatalogCitySlug): Promise<CatalogByCityResult> {
+export async function fetchCatalogByCity(params: {
+  citySlug: CatalogCitySlug;
+  includePromos?: boolean;
+}): Promise<CatalogByCityResult> {
+  const includePromos = params.includePromos === true;
   const supabase = createServiceSupabaseClient();
   const { data: city, error: cityError } = await supabase
     .from("cities")
     .select("id,slug")
-    .eq("slug", citySlug)
+    .eq("slug", params.citySlug)
     .maybeSingle();
 
   if (cityError) {
@@ -123,15 +127,17 @@ export async function fetchCatalogByCity(citySlug: CatalogCitySlug): Promise<Cat
       .select(
         "in_stock,price_override,products!inner(id,title,description,base_price,image_url,category_slug,is_active),cities!inner(slug)",
       )
-      .eq("cities.slug", citySlug)
+      .eq("cities.slug", params.citySlug)
       .eq("products.is_active", true),
-    supabase
-      .from("promo_products")
-      .select("product_id,old_price,new_price,sort_order")
-      .eq("city_id", city.id)
-      .eq("is_active", true)
-      .order("sort_order", { ascending: true })
-      .order("id", { ascending: true }),
+    includePromos
+      ? supabase
+          .from("promo_products")
+          .select("product_id,old_price,new_price,sort_order")
+          .eq("city_id", city.id)
+          .eq("is_active", true)
+          .order("sort_order", { ascending: true })
+          .order("id", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (error) {

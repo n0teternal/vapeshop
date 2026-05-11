@@ -247,6 +247,7 @@ async function loadActivePromoPricesByProductId(params: {
 export async function createOrder(params: {
   payload: CreateOrderPayload;
   tgUser: TgUser;
+  allowPromoPrices?: boolean;
 }): Promise<CreateOrderResult> {
   const supabase = createServiceSupabaseClient();
   const orderComment = buildOrderComment(params.payload);
@@ -296,11 +297,14 @@ export async function createOrder(params: {
     inventoryList.map((r) => [r.product_id, r]),
   );
   const productById = new Map<string, ProductRow>(productList.map((p) => [p.id, p]));
-  const promoPriceByProductId = await loadActivePromoPricesByProductId({
-    supabase,
-    cityId: city.id,
-    productIds,
-  });
+  const promoPriceByProductId =
+    params.allowPromoPrices === true
+      ? await loadActivePromoPricesByProductId({
+          supabase,
+          cityId: city.id,
+          productIds,
+        })
+      : new Map<string, number>();
 
   const lines: OrderLine[] = [];
   let totalBeforeDiscount = 0;
