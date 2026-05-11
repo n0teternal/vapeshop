@@ -288,6 +288,7 @@ function reducer(state: AppState, action: Action): AppState {
             x.productId === action.item.productId
               ? {
                   ...x,
+                  price: action.item.price,
                   qty: x.qty + 1,
                   imageUrl: x.imageUrl ?? action.item.imageUrl ?? null,
                 }

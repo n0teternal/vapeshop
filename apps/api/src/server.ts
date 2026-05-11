@@ -449,7 +449,11 @@ app.get<{
 app.get<{
   Querystring: { citySlug?: string };
   Reply:
-    | ApiSuccess<{ citySlug: CatalogCitySlug; items: CatalogItem[] }>
+    | ApiSuccess<{
+        citySlug: CatalogCitySlug;
+        items: CatalogItem[];
+        promoItems: Awaited<ReturnType<typeof fetchCatalogByCity>>["promoItems"];
+      }>
     | ErrorResponse;
 }>("/api/catalog", async (request, reply) => {
   try {
@@ -458,12 +462,12 @@ app.get<{
       throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
     }
 
-    const items = await fetchCatalogByCity(citySlug);
+    const catalog = await fetchCatalogByCity(citySlug);
 
     return reply
       .header("Cache-Control", "public, max-age=30, s-maxage=120, stale-while-revalidate=300")
       .code(200)
-      .send(ok({ citySlug, items }));
+      .send(ok({ citySlug, items: catalog.items, promoItems: catalog.promoItems }));
   } catch (e: unknown) {
     const statusCode = isHttpError(e) ? e.statusCode : 500;
     const code = isHttpError(e) ? e.code : "INTERNAL";

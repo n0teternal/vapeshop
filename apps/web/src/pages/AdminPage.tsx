@@ -37,6 +37,20 @@ type ImportProductsCsvResult = {
   }>;
 };
 
+type ImportPromoProductsCsvResult = {
+  delimiter: ";" | "," | "\t";
+  decodedEncoding?: "utf-8" | "windows-1251" | "ibm866" | "koi8-r" | "xlsx";
+  cities: Array<{ id: number; slug: string; name: string }>;
+  rows: { total: number; valid: number; invalid: number };
+  promos: { upserted: number; deleted: number };
+  errors: Array<{
+    rowNum: number;
+    productId: string | null;
+    title: string | null;
+    messages: string[];
+  }>;
+};
+
 type UploadImagesResult = {
   saved: Array<{ originalName: string; fileName: string; size: number }>;
   errors: Array<{ originalName: string; message: string }>;
@@ -153,6 +167,15 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [result, setResult] = useState<ImportProductsCsvResult | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadName, setDownloadName] = useState<string>("products.with_ids.xlsx");
+  const [promoFile, setPromoFile] = useState<File | null>(null);
+  const [promoCsvEncoding, setPromoCsvEncoding] = useState<
+    "auto" | "utf-8" | "windows-1251" | "ibm866" | "koi8-r"
+  >("auto");
+  const [promoSubmitting, setPromoSubmitting] = useState(false);
+  const [promoDownloading, setPromoDownloading] = useState(false);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoDownloadError, setPromoDownloadError] = useState<string | null>(null);
+  const [promoResult, setPromoResult] = useState<ImportPromoProductsCsvResult | null>(null);
 
   useEffect(() => {
     return () => {
@@ -299,6 +322,101 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
     }
   }
 
+  async function runPromoImport(): Promise<void> {
+    if (!promoFile) return;
+
+    setPromoSubmitting(true);
+    setPromoError(null);
+    setPromoDownloadError(null);
+    setPromoResult(null);
+
+    try {
+      const form = new FormData();
+      form.append("file", promoFile);
+
+      const search = new URLSearchParams();
+      search.set("citySlug", city.slug);
+      if (promoCsvEncoding !== "auto") search.set("encoding", promoCsvEncoding);
+      const query = search.toString() ? `?${search.toString()}` : "";
+      const res = await apiUpload<ImportPromoProductsCsvResult>(
+        `/api/admin/import/promos${query}`,
+        form,
+      );
+      setPromoResult(res);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Promo import failed";
+      setPromoError(message);
+    } finally {
+      setPromoSubmitting(false);
+    }
+  }
+
+  async function downloadPromoXlsx(): Promise<void> {
+    setPromoDownloading(true);
+    setPromoDownloadError(null);
+    try {
+      const headers: Record<string, string> = {};
+      const tgInitData = window.Telegram?.WebApp?.initData ?? "";
+      if (tgInitData) {
+        headers["x-telegram-init-data"] = tgInitData;
+      }
+      if (import.meta.env.DEV && !tgInitData) {
+        headers["x-dev-admin"] = "1";
+      }
+
+      const query = `?${new URLSearchParams({ citySlug: city.slug }).toString()}`;
+      let res = await fetch(buildApiUrl(`/api/admin/export/promos.xlsx${query}`), {
+        method: "GET",
+        headers,
+      });
+      if (res.status === 404) {
+        res = await fetch(buildApiUrl(`/api/admin/export/promos${query}`), {
+          method: "GET",
+          headers,
+        });
+      }
+
+      if (!res.ok) {
+        let message = `Failed to download promo XLSX (${res.status})`;
+        try {
+          const payload = (await res.json()) as {
+            ok?: boolean;
+            error?: { message?: string };
+          };
+          const apiMessage = payload?.error?.message;
+          if (typeof apiMessage === "string" && apiMessage.trim().length > 0) {
+            message = apiMessage;
+          }
+        } catch {
+          // ignore JSON parse failures for non-JSON error responses
+        }
+        throw new Error(message);
+      }
+
+      const blob = await res.blob();
+      const fallbackName = `promo-products.${city.slug}.latest.${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const fileName = parseDownloadFileName(
+        res.headers.get("content-disposition"),
+        fallbackName,
+      );
+      const objectUrl = URL.createObjectURL(blob);
+
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      anchor.style.display = "none";
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to download promo XLSX";
+      setPromoDownloadError(message);
+    } finally {
+      setPromoDownloading(false);
+    }
+  }
+
   return (
     <Card>
       <div className="flex items-center justify-between gap-3">
@@ -437,6 +555,122 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
           ) : null}
         </div>
       ) : null}
+
+      <div className="mt-5 border-t border-border/70 pt-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">
+              Promo products: {formatCityLabel(city)}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground/80">
+              Download the city table, fill promo_old_price and promo_new_price, then import it.
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <button
+              type="button"
+              className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
+              disabled={!promoFile || promoSubmitting || promoDownloading}
+              onClick={() => void runPromoImport()}
+            >
+              {promoSubmitting ? "Importing..." : "Import promo"}
+            </button>
+            <button
+              type="button"
+              className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={promoDownloading || promoSubmitting}
+              onClick={() => void downloadPromoXlsx()}
+            >
+              {promoDownloading ? "Preparing..." : `Download promo ${city.slug.toUpperCase()} XLSX`}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <input
+            type="file"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            disabled={promoSubmitting}
+            onChange={(e) => {
+              const next = e.target.files?.[0] ?? null;
+              setPromoFile(next);
+              setPromoResult(null);
+              setPromoError(null);
+            }}
+          />
+        </div>
+
+        <label className="mt-2 block text-xs text-muted-foreground">
+          CSV encoding
+          <select
+            className="mt-1 block rounded-md border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+            value={promoCsvEncoding}
+            disabled={promoSubmitting}
+            onChange={(e) =>
+              setPromoCsvEncoding(
+                e.target.value as "auto" | "utf-8" | "windows-1251" | "ibm866" | "koi8-r",
+              )
+            }
+          >
+            <option value="auto">auto (recommended)</option>
+            <option value="utf-8">utf-8</option>
+            <option value="windows-1251">windows-1251</option>
+            <option value="ibm866">ibm866</option>
+            <option value="koi8-r">koi8-r</option>
+          </select>
+        </label>
+
+        {promoError ? (
+          <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {promoError}
+          </div>
+        ) : null}
+        {promoDownloadError ? (
+          <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {promoDownloadError}
+          </div>
+        ) : null}
+
+        {promoResult ? (
+          <div className="mt-3 space-y-2 text-sm text-foreground/80">
+            <div>
+              Rows: total={promoResult.rows.total} valid={promoResult.rows.valid} invalid=
+              {promoResult.rows.invalid}
+            </div>
+            {promoResult.decodedEncoding ? (
+              <div>Decoded encoding: {promoResult.decodedEncoding}</div>
+            ) : null}
+            <div>
+              Promo rows: upserted={promoResult.promos.upserted} deleted=
+              {promoResult.promos.deleted}
+            </div>
+
+            {promoResult.errors.length > 0 ? (
+              <details className="rounded-xl border border-border/70 bg-muted/55 px-3 py-2">
+                <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                  Promo errors ({promoResult.errors.length})
+                </summary>
+                <div className="mt-2 space-y-2 text-xs text-foreground/80">
+                  {promoResult.errors.slice(0, 20).map((er) => (
+                    <div key={`promo-row-${er.rowNum}`}>
+                      <div className="font-semibold">
+                        row {er.rowNum}
+                        {er.title ? ` (${er.title})` : ""}
+                      </div>
+                      <div className="text-foreground/80">{er.messages.join("; ")}</div>
+                    </div>
+                  ))}
+                  {promoResult.errors.length > 20 ? (
+                    <div className="text-muted-foreground">
+                      ...and {promoResult.errors.length - 20} more
+                    </div>
+                  ) : null}
+                </div>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </Card>
   );
 }

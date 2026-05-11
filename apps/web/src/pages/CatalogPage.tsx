@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { BadgePercent } from "lucide-react";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
 import { isSupabaseConfigured } from "../supabase/client";
-import { fetchCatalog, type CatalogItem, SupabaseQueryError } from "../supabase/catalog";
+import {
+  fetchCatalog,
+  type CatalogItem,
+  type CatalogData,
+  type PromoCatalogItem,
+  SupabaseQueryError,
+} from "../supabase/catalog";
 import { buildImageCandidates } from "../utils/imageCandidates";
 
 const CATALOG_INITIAL_RENDER_COUNT = 24;
@@ -746,6 +753,11 @@ function ProductCard({
 
       <div className="px-1 pb-1">
         <div className="text-[clamp(1.15rem,4.5vw,1.45rem)] font-black leading-none text-foreground">
+          {item.promoOldPrice && item.promoOldPrice > item.price ? (
+            <span className="mb-0.5 block text-xs font-semibold leading-none text-muted-foreground line-through">
+              {formatPriceRub(item.promoOldPrice)}
+            </span>
+          ) : null}
           {formatPriceRub(item.price)}
         </div>
         <div className="mt-1 line-clamp-2 min-h-[2.6em] text-[clamp(0.86rem,3.25vw,1rem)] font-normal leading-snug text-foreground/85">
@@ -756,16 +768,83 @@ function ProductCard({
   );
 }
 
-function mapMockCatalog(): CatalogItem[] {
-  return PRODUCTS.map((p) => ({
-    id: p.id,
-    title: p.title,
-    description: null,
-    imageUrl: null,
-    categorySlug: "other",
-    price: p.price,
-    inStock: p.inStock,
-  }));
+function PromoProductsBanner({
+  items,
+  onAdd,
+}: {
+  items: PromoCatalogItem[];
+  onAdd: (item: PromoCatalogItem) => void;
+}) {
+  if (items.length === 0) return null;
+
+  return (
+    <section className="rounded-2xl border border-primary/30 bg-[linear-gradient(135deg,hsl(var(--primary)/0.14),hsl(var(--accent)/0.2))] px-3 py-3 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3 px-1">
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary text-primary-foreground">
+            <BadgePercent className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div>
+            <div className="text-sm font-bold leading-5 text-foreground">Акции</div>
+            <div className="text-xs text-muted-foreground">Промо-цены на товары города</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+        {items.map((item) => (
+          <article
+            key={item.id}
+            className="w-[210px] shrink-0 overflow-hidden rounded-xl border border-border/70 bg-background/80"
+          >
+            <div className="flex gap-3 p-2.5">
+              <ProductImagePreview
+                imageUrl={item.imageUrl}
+                alt={item.title}
+                loading="lazy"
+                targetWidth={180}
+                className="h-20 w-20 shrink-0 rounded-lg object-cover"
+                placeholderClassName="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="line-clamp-2 min-h-[2.5rem] text-xs font-semibold leading-5 text-foreground">
+                  {item.title}
+                </div>
+                <div className="mt-1 text-[11px] font-semibold text-muted-foreground line-through">
+                  {formatPriceRub(item.oldPrice)}
+                </div>
+                <div className="text-base font-black leading-5 text-primary">
+                  {formatPriceRub(item.newPrice)}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="flex h-9 w-full items-center justify-center bg-primary px-3 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+              onClick={() => onAdd(item)}
+            >
+              В корзину
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function mapMockCatalog(): CatalogData {
+  return {
+    items: PRODUCTS.map((p) => ({
+      id: p.id,
+      title: p.title,
+      description: null,
+      imageUrl: null,
+      categorySlug: "other",
+      price: p.price,
+      inStock: p.inStock,
+    })),
+    promoItems: [],
+  };
 }
 
 type CategoryStat = {
@@ -880,13 +959,15 @@ export function CatalogPage() {
     },
     enabled: supabaseEnabled && state.city !== null,
   });
-  const supabaseItems = catalogQuery.data ?? [];
+  const supabaseCatalog = catalogQuery.data ?? { items: [], promoItems: [] };
   const loading = supabaseEnabled && catalogQuery.isPending;
   const error = useMemo(() => {
     if (!catalogQuery.error) return null;
     return mapCatalogLoadError(catalogQuery.error);
   }, [catalogQuery.error]);
-  const items = supabaseEnabled ? supabaseItems : mockItems;
+  const catalogData = supabaseEnabled ? supabaseCatalog : mockItems;
+  const items = catalogData.items;
+  const promoItems = catalogData.promoItems;
 
   const cityLabel = useMemo(() => {
     if (state.city === "vvo") return "Владивосток (VVO)";
@@ -1345,6 +1426,22 @@ export function CatalogPage() {
           </label>
         ) : null}
       </div>
+
+      <PromoProductsBanner
+        items={state.city === "blg" ? promoItems : []}
+        onAdd={(item) => {
+          dispatch({
+            type: "cart/add",
+            item: {
+              productId: item.id,
+              title: item.title,
+              price: item.newPrice,
+              imageUrl: item.imageUrl,
+            },
+          });
+          showToast("Промо-товар добавлен в корзину");
+        }}
+      />
 
       {!supabaseEnabled ? (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200">

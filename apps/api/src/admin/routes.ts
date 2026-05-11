@@ -8,6 +8,7 @@ import { HttpError, isHttpError } from "../httpError.js";
 import { decodeCsvBuffer } from "../import/decodeCsvBuffer.js";
 import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import { importProductsCsv } from "../import/productsCsv.js";
+import { importPromoProductsCsv } from "../import/promoProductsCsv.js";
 import { processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { requireAdmin } from "./requireAdmin.js";
@@ -886,6 +887,239 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Reply: Buffer | ApiFailure }>(
     "/api/admin/export/products",
     exportProductsXlsxHandler,
+  );
+
+  const exportPromoProductsXlsxHandler = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    try {
+      await requireAdmin(request);
+      const parsedQuery = z
+        .object({
+          citySlug: z.string().trim().min(1).max(50),
+        })
+        .safeParse(request.query);
+      if (!parsedQuery.success) {
+        throw new HttpError(400, "BAD_REQUEST", "citySlug is required");
+      }
+
+      const supabase = createServiceSupabaseClient();
+      const { data: city, error: cityError } = await supabase
+        .from("cities")
+        .select("id,slug,name")
+        .eq("slug", parsedQuery.data.citySlug)
+        .maybeSingle();
+
+      if (cityError) {
+        throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
+      }
+      if (!city) {
+        throw new HttpError(400, "BAD_REQUEST", "Unknown citySlug");
+      }
+
+      const { data: inventoryRows, error: inventoryError } = await supabase
+        .from("inventory")
+        .select("product_id,in_stock,stock_qty,price_override")
+        .eq("city_id", city.id);
+
+      if (inventoryError) {
+        throw new HttpError(500, "DB", `Failed to load city inventory: ${inventoryError.message}`);
+      }
+
+      type CityInventoryRow = {
+        product_id: string;
+        in_stock: boolean;
+        stock_qty: number | null;
+        price_override: number | null;
+      };
+      type ExportProductRow = {
+        id: string;
+        title: string;
+        category_slug: string;
+        base_price: unknown;
+        is_active: boolean;
+      };
+      type ExportPromoRow = {
+        product_id: string;
+        old_price: unknown;
+        new_price: unknown;
+        sort_order: number;
+        is_active: boolean;
+      };
+
+      const cityInventoryRows = (inventoryRows ?? []) as CityInventoryRow[];
+      const productIds = cityInventoryRows.map((row) => row.product_id);
+      const [productsResponse, promosResponse] = await Promise.all([
+        productIds.length > 0
+          ? supabase
+              .from("products")
+              .select("id,title,category_slug,base_price,is_active")
+              .in("id", productIds)
+          : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from("promo_products")
+          .select("product_id,old_price,new_price,sort_order,is_active")
+          .eq("city_id", city.id),
+      ]);
+
+      if (productsResponse.error) {
+        throw new HttpError(500, "DB", `Failed to load products: ${productsResponse.error.message}`);
+      }
+      if (promosResponse.error) {
+        throw new HttpError(500, "DB", `Failed to load promo products: ${promosResponse.error.message}`);
+      }
+
+      const productById = new Map<string, ExportProductRow>();
+      for (const product of (productsResponse.data ?? []) as ExportProductRow[]) {
+        productById.set(product.id, product);
+      }
+
+      const promoByProductId = new Map<string, ExportPromoRow>();
+      for (const promo of (promosResponse.data ?? []) as ExportPromoRow[]) {
+        promoByProductId.set(promo.product_id, promo);
+      }
+
+      const headers = [
+        "product_id",
+        "title",
+        "category_slug",
+        "current_price",
+        "in_stock",
+        "stock_qty",
+        "promo_old_price",
+        "promo_new_price",
+        "promo_active",
+        "promo_sort_order",
+      ];
+      const aoa: Array<Array<string | number | boolean>> = [headers];
+
+      const sortedInventory = [...cityInventoryRows].sort((left, right) => {
+        const leftTitle = productById.get(left.product_id)?.title ?? "";
+        const rightTitle = productById.get(right.product_id)?.title ?? "";
+        return leftTitle.localeCompare(rightTitle, "ru") || left.product_id.localeCompare(right.product_id);
+      });
+
+      for (const inv of sortedInventory) {
+        const product = productById.get(inv.product_id);
+        if (!product || product.is_active !== true) continue;
+
+        const currentPrice =
+          inv.price_override === null || inv.price_override === undefined
+            ? toNumber(product.base_price, "products.base_price")
+            : toNumber(inv.price_override, "inventory.price_override");
+        const promo = promoByProductId.get(inv.product_id);
+
+        aoa.push([
+          inv.product_id,
+          product.title,
+          product.category_slug ?? "other",
+          currentPrice,
+          inv.in_stock === true,
+          inv.stock_qty ?? "",
+          promo && promo.is_active ? toNumber(promo.old_price, "promo_products.old_price") : "",
+          promo && promo.is_active ? toNumber(promo.new_price, "promo_products.new_price") : "",
+          promo?.is_active === true,
+          promo?.sort_order ?? "",
+        ]);
+      }
+
+      const sheet = XLSX.utils.aoa_to_sheet(aoa);
+      const book = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(book, sheet, "promo_products");
+      const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
+      const datePart = new Date().toISOString().slice(0, 10);
+      const fileName = `promo-products.${city.slug}.latest.${datePart}.xlsx`;
+
+      return reply
+        .header(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        .header("Content-Disposition", `attachment; filename=\"${fileName}\"`)
+        .header("Cache-Control", "no-store")
+        .code(200)
+        .send(buffer);
+    } catch (e) {
+      const { statusCode, body } = errorToResponse(e);
+      return reply.code(statusCode).send(body);
+    }
+  };
+
+  app.get<{ Reply: Buffer | ApiFailure }>(
+    "/api/admin/export/promos.xlsx",
+    exportPromoProductsXlsxHandler,
+  );
+
+  app.get<{ Reply: Buffer | ApiFailure }>(
+    "/api/admin/export/promos",
+    exportPromoProductsXlsxHandler,
+  );
+
+  app.post<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/import/promos",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        const querySchema = z.object({
+          citySlug: z.string().trim().min(1).max(50),
+          encoding: z
+            .enum(["auto", "utf-8", "windows-1251", "ibm866", "koi8-r"])
+            .optional(),
+        });
+        const parsedQuery = querySchema.safeParse(request.query);
+        if (!parsedQuery.success) {
+          throw new HttpError(400, "BAD_REQUEST", "citySlug is required");
+        }
+
+        const file = await request.file();
+        if (!file) {
+          throw new HttpError(400, "BAD_REQUEST", "file is required");
+        }
+
+        const buffer = await file.toBuffer();
+        const maxSize = 5 * 1024 * 1024;
+        if (buffer.byteLength > maxSize) {
+          throw new HttpError(400, "BAD_REQUEST", "File too large (max 5MB)");
+        }
+
+        const fileName = (file.filename ?? "").toLowerCase();
+        const mimeType = (file.mimetype ?? "").toLowerCase();
+        const isSpreadsheet =
+          fileName.endsWith(".xlsx") ||
+          fileName.endsWith(".xls") ||
+          mimeType.includes("spreadsheetml") ||
+          mimeType.includes("ms-excel");
+
+        let csvText: string;
+        let encoding: string;
+        if (isSpreadsheet) {
+          csvText = decodeSpreadsheetBuffer(buffer);
+          encoding = "xlsx";
+        } else {
+          const encodingMode = parsedQuery.data.encoding ?? "auto";
+          const decoded = decodeCsvBuffer({
+            buffer,
+            forcedEncoding: encodingMode === "auto" ? null : encodingMode,
+          });
+          csvText = decoded.text;
+          encoding = decoded.encoding;
+        }
+
+        request.log.info({ encoding, fileName, mimeType }, "Decoded imported promo products file");
+        const result = await importPromoProductsCsv({
+          supabase: createServiceSupabaseClient(),
+          csvText,
+          citySlug: parsedQuery.data.citySlug,
+        });
+
+        return reply.code(200).send(ok({ ...result, decodedEncoding: encoding }));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
   );
 
   app.post<{ Reply: ApiSuccess<unknown> | ApiFailure }>(

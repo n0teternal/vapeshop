@@ -11,6 +11,19 @@ export type CatalogItem = {
   categorySlug: string;
   price: number;
   inStock: boolean;
+  promoOldPrice?: number | null;
+  promoNewPrice?: number | null;
+};
+
+export type PromoCatalogItem = CatalogItem & {
+  oldPrice: number;
+  newPrice: number;
+  sortOrder: number;
+};
+
+export type CatalogByCityResult = {
+  items: CatalogItem[];
+  promoItems: PromoCatalogItem[];
 };
 
 type JoinedProduct = {
@@ -21,6 +34,13 @@ type JoinedProduct = {
   image_url: string | null;
   category_slug: string;
   is_active: boolean;
+};
+
+type PromoRow = {
+  product_id: string;
+  old_price: unknown;
+  new_price: unknown;
+  sort_order: number | null;
 };
 
 function numberFromUnknown(value: unknown, fieldName: string): number {
@@ -40,6 +60,17 @@ function numberFromUnknown(value: unknown, fieldName: string): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isMissingPromoProductsTableError(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const code = typeof error.code === "string" ? error.code : "";
+  const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  return (
+    code === "PGRST205" ||
+    (message.includes("promo_products") && message.includes("schema cache")) ||
+    (message.includes("relation") && message.includes("promo_products"))
+  );
 }
 
 function parseJoinedProduct(value: unknown): JoinedProduct | null {
@@ -71,22 +102,48 @@ function parseJoinedProduct(value: unknown): JoinedProduct | null {
   };
 }
 
-export async function fetchCatalogByCity(citySlug: CatalogCitySlug): Promise<CatalogItem[]> {
+export async function fetchCatalogByCity(citySlug: CatalogCitySlug): Promise<CatalogByCityResult> {
   const supabase = createServiceSupabaseClient();
-  const { data, error } = await supabase
-    .from("inventory")
-    .select(
-      "in_stock,price_override,products!inner(id,title,description,base_price,image_url,category_slug,is_active),cities!inner(slug)",
-    )
-    .eq("cities.slug", citySlug)
-    .eq("products.is_active", true);
+  const { data: city, error: cityError } = await supabase
+    .from("cities")
+    .select("id,slug")
+    .eq("slug", citySlug)
+    .maybeSingle();
+
+  if (cityError) {
+    throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
+  }
+  if (!city) {
+    throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
+  }
+
+  const [{ data, error }, { data: promoRows, error: promoError }] = await Promise.all([
+    supabase
+      .from("inventory")
+      .select(
+        "in_stock,price_override,products!inner(id,title,description,base_price,image_url,category_slug,is_active),cities!inner(slug)",
+      )
+      .eq("cities.slug", citySlug)
+      .eq("products.is_active", true),
+    supabase
+      .from("promo_products")
+      .select("product_id,old_price,new_price,sort_order")
+      .eq("city_id", city.id)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true }),
+  ]);
 
   if (error) {
     throw new HttpError(500, "DB", `Failed to load catalog: ${error.message}`);
   }
+  if (promoError && !isMissingPromoProductsTableError(promoError)) {
+    throw new HttpError(500, "DB", `Failed to load promo products: ${promoError.message}`);
+  }
 
   const rows: unknown[] = data ?? [];
   const items: CatalogItem[] = [];
+  const itemById = new Map<string, CatalogItem>();
 
   for (const row of rows) {
     if (!isRecord(row)) continue;
@@ -101,7 +158,7 @@ export async function fetchCatalogByCity(citySlug: CatalogCitySlug): Promise<Cat
         ? null
         : numberFromUnknown(overrideRaw, "inventory.price_override");
 
-    items.push({
+    const item: CatalogItem = {
       id: product.id,
       title: product.title,
       description: product.description,
@@ -109,8 +166,32 @@ export async function fetchCatalogByCity(citySlug: CatalogCitySlug): Promise<Cat
       categorySlug: product.category_slug,
       price: overridePrice ?? basePrice,
       inStock: row.in_stock === true,
+    };
+    items.push(item);
+    itemById.set(item.id, item);
+  }
+
+  const promoItems: PromoCatalogItem[] = [];
+  for (const promo of (promoError ? [] : (promoRows ?? [])) as PromoRow[]) {
+    const item = itemById.get(promo.product_id);
+    if (!item || !item.inStock) continue;
+
+    const oldPrice = numberFromUnknown(promo.old_price, "promo_products.old_price");
+    const newPrice = numberFromUnknown(promo.new_price, "promo_products.new_price");
+    if (newPrice <= 0 || oldPrice <= newPrice) continue;
+
+    item.price = newPrice;
+    item.promoOldPrice = oldPrice;
+    item.promoNewPrice = newPrice;
+
+    promoItems.push({
+      ...item,
+      price: newPrice,
+      oldPrice,
+      newPrice,
+      sortOrder: typeof promo.sort_order === "number" ? promo.sort_order : 0,
     });
   }
 
-  return items;
+  return { items, promoItems };
 }

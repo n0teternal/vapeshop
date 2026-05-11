@@ -31,20 +31,37 @@ export type CatalogItem = {
   categorySlug: string;
   price: number;
   inStock: boolean;
+  promoOldPrice?: number | null;
+  promoNewPrice?: number | null;
+};
+
+export type PromoCatalogItem = CatalogItem & {
+  oldPrice: number;
+  newPrice: number;
+  sortOrder: number;
+};
+
+export type CatalogData = {
+  items: CatalogItem[];
+  promoItems: PromoCatalogItem[];
 };
 
 type CatalogApiResponse = {
   citySlug: CitySlug;
   items: CatalogItem[];
+  promoItems?: PromoCatalogItem[];
 };
 
-export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogItem[]> {
+export async function fetchCatalog(citySlug: CitySlug): Promise<CatalogData> {
   try {
     const data = await apiGet<CatalogApiResponse>(
       `/api/catalog?citySlug=${encodeURIComponent(citySlug)}`,
       { withTelegramAuth: false },
     );
-    return data.items;
+    return {
+      items: data.items,
+      promoItems: data.promoItems ?? [],
+    };
   } catch (error: unknown) {
     if (error instanceof ApiError) {
       throw new SupabaseQueryError({

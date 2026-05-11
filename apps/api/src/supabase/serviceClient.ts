@@ -72,6 +72,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      promo_products: {
+        Row: {
+          id: number;
+          city_id: number;
+          product_id: string;
+          old_price: number;
+          new_price: number;
+          sort_order: number;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          city_id: number;
+          product_id: string;
+          old_price: number;
+          new_price: number;
+          sort_order?: number;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: number;
+          city_id?: number;
+          product_id?: string;
+          old_price?: number;
+          new_price?: number;
+          sort_order?: number;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       customer_profiles: {
         Row: {
           tg_user_id: number;

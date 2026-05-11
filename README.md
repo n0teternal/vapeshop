@@ -114,6 +114,7 @@ Dashboard → **SQL Editor** → выполните:
 Dashboard → **SQL Editor** → выполните:
 - SQL рефералок (profiles/referrals/coupons + поля в orders)
 - `supabase/alter_referrals_loyalty.sql` (ledger баллов + индексы + `tg_username`)
+- `supabase/alter_promo_products.sql` (промо-товары по городам: старая/новая цена)
 
 ## Storage (product images)
 

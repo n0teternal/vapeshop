@@ -61,6 +61,11 @@ type ProductRow = {
   is_active: boolean;
 };
 
+type PromoPriceRow = {
+  product_id: string;
+  new_price: unknown;
+};
+
 type ReservedInventory = {
   productId: string;
   previousStockQty: number;
@@ -92,6 +97,18 @@ function numberFromUnknown(value: unknown): number {
     throw new HttpError(500, "DB", `Invalid numeric value: ${String(value)}`);
   }
   return n;
+}
+
+function isMissingPromoProductsTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: unknown; message?: unknown };
+  const code = typeof maybeError.code === "string" ? maybeError.code : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  return (
+    code === "PGRST205" ||
+    (message.includes("promo_products") && message.includes("schema cache")) ||
+    (message.includes("relation") && message.includes("promo_products"))
+  );
 }
 
 function normalizeItems(items: CreateOrderPayload["items"]): Map<string, number> {
@@ -197,6 +214,36 @@ async function resolveOrderTgUser(params: {
   };
 }
 
+async function loadActivePromoPricesByProductId(params: {
+  supabase: ReturnType<typeof createServiceSupabaseClient>;
+  cityId: number;
+  productIds: string[];
+}): Promise<Map<string, number>> {
+  if (params.productIds.length === 0) return new Map<string, number>();
+
+  const { data, error } = await params.supabase
+    .from("promo_products")
+    .select("product_id,new_price")
+    .eq("city_id", params.cityId)
+    .eq("is_active", true)
+    .in("product_id", params.productIds);
+
+  if (error) {
+    if (isMissingPromoProductsTableError(error)) return new Map<string, number>();
+    throw new HttpError(500, "DB", `Failed to load promo prices: ${error.message}`);
+  }
+
+  const prices = new Map<string, number>();
+  for (const row of (data ?? []) as PromoPriceRow[]) {
+    const price = numberFromUnknown(row.new_price);
+    if (price > 0) {
+      prices.set(row.product_id, price);
+    }
+  }
+
+  return prices;
+}
+
 export async function createOrder(params: {
   payload: CreateOrderPayload;
   tgUser: TgUser;
@@ -249,6 +296,11 @@ export async function createOrder(params: {
     inventoryList.map((r) => [r.product_id, r]),
   );
   const productById = new Map<string, ProductRow>(productList.map((p) => [p.id, p]));
+  const promoPriceByProductId = await loadActivePromoPricesByProductId({
+    supabase,
+    cityId: city.id,
+    productIds,
+  });
 
   const lines: OrderLine[] = [];
   let totalBeforeDiscount = 0;
@@ -282,7 +334,7 @@ export async function createOrder(params: {
       inv.price_override === null || inv.price_override === undefined
         ? null
         : numberFromUnknown(inv.price_override);
-    const unitPrice = overridePrice ?? basePrice;
+    const unitPrice = promoPriceByProductId.get(productId) ?? overridePrice ?? basePrice;
 
     lines.push({ productId, title: product.title, qty, unitPrice });
     totalBeforeDiscount += unitPrice * qty;

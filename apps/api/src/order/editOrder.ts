@@ -54,6 +54,11 @@ type InventoryRow = {
   price_override: unknown;
 };
 
+type PromoPriceRow = {
+  product_id: string;
+  new_price: unknown;
+};
+
 type RestorableInventoryUpdate = {
   productId: string;
   previousStockQty: number;
@@ -136,6 +141,18 @@ function numberFromUnknown(value: unknown, fieldName: string): number {
   }
 
   return parsed;
+}
+
+function isMissingPromoProductsTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: unknown; message?: unknown };
+  const code = typeof maybeError.code === "string" ? maybeError.code : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  return (
+    code === "PGRST205" ||
+    (message.includes("promo_products") && message.includes("schema cache")) ||
+    (message.includes("relation") && message.includes("promo_products"))
+  );
 }
 
 function normalizeItems(items: CreateOrderPayload["items"]): Map<string, number> {
@@ -265,6 +282,36 @@ async function loadInventoryByProductId(params: {
   return new Map<string, InventoryRow>(
     ((data ?? []) as InventoryRow[]).map((row) => [row.product_id, row]),
   );
+}
+
+async function loadActivePromoPricesByProductId(params: {
+  cityId: number;
+  productIds: string[];
+}): Promise<Map<string, number>> {
+  if (params.productIds.length === 0) return new Map<string, number>();
+
+  const supabase = createServiceSupabaseClient();
+  const { data, error } = await supabase
+    .from("promo_products")
+    .select("product_id,new_price")
+    .eq("city_id", params.cityId)
+    .eq("is_active", true)
+    .in("product_id", params.productIds);
+
+  if (error) {
+    if (isMissingPromoProductsTableError(error)) return new Map<string, number>();
+    throw new HttpError(500, "DB", `Failed to load promo prices: ${error.message}`);
+  }
+
+  const prices = new Map<string, number>();
+  for (const row of (data ?? []) as PromoPriceRow[]) {
+    const price = numberFromUnknown(row.new_price, "promo_products.new_price");
+    if (price > 0) {
+      prices.set(row.product_id, price);
+    }
+  }
+
+  return prices;
 }
 
 async function rollbackInventoryUpdates(params: {
@@ -454,9 +501,10 @@ export async function startOrderEditSession(params: {
         .filter((productId): productId is string => typeof productId === "string"),
     ),
   );
-  const [productsById, inventoryByProductId] = await Promise.all([
+  const [productsById, inventoryByProductId, promoPriceByProductId] = await Promise.all([
     loadProductsById(productIds),
     loadInventoryByProductId({ cityId: city.id, productIds }),
+    loadActivePromoPricesByProductId({ cityId: city.id, productIds }),
   ]);
 
   const cart = orderItems
@@ -465,11 +513,12 @@ export async function startOrderEditSession(params: {
       const product = productsById.get(row.product_id);
       const inventory = inventoryByProductId.get(row.product_id);
       const price =
-        inventory?.price_override === null || inventory?.price_override === undefined
+        promoPriceByProductId.get(row.product_id) ??
+        (inventory?.price_override === null || inventory?.price_override === undefined
           ? product
             ? numberFromUnknown(product.base_price, "products.base_price")
             : numberFromUnknown(row.unit_price, "order_items.unit_price")
-          : numberFromUnknown(inventory.price_override, "inventory.price_override");
+          : numberFromUnknown(inventory.price_override, "inventory.price_override"));
 
       return {
         productId: row.product_id,
@@ -567,9 +616,10 @@ export async function applyOrderEdit(params: {
   const productIds = Array.from(
     new Set([...currentQtyByProductId.keys(), ...requested.keys()]),
   );
-  const [productsById, inventoryByProductId] = await Promise.all([
+  const [productsById, inventoryByProductId, promoPriceByProductId] = await Promise.all([
     loadProductsById(productIds),
     loadInventoryByProductId({ cityId: city.id, productIds }),
+    loadActivePromoPricesByProductId({ cityId: city.id, productIds }),
   ]);
 
   const lines: Array<{ productId: string; title: string; qty: number; unitPrice: number }> = [];
@@ -605,9 +655,10 @@ export async function applyOrderEdit(params: {
       !product.is_active && requestedQty <= currentQty
         ? currentUnitPriceByProductId.get(productId) ??
           numberFromUnknown(product.base_price, "products.base_price")
-        : inventory?.price_override === null || inventory?.price_override === undefined
-          ? numberFromUnknown(product.base_price, "products.base_price")
-          : numberFromUnknown(inventory.price_override, "inventory.price_override");
+        : promoPriceByProductId.get(productId) ??
+          (inventory?.price_override === null || inventory?.price_override === undefined
+            ? numberFromUnknown(product.base_price, "products.base_price")
+            : numberFromUnknown(inventory.price_override, "inventory.price_override"));
 
     lines.push({
       productId,
