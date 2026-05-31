@@ -10,6 +10,7 @@ import {
   buildOrderTelegramMessage,
   buildOrderStatusTelegramText,
   type CitySlug,
+  type OrderPaymentMethod,
   type OrderStatus,
 } from "./telegramMessage.js";
 
@@ -316,6 +317,7 @@ async function isRecentCityOrder(params: {
 export async function syncFinalOrderTelegramState(params: {
   orderId: string;
   status: FinalOrderStatus;
+  paymentMethod?: OrderPaymentMethod;
   fallbackTarget?: NotifyTarget | null;
   skipStatusChats?: boolean;
   cancelledOrderChatsMode?: "auto" | "edit_only";
@@ -337,7 +339,7 @@ export async function syncFinalOrderTelegramState(params: {
     params.status === "done" ||
     (params.status === "cancelled" && shouldDuplicateCancelledOrderChats);
 
-  const statusText = buildOrderStatusTelegramText({
+  const statusTextParams: Parameters<typeof buildOrderStatusTelegramText>[0] = {
     status: params.status,
     cityName: context.city.name,
     citySlug: context.citySlug,
@@ -352,7 +354,12 @@ export async function syncFinalOrderTelegramState(params: {
     discountApplied: context.discountAmount > 0,
     orderId: context.order.id,
     isEdited: context.isEdited,
-  });
+  };
+  if (params.status === "done" && params.paymentMethod) {
+    statusTextParams.paymentMethod = params.paymentMethod;
+  }
+
+  const statusText = buildOrderStatusTelegramText(statusTextParams);
   const orderStatusMessage = buildOrderTelegramMessage({
     status: params.status,
     cityName: context.city.name,

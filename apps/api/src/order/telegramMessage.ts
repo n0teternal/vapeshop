@@ -5,6 +5,7 @@ import {
 } from "./conversationRequest.js";
 
 export type OrderStatus = "new" | "processing" | "done" | "cancelled";
+export type OrderPaymentMethod = "cash" | "card";
 
 export type CitySlug = "vvo" | "blg";
 
@@ -32,6 +33,7 @@ type OrderMessageBaseParams = {
   lines: OrderLine[];
   totalPrice: number;
   discountApplied?: boolean;
+  paymentMethod?: OrderPaymentMethod;
   orderId: string;
 };
 
@@ -46,6 +48,10 @@ function escapeHtml(input: string): string {
 
 function formatRub(value: number): string {
   return `${Math.round(value)} ₽`;
+}
+
+export function formatOrderPaymentMethodLabel(method: OrderPaymentMethod): string {
+  return method === "cash" ? "\u041d\u0430\u043b\u0438\u0447\u043d\u044b\u0435" : "\u041a\u0430\u0440\u0442\u0430";
 }
 
 function statusPrefix(status: OrderStatus): string {
@@ -80,6 +86,10 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
     .map((line) => `• ${escapeHtml(line.title)} ×${line.qty} — ${formatRub(line.unitPrice)}`)
     .join("\n");
 
+  const paymentPart = params.paymentMethod
+    ? `\n\u041e\u043f\u043b\u0430\u0442\u0430: <b>${escapeHtml(formatOrderPaymentMethodLabel(params.paymentMethod))}</b>`
+    : "";
+
   const commentPart = params.comment ? `\nКомментарий: ${escapeHtml(params.comment)}` : "";
   const totalSuffix = params.discountApplied ? " - СКИДКА!" : "";
 
@@ -91,6 +101,7 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
     `${itemsLines}\n\n` +
     `<b>Итого:</b> ${formatRub(params.totalPrice)}${totalSuffix}\n` +
     `Получение: ${escapeHtml(params.deliveryMethod)}` +
+    paymentPart +
     commentPart +
     `\n\nUUID: <code>${escapeHtml(params.orderId)}</code>`
   );
@@ -104,13 +115,17 @@ export function buildOrderTelegramMessage(
   },
 ): TelegramOrderMessage {
   const actionsView: TelegramOrderActionsView = params.actionsView ?? "main";
+  const hasFinalStatus = params.status === "done" || params.status === "cancelled";
+  const actionPromptPrefix =
+    actionsView === "done_confirm" && !hasFinalStatus
+      ? "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u043f\u043e\u0441\u043e\u0431 \u043e\u043f\u043b\u0430\u0442\u044b:\n"
+      : "";
   const text =
     statusPrefix(params.status) +
     editedPrefix(params.isEdited) +
+    actionPromptPrefix +
     `<b>Новый заказ</b>\n` +
     buildOrderBody(params);
-  const hasFinalStatus = params.status === "done" || params.status === "cancelled";
-
   const inline_keyboard =
     actionsView === "contact_confirm"
       ? [
@@ -121,7 +136,16 @@ export function buildOrderTelegramMessage(
           ...(!hasFinalStatus
             ? actionsView === "done_confirm"
               ? [
-                  [{ text: "Подтвердить ✅", callback_data: `status:done:${params.orderId}` }],
+                  [
+                    {
+                      text: "\u041d\u0430\u043b\u0438\u0447\u043d\u044b\u0435",
+                      callback_data: `status:done:cash:${params.orderId}`,
+                    },
+                    {
+                      text: "\u041a\u0430\u0440\u0442\u0430",
+                      callback_data: `status:done:card:${params.orderId}`,
+                    },
+                  ],
                   [{ text: "⬅ Назад", callback_data: `ui:main:${params.orderId}` }],
                 ]
               : actionsView === "cancel_confirm"

@@ -6,6 +6,7 @@ import { buildCustomerConversationRequestMessage } from "../order/conversationRe
 import {
   buildOrderTelegramMessage,
   type CitySlug,
+  type OrderPaymentMethod,
   type OrderStatus,
 } from "../order/telegramMessage.js";
 import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
@@ -41,7 +42,7 @@ type ParsedStartCommand = {
 };
 
 type ParsedCallbackAction =
-  | { kind: "order_status"; status: CallbackStatus; orderId: string }
+  | { kind: "order_status"; status: CallbackStatus; orderId: string; paymentMethod?: OrderPaymentMethod }
   | { kind: "order_ui"; view: CallbackUiView; orderId: string }
   | { kind: "request_conversation"; orderId: string }
   | { kind: "menu"; view: "main" | "orders" | "referral" };
@@ -131,6 +132,15 @@ function parseStartCommand(update: unknown): ParsedStartCommand | null {
   };
 }
 
+function isUuidV4ish(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function parseOrderPaymentMethod(value: string | undefined): OrderPaymentMethod | null {
+  if (value === "cash" || value === "card") return value;
+  return null;
+}
+
 function parseCallbackData(data: string): ParsedCallbackAction | null {
   const parts = data.split(":");
   const type = parts[0];
@@ -146,30 +156,36 @@ function parseCallbackData(data: string): ParsedCallbackAction | null {
 
   if (type === "contact_request" && parts.length === 2) {
     const orderId = actionRaw;
-    const uuidV4ish =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
-    if (!uuidV4ish) return null;
+    if (!isUuidV4ish(orderId)) return null;
     return { kind: "request_conversation", orderId };
   }
 
   // Keep this tolerant: Telegram callback_data is just a string and older/newer clients may add segments.
   if (parts.length < 3) return null;
 
-  const orderId = parts.slice(2).join(":");
-  if (!orderId) return null;
-
-  const uuidV4ish =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId);
-  if (!uuidV4ish) return null;
-
   if (type === "status") {
     if (actionRaw !== "processing" && actionRaw !== "done" && actionRaw !== "cancelled") {
       return null;
     }
-    return { kind: "order_status", status: actionRaw, orderId };
+
+    const maybePaymentMethod = parseOrderPaymentMethod(parts[2]);
+    const paymentMethod = actionRaw === "done" ? maybePaymentMethod : null;
+    const orderId = (paymentMethod ? parts.slice(3) : parts.slice(2)).join(":");
+    if (!isUuidV4ish(orderId)) return null;
+
+    if (actionRaw === "done" && !paymentMethod) {
+      return { kind: "order_ui", view: "done_confirm", orderId };
+    }
+
+    return paymentMethod
+      ? { kind: "order_status", status: actionRaw, orderId, paymentMethod }
+      : { kind: "order_status", status: actionRaw, orderId };
   }
 
   if (type === "ui") {
+    const orderId = parts.slice(2).join(":");
+    if (!isUuidV4ish(orderId)) return null;
+
     if (
       actionRaw !== "main" &&
       actionRaw !== "done_confirm" &&
@@ -473,7 +489,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       (action.status === "done" || action.status === "cancelled")
     ) {
       try {
-        await syncFinalOrderTelegramState({
+        const syncParams: Parameters<typeof syncFinalOrderTelegramState>[0] = {
           orderId: order.id,
           status: action.status,
           fallbackTarget: parsed.message
@@ -483,7 +499,12 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
               }
             : null,
           logger: request.log,
-        });
+        };
+        if (action.status === "done" && action.paymentMethod) {
+          syncParams.paymentMethod = action.paymentMethod;
+        }
+
+        await syncFinalOrderTelegramState(syncParams);
       } catch (e) {
         request.log.error(
           { err: e, orderId: order.id, status: action.status },
