@@ -1,11 +1,25 @@
 export type DeliveryCitySlug = "vvo" | "blg";
 
+export const BLG_WEEKDAY_DELIVERY_TIME_SLOTS = [
+  "18:00-20:00",
+  "20:00-22:00",
+  "22:00-00:00",
+] as const;
+
+export const BLG_WEEKEND_DELIVERY_TIME_SLOTS = [
+  "14:00-16:00",
+  "16:00-18:00",
+  "18:00-20:00",
+  "20:00-22:00",
+  "22:00-00:00",
+] as const;
+
 export const BLG_DELIVERY_TIME_SLOTS = [
-  "13:00-15:00",
-  "15:00-17:00",
-  "17:00-19:00",
-  "19:00-21:00",
-  "21:00-00:00",
+  "14:00-16:00",
+  "16:00-18:00",
+  "18:00-20:00",
+  "20:00-22:00",
+  "22:00-00:00",
 ] as const;
 type BlgDeliveryTimeSlot = (typeof BLG_DELIVERY_TIME_SLOTS)[number];
 
@@ -13,11 +27,11 @@ const BLG_ORDER_CUTOFF_BY_TIME_SLOT: Record<
   BlgDeliveryTimeSlot,
   { dayOffset: number; minutesOfDay: number }
 > = {
-  "13:00-15:00": { dayOffset: 0, minutesOfDay: 0 },
-  "15:00-17:00": { dayOffset: 0, minutesOfDay: 15 * 60 },
-  "17:00-19:00": { dayOffset: 0, minutesOfDay: 16 * 60 },
-  "19:00-21:00": { dayOffset: 0, minutesOfDay: 19 * 60 },
-  "21:00-00:00": { dayOffset: 0, minutesOfDay: 21 * 60 },
+  "14:00-16:00": { dayOffset: 0, minutesOfDay: 0 },
+  "16:00-18:00": { dayOffset: 0, minutesOfDay: 16 * 60 },
+  "18:00-20:00": { dayOffset: 0, minutesOfDay: 18 * 60 },
+  "20:00-22:00": { dayOffset: 0, minutesOfDay: 20 * 60 },
+  "22:00-00:00": { dayOffset: 0, minutesOfDay: 22 * 60 },
 };
 export const BLG_DELIVERY_FEE_RUB = 150;
 export const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
@@ -66,6 +80,22 @@ function parseIsoDate(value: string): { year: number; month: number; day: number
   };
 }
 
+function isWeekendIsoDate(value: string): boolean {
+  const parsed = parseIsoDate(value);
+  if (!parsed) return false;
+
+  const dayOfWeek = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day)).getUTCDay();
+  return dayOfWeek === 0 || dayOfWeek === 6;
+}
+
+export function getBlgDeliveryTimeSlotsForDate(
+  deliveryDate: string,
+): readonly BlgDeliveryTimeSlot[] {
+  return isWeekendIsoDate(deliveryDate)
+    ? BLG_WEEKEND_DELIVERY_TIME_SLOTS
+    : BLG_WEEKDAY_DELIVERY_TIME_SLOTS;
+}
+
 function getCityLocalDateTimeMs(params: {
   citySlug: DeliveryCitySlug;
   parsedDate: { year: number; month: number; day: number };
@@ -102,7 +132,7 @@ export function getMinDeliveryDateForCity(
   const today = getTodayIsoDateForCity(citySlug, nowMs);
   if (citySlug !== "blg") return today;
 
-  const hasOpenSlotsToday = BLG_DELIVERY_TIME_SLOTS.some((deliveryTimeSlot) =>
+  const hasOpenSlotsToday = getBlgDeliveryTimeSlotsForDate(today).some((deliveryTimeSlot) =>
     isBlgDeliveryTimeSlotOrderOpen({
       deliveryDate: today,
       deliveryTimeSlot,

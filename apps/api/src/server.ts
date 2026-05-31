@@ -16,6 +16,7 @@ import { listCustomerOrders } from "./order/customerOrders.js";
 import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
 import {
   BLG_DELIVERY_TIME_SLOTS,
+  getBlgDeliveryTimeSlotsForDate,
   getMinDeliveryDateForCity,
   getTodayIsoDateForCity,
   isBlgDeliveryTimeSlotOrderOpen,
@@ -205,7 +206,7 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   }
 
   if (deliveryTimeSlot !== null && citySlug === "blg" && normalizedDeliveryMethod === "delivery") {
-    if (!BLG_DELIVERY_TIME_SLOTS.includes(deliveryTimeSlot as (typeof BLG_DELIVERY_TIME_SLOTS)[number])) {
+    if (deliveryDate === null) {
       throw new HttpError(
         400,
         "BAD_REQUEST",
@@ -213,7 +214,12 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
       );
     }
 
-    if (deliveryDate === null) {
+    const availableTimeSlotsForDate = getBlgDeliveryTimeSlotsForDate(deliveryDate);
+    if (
+      !availableTimeSlotsForDate.includes(
+        deliveryTimeSlot as (typeof BLG_DELIVERY_TIME_SLOTS)[number],
+      )
+    ) {
       throw new HttpError(
         400,
         "BAD_REQUEST",
