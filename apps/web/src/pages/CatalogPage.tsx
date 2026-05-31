@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BadgePercent } from "lucide-react";
-import { apiGet } from "../api/client";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
@@ -870,7 +869,7 @@ type CatalogSortMode =
   | "title_desc";
 type CatalogToast = { key: number; message: string };
 type CatalogLoadError = { message: string; devDetails?: string };
-type AdminMe = { tgUserId: number; username: string | null; role: string };
+type CatalogPageMode = "catalog" | "promos";
 
 function mapCatalogLoadError(error: unknown): CatalogLoadError {
   if (error instanceof SupabaseQueryError) {
@@ -928,7 +927,7 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
   return { message, devDetails: error instanceof Error ? error.message : String(error) };
 }
 
-export function CatalogPage() {
+export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {}) {
   const { state, dispatch } = useAppState();
   const orderEditSessionActive = state.orderEditSession !== null;
 
@@ -950,15 +949,8 @@ export function CatalogPage() {
 
   const mockItems = useMemo(() => mapMockCatalog(), []);
   const supabaseEnabled = isSupabaseConfigured();
-  const adminQuery = useQuery({
-    queryKey: ["admin-me"],
-    queryFn: () => apiGet<AdminMe>("/api/admin/me"),
-    retry: false,
-    staleTime: 60_000,
-  });
-  const isAdmin = adminQuery.isSuccess;
   const catalogQuery = useQuery({
-    queryKey: ["catalog", state.city, isAdmin] as const,
+    queryKey: ["catalog", state.city, true] as const,
     queryFn: ({ queryKey }) => {
       const [, citySlug, includePromos] = queryKey;
       if (!citySlug) {
@@ -985,7 +977,9 @@ export function CatalogPage() {
   }, [state.city]);
 
   const catalogRows = useMemo<CatalogRow[]>(() => {
-    return items.filter((item) => item.inStock).map((item) => {
+    const sourceItems: CatalogItem[] = mode === "promos" ? promoItems : items;
+
+    return sourceItems.filter((item) => item.inStock).map((item) => {
       const categoryId =
         typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
           ? normalizeCatalogCategoryId(item.categorySlug) ?? item.categorySlug.trim().toLowerCase()
@@ -1004,7 +998,7 @@ export function CatalogPage() {
         searchTexts: buildCatalogSearchTexts(item, manufacturerLabel, categoryId),
       };
     });
-  }, [items, state.city]);
+  }, [items, mode, promoItems, state.city]);
 
   const categories = useMemo<CategoryStat[]>(() => {
     const counts = new Map<string, number>();
@@ -1332,6 +1326,22 @@ export function CatalogPage() {
         </button>
       </div>
 
+      {mode === "promos" ? (
+        <section className="flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-3 py-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
+            <BadgePercent className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-base font-bold leading-tight text-foreground">
+              {"\u0410\u043a\u0446\u0438\u0438"}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {"\u0412\u0441\u0435 \u0442\u043e\u0432\u0430\u0440\u044b \u0441\u043e \u0441\u043d\u0438\u0436\u0435\u043d\u043d\u043e\u0439 \u0446\u0435\u043d\u043e\u0439"}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex flex-1 items-center gap-2">
@@ -1436,21 +1446,23 @@ export function CatalogPage() {
         ) : null}
       </div>
 
-      <PromoProductsBanner
-        items={state.city === "blg" ? promoItems : []}
-        onAdd={(item) => {
-          dispatch({
-            type: "cart/add",
-            item: {
-              productId: item.id,
-              title: item.title,
-              price: item.newPrice,
-              imageUrl: item.imageUrl,
-            },
-          });
-          showToast("Промо-товар добавлен в корзину");
-        }}
-      />
+      {mode === "catalog" ? (
+        <PromoProductsBanner
+          items={state.city === "blg" ? promoItems : []}
+          onAdd={(item) => {
+            dispatch({
+              type: "cart/add",
+              item: {
+                productId: item.id,
+                title: item.title,
+                price: item.newPrice,
+                imageUrl: item.imageUrl,
+              },
+            });
+            showToast("Промо-товар добавлен в корзину");
+          }}
+        />
+      ) : null}
 
       {!supabaseEnabled ? (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200">

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Heart, Home, ShoppingBag, UserRound } from "lucide-react";
+import { BadgePercent, Heart, Home, ShoppingBag, UserRound } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { apiDelete } from "../api/client";
 import { Button } from "../components/ui/button";
@@ -21,11 +21,11 @@ type TabLinkProps = {
 
 function TabLink({ to, label, badge, end, icon, photoUrl }: TabLinkProps) {
   return (
-    <NavLink to={to} end={end} className="group">
+    <NavLink to={to} end={end} className="group min-w-0">
       {({ isActive }) => (
         <span
           className={cn(
-            "flex min-h-[58px] flex-col items-center justify-center gap-0.5 rounded-2xl px-2 text-[11px] font-semibold transition-colors",
+            "flex min-h-[58px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-[10px] font-semibold leading-tight transition-colors sm:px-2 sm:text-[11px]",
             isActive
               ? "bg-primary/12 text-primary"
               : "text-muted-foreground hover:bg-accent/55 hover:text-foreground",
@@ -39,7 +39,7 @@ function TabLink({ to, label, badge, end, icon, photoUrl }: TabLinkProps) {
               </span>
             ) : null}
           </span>
-          <span>{label}</span>
+          <span className="max-w-full truncate">{label}</span>
         </span>
       )}
     </NavLink>
@@ -147,7 +147,7 @@ export function Layout() {
 
         <nav className="fixed inset-x-0 bottom-0 z-40 px-2 pb-1 [padding-bottom:calc(env(safe-area-inset-bottom,0px)+0.35rem)]">
           <div className="mx-auto w-full max-w-md rounded-[2rem] border border-border/70 bg-card/78 px-2 py-1 shadow-[0_-14px_45px_-24px_rgba(15,23,42,0.65)] backdrop-blur-xl">
-            <div className="grid grid-cols-4 gap-1">
+            <div className="grid grid-cols-5 gap-1">
               <TabLink
                 to="/"
                 end
@@ -155,6 +155,17 @@ export function Layout() {
                 photoUrl={photoUrl}
                 icon={(isActive) => (
                   <Home
+                    className={cn("h-5 w-5", isActive ? "text-primary" : "text-muted-foreground")}
+                    strokeWidth={2.2}
+                  />
+                )}
+              />
+              <TabLink
+                to="/promos"
+                label={"\u0410\u043a\u0446\u0438\u0438"}
+                photoUrl={photoUrl}
+                icon={(isActive) => (
+                  <BadgePercent
                     className={cn("h-5 w-5", isActive ? "text-primary" : "text-muted-foreground")}
                     strokeWidth={2.2}
                   />

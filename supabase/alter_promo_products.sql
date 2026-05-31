@@ -22,7 +22,7 @@ create index if not exists promo_products_city_active_sort_idx
 create index if not exists promo_products_product_idx
   on public.promo_products (product_id);
 
--- Promo feature is admin-only for now. Backend admin routes use service_role.
+-- Promo rows stay server-readable; active promos are exposed through backend catalog API.
 revoke all on public.promo_products from anon, authenticated;
 
 alter table public.promo_products enable row level security;
