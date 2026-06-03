@@ -46,6 +46,15 @@ type ReferralOverviewBalance = {
 
 const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
 const DEFAULT_POINTS_MAX_SPEND_PERCENT = 50;
+const BLG_JUNE_2026_DELIVERY_TIME_SLOTS = [
+  "13:00-15:00",
+  "15:00-17:00",
+  "17:00-19:00",
+  "19:00-21:00",
+  "21:00-23:00",
+  "23:00-00:00",
+] as const;
+
 const BLG_WEEKDAY_DELIVERY_TIME_SLOTS = [
   "18:00-20:00",
   "20:00-22:00",
@@ -60,12 +69,20 @@ const BLG_WEEKEND_DELIVERY_TIME_SLOTS = [
   "22:00-00:00",
 ] as const;
 
-type DeliveryTimeSlot = (typeof BLG_WEEKEND_DELIVERY_TIME_SLOTS)[number];
+type DeliveryTimeSlot =
+  | (typeof BLG_JUNE_2026_DELIVERY_TIME_SLOTS)[number]
+  | (typeof BLG_WEEKEND_DELIVERY_TIME_SLOTS)[number];
 
 const BLG_ORDER_CUTOFF_BY_TIME_SLOT: Record<
   DeliveryTimeSlot,
   { dayOffset: number; minutesOfDay: number }
 > = {
+  "13:00-15:00": { dayOffset: 0, minutesOfDay: 0 },
+  "15:00-17:00": { dayOffset: 0, minutesOfDay: 15 * 60 },
+  "17:00-19:00": { dayOffset: 0, minutesOfDay: 17 * 60 },
+  "19:00-21:00": { dayOffset: 0, minutesOfDay: 19 * 60 },
+  "21:00-23:00": { dayOffset: 0, minutesOfDay: 21 * 60 },
+  "23:00-00:00": { dayOffset: 0, minutesOfDay: 23 * 60 },
   "14:00-16:00": { dayOffset: 0, minutesOfDay: 0 },
   "16:00-18:00": { dayOffset: 0, minutesOfDay: 16 * 60 },
   "18:00-20:00": { dayOffset: 0, minutesOfDay: 18 * 60 },
@@ -169,7 +186,16 @@ function isWeekendIsoDate(value: string): boolean {
   return dayOfWeek === 0 || dayOfWeek === 6;
 }
 
+function isBlgJune2026DeliveryScheduleDate(value: string): boolean {
+  const parsed = parseIsoDate(value);
+  return parsed?.year === 2026 && parsed.month === 6;
+}
+
 function getBlgDeliveryTimeSlotsForDate(deliveryDate: string): readonly DeliveryTimeSlot[] {
+  if (isBlgJune2026DeliveryScheduleDate(deliveryDate)) {
+    return BLG_JUNE_2026_DELIVERY_TIME_SLOTS;
+  }
+
   return isWeekendIsoDate(deliveryDate)
     ? BLG_WEEKEND_DELIVERY_TIME_SLOTS
     : BLG_WEEKDAY_DELIVERY_TIME_SLOTS;

@@ -8,6 +8,10 @@ const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, repoRoot, "");
   const devApiTarget = (env.VITE_DEV_API_TARGET ?? "http://localhost:8787").trim();
+  const apiProxy = {
+    target: devApiTarget,
+    changeOrigin: true,
+  };
 
   return {
     plugins: [react()],
@@ -15,10 +19,14 @@ export default defineConfig(({ mode }) => {
     envDir: repoRoot,
     server: {
       proxy: {
-        "/api": {
-          target: devApiTarget,
-          changeOrigin: true,
-        },
+        "/api": apiProxy,
+      },
+    },
+    preview: {
+      host: "0.0.0.0",
+      port: 4173,
+      proxy: {
+        "/api": apiProxy,
       },
     },
   };
