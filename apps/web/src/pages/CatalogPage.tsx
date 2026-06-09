@@ -1430,13 +1430,15 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
       </div>
 
       {mode === "promos" ? (
-        <section className="flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-3 py-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
-            <BadgePercent className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-2xl font-black uppercase leading-none tracking-wide text-primary">
-              АКЦИИ
+        <section className="rounded-2xl border border-primary/30 bg-primary/10 px-3 py-3">
+          <div className="flex items-center justify-between gap-3 px-1">
+            <div className="flex items-center gap-2">
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary text-primary-foreground">
+                <BadgePercent className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="text-3xl font-black uppercase leading-none tracking-wide text-primary">
+                АКЦИИ
+              </div>
             </div>
           </div>
         </section>
