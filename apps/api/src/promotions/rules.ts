@@ -135,17 +135,25 @@ export function extractPromotionBrandLabel(title: string): string {
   return "";
 }
 
-function brandMatches(title: string, brand: string | null): boolean {
-  if (!brand) return true;
+function parsePromotionBrandFilters(brand: string | null): string[] {
+  if (!brand) return [];
+  return brand
+    .split(/[,;\n]+/g)
+    .map(normalizeSearchText)
+    .filter((value) => value.length > 0);
+}
 
-  const normalizedBrand = normalizeSearchText(brand);
-  if (!normalizedBrand) return true;
+function brandMatches(title: string, brand: string | null): boolean {
+  const normalizedBrands = parsePromotionBrandFilters(brand);
+  if (normalizedBrands.length === 0) return true;
 
   const manufacturer = normalizeSearchText(extractPromotionBrandLabel(title));
-  if (manufacturer && manufacturer === normalizedBrand) return true;
-
   const normalizedTitle = normalizeSearchText(title);
-  return normalizedTitle.startsWith(`${normalizedBrand} `);
+  return normalizedBrands.some(
+    (normalizedBrand) =>
+      (manufacturer && manufacturer === normalizedBrand) ||
+      normalizedTitle.startsWith(`${normalizedBrand} `),
+  );
 }
 
 function isMissingPromotionRulesTableError(error: unknown): boolean {

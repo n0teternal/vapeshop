@@ -401,7 +401,6 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           .from("inventory")
           .select("products!inner(title,category_slug,is_active)")
           .eq("city_id", city.id)
-          .eq("in_stock", true)
           .eq("products.is_active", true);
 
         if (categorySlug) {
@@ -476,7 +475,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           type: z.literal(PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE),
           citySlug: z.enum(["vvo", "blg"]),
           categorySlug: z.string().trim().min(1).max(50),
-          brand: z.string().trim().max(100).nullable().optional(),
+          brand: z.string().trim().max(1000).nullable().optional(),
+          brands: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
           startsAt: z.string().trim().max(80).nullable().optional(),
           endsAt: z.string().trim().max(80).nullable().optional(),
         });
@@ -492,10 +492,15 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           throw new HttpError(400, "BAD_REQUEST", "endsAt must be after startsAt");
         }
 
+        const selectedBrands = [
+          ...new Set((parsed.data.brands ?? []).map((brand) => brand.trim()).filter(Boolean)),
+        ];
         const brand =
-          typeof parsed.data.brand === "string" && parsed.data.brand.trim().length > 0
-            ? parsed.data.brand.trim()
-            : null;
+          selectedBrands.length > 0
+            ? selectedBrands.join(", ")
+            : typeof parsed.data.brand === "string" && parsed.data.brand.trim().length > 0
+              ? parsed.data.brand.trim()
+              : null;
         const supabase = createServiceSupabaseClient();
         const { data: city, error: cityError } = await supabase
           .from("cities")

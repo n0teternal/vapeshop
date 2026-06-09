@@ -1187,6 +1187,11 @@ function formatPromotionCategory(categorySlug: string): string {
   );
 }
 
+function formatPromotionBrandScope(brand: string | null): string {
+  if (!brand) return "Все бренды";
+  return brand.includes(",") ? `Бренды: ${brand}` : `Бренд: ${brand}`;
+}
+
 function AdminPromotionsManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [promotions, setPromotions] = useState<AdminPromotionRule[]>([]);
@@ -1201,7 +1206,7 @@ function AdminPromotionsManager() {
     type: PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
     citySlug: "blg",
     categorySlug: "disposable",
-    brand: "",
+    brands: [] as string[],
     startsAt: "",
     endsAt: "",
   });
@@ -1218,7 +1223,7 @@ function AdminPromotionsManager() {
       setCities(citiesData);
       setDraft((prev) => {
         if (citiesData.some((city) => city.slug === prev.citySlug)) return prev;
-        return { ...prev, citySlug: citiesData[0]?.slug ?? "blg", brand: "" };
+        return { ...prev, citySlug: citiesData[0]?.slug ?? "blg", brands: [] };
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load promotions");
@@ -1250,8 +1255,9 @@ function AdminPromotionsManager() {
         if (cancelled) return;
         setBrandOptions(data.items);
         setDraft((prev) => {
-          if (!prev.brand || data.items.includes(prev.brand)) return prev;
-          return { ...prev, brand: "" };
+          const brands = prev.brands.filter((brand) => data.items.includes(brand));
+          if (brands.length === prev.brands.length) return prev;
+          return { ...prev, brands };
         });
       })
       .catch((e: unknown) => {
@@ -1283,7 +1289,7 @@ function AdminPromotionsManager() {
         type: draft.type,
         citySlug: draft.citySlug,
         categorySlug: draft.categorySlug,
-        brand: draft.brand.trim() || null,
+        brands: draft.brands,
         startsAt: dateInputToIso(draft.startsAt, false),
         endsAt: dateInputToIso(draft.endsAt, true),
       });
@@ -1295,7 +1301,7 @@ function AdminPromotionsManager() {
         type: PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
         citySlug: draft.citySlug,
         categorySlug: "disposable",
-        brand: "",
+        brands: [],
         startsAt: "",
         endsAt: "",
       });
@@ -1361,7 +1367,7 @@ function AdminPromotionsManager() {
                     · {promotion.adminTitle} · {formatPromotionCategory(promotion.categorySlug)}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {promotion.brand ? `Бренд: ${promotion.brand}` : "Все бренды"} ·{" "}
+                    {formatPromotionBrandScope(promotion.brand)} ·{" "}
                     {formatPromotionDate(promotion.startsAt)} -{" "}
                     {formatPromotionDate(promotion.endsAt)}
                   </div>
@@ -1433,7 +1439,7 @@ function AdminPromotionsManager() {
                   value={draft.citySlug}
                   disabled={saving || cities.length === 0}
                   onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, citySlug: e.target.value, brand: "" }))
+                    setDraft((prev) => ({ ...prev, citySlug: e.target.value, brands: [] }))
                   }
                 >
                   {cities.map((city) => (
@@ -1453,7 +1459,7 @@ function AdminPromotionsManager() {
                   value={draft.categorySlug}
                   disabled={saving}
                   onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, categorySlug: e.target.value, brand: "" }))
+                    setDraft((prev) => ({ ...prev, categorySlug: e.target.value, brands: [] }))
                   }
                 >
                   {PROMOTION_CATEGORY_OPTIONS.map((category) => (
@@ -1464,28 +1470,48 @@ function AdminPromotionsManager() {
                 </select>
               </label>
 
-              <label className="grid gap-1.5 text-sm">
-                <span className="text-xs font-semibold text-muted-foreground">
+              <fieldset className="grid gap-1.5 text-sm">
+                <legend className="text-xs font-semibold text-muted-foreground">
                   Бренд компании
-                </span>
-                <select
-                  className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
-                  value={draft.brand}
-                  disabled={saving || brandsLoading}
-                  onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, brand: e.target.value }))
-                  }
-                >
-                  <option value="">
-                    {brandsLoading ? "Загружаем..." : "Все бренды"}
-                  </option>
-                  {brandOptions.map((brand) => (
-                    <option key={brand} value={brand}>
-                      {brand}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                </legend>
+                <div className="max-h-44 overflow-y-auto rounded-xl border border-border/70 bg-card/90 p-2">
+                  <label className="flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm hover:bg-muted/45">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={draft.brands.length === 0}
+                      disabled={saving || brandsLoading}
+                      onChange={() => setDraft((prev) => ({ ...prev, brands: [] }))}
+                    />
+                    <span>{brandsLoading ? "Загружаем..." : "Все бренды"}</span>
+                  </label>
+                  {brandOptions.map((brand) => {
+                    const checked = draft.brands.includes(brand);
+                    return (
+                      <label
+                        key={brand}
+                        className="flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm hover:bg-muted/45"
+                      >
+                        <input
+                          type="checkbox"
+                          className="size-4 accent-primary"
+                          checked={checked}
+                          disabled={saving || brandsLoading}
+                          onChange={(e) =>
+                            setDraft((prev) => ({
+                              ...prev,
+                              brands: e.target.checked
+                                ? [...prev.brands, brand]
+                                : prev.brands.filter((selectedBrand) => selectedBrand !== brand),
+                            }))
+                          }
+                        />
+                        <span className="min-w-0 truncate">{brand}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-1.5 text-sm">
