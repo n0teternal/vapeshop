@@ -263,9 +263,6 @@ export function OrdersPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Управление заказами</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Здесь можно посмотреть свои заказы и отменить те, которые ещё не дошли до статуса done.
-          </p>
         </div>
         <Button
           type="button"
@@ -304,9 +301,6 @@ export function OrdersPage() {
               <PackageSearch className="h-8 w-8" />
             </div>
             <div className="text-base font-semibold">Активных заказов пока нет</div>
-            <div className="max-w-[28ch] text-sm text-muted-foreground">
-              Здесь показываются только заказы в статусах new и processing.
-            </div>
             <Button asChild>
               <Link to="/">Перейти в каталог</Link>
             </Button>

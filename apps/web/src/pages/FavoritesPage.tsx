@@ -25,9 +25,6 @@ export function FavoritesPage() {
             <Heart className="h-8 w-8" />
           </div>
           <div className="text-lg font-semibold">Пока пусто</div>
-          <p className="mt-2 max-w-[24ch] text-sm text-muted-foreground">
-            Добавляйте товары сердечком в каталоге.
-          </p>
           <Button asChild className="mt-5">
             <Link to="/">Перейти в каталог</Link>
           </Button>

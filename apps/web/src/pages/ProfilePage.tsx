@@ -96,9 +96,6 @@ export function ProfilePage() {
           <CardTitle className="text-base">Управление заказами</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="text-sm text-muted-foreground">
-            Просматривайте свои заказы и отменяйте те, которые ещё не достигли статуса done.
-          </div>
           <Button asChild>
             <Link to="/orders" className="inline-flex items-center gap-2">
               <PackageSearch className="h-4 w-4" />
@@ -113,9 +110,6 @@ export function ProfilePage() {
             <CardTitle className="text-base">Рефералка и баллы</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="text-sm text-muted-foreground">
-              Приглашайте друзей, следите за их статусом и балансом бонусных баллов.
-            </div>
             <Button asChild>
               <Link to="/referrals" className="inline-flex items-center gap-2">
                 <Gift className="h-4 w-4" />

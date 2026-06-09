@@ -690,9 +690,6 @@ export function CartPage() {
             <ShoppingBag className="h-8 w-8" />
           </div>
           <div className="text-lg font-semibold">Корзина пуста</div>
-          <p className="mt-2 max-w-[24ch] text-sm text-muted-foreground">
-            Добавьте товары из каталога.
-          </p>
           <Button asChild className="mt-5">
             <Link to="/">Перейти в каталог</Link>
           </Button>

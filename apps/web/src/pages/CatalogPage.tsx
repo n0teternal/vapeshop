@@ -1325,22 +1325,6 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
         </button>
       </div>
 
-      {mode === "promos" ? (
-        <section className="flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-3 py-3">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
-            <BadgePercent className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-2xl font-black uppercase leading-none tracking-wide text-primary">
-              АКЦИИ
-            </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              {"\u0412\u0441\u0435 \u0442\u043e\u0432\u0430\u0440\u044b \u0441\u043e \u0441\u043d\u0438\u0436\u0435\u043d\u043d\u043e\u0439 \u0446\u0435\u043d\u043e\u0439"}
-            </div>
-          </div>
-        </section>
-      ) : null}
-
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex flex-1 items-center gap-2">
@@ -1444,6 +1428,19 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
           </label>
         ) : null}
       </div>
+
+      {mode === "promos" ? (
+        <section className="flex items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-3 py-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground">
+            <BadgePercent className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="text-2xl font-black uppercase leading-none tracking-wide text-primary">
+              АКЦИИ
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {mode === "catalog" ? (
         <PromoProductsBanner
@@ -1715,9 +1712,6 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-base font-semibold text-foreground">Фильтры каталога</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Здесь настраиваются все категории.
-                </div>
               </div>
 
               <button
@@ -1785,11 +1779,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
             <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Производитель
             </div>
-            {!selectedCategoryId ? (
-              <div className="mt-2 text-sm text-muted-foreground">
-                Выберите категорию, чтобы увидеть связанные бренды.
-              </div>
-            ) : manufacturers.length === 0 ? (
+            {!selectedCategoryId ? null : manufacturers.length === 0 ? (
               <div className="mt-2 text-sm text-muted-foreground">
                 Для этой категории бренды пока не определились.
               </div>
