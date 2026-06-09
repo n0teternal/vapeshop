@@ -430,7 +430,10 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     if (action.kind === "order_status" && action.status === "cancelled") {
       try {
-        await cancelOrderAndRestoreInventory({ orderId: action.orderId });
+        await cancelOrderAndRestoreInventory({
+          orderId: action.orderId,
+          allowLockedCancellation: true,
+        });
       } catch (e) {
         request.log.error({ err: e, orderId: action.orderId }, "Failed to cancel order");
         await answerSafe(

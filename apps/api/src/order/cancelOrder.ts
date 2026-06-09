@@ -170,6 +170,7 @@ async function restoreOrderInventory(params: {
 export async function cancelOrderAndRestoreInventory(params: {
   orderId: string;
   expectedTgUserId?: number;
+  allowLockedCancellation?: boolean;
 }): Promise<{
   changed: boolean;
   status: OrderStatus;
@@ -227,6 +228,7 @@ export async function cancelOrderAndRestoreInventory(params: {
   }
 
   if (
+    params.allowLockedCancellation !== true &&
     isCancellationLockedByDeliveryWindow({
       citySlug,
       comment: (order as OrderRow).comment,
