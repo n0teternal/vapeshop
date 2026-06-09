@@ -116,6 +116,10 @@ type AdminPromotionsResponse = {
   items: AdminPromotionRule[];
 };
 
+type AdminPromotionBrandsResponse = {
+  items: string[];
+};
+
 const PRODUCTS_PAGE_SIZE = 120;
 const ORDERS_PAGE_SIZE = 50;
 const PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE =
@@ -1187,7 +1191,9 @@ function AdminPromotionsManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [promotions, setPromotions] = useState<AdminPromotionRule[]>([]);
   const [cities, setCities] = useState<AdminCity[]>([]);
+  const [brandOptions, setBrandOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [brandsLoading, setBrandsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1212,7 +1218,7 @@ function AdminPromotionsManager() {
       setCities(citiesData);
       setDraft((prev) => {
         if (citiesData.some((city) => city.slug === prev.citySlug)) return prev;
-        return { ...prev, citySlug: citiesData[0]?.slug ?? "blg" };
+        return { ...prev, citySlug: citiesData[0]?.slug ?? "blg", brand: "" };
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load promotions");
@@ -1224,6 +1230,43 @@ function AdminPromotionsManager() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!modalOpen || !draft.citySlug) {
+      setBrandOptions([]);
+      setBrandsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const params = new URLSearchParams({
+      citySlug: draft.citySlug,
+      categorySlug: draft.categorySlug,
+    });
+
+    setBrandsLoading(true);
+    apiGet<AdminPromotionBrandsResponse>(`/api/admin/promotion-brands?${params.toString()}`)
+      .then((data) => {
+        if (cancelled) return;
+        setBrandOptions(data.items);
+        setDraft((prev) => {
+          if (!prev.brand || data.items.includes(prev.brand)) return prev;
+          return { ...prev, brand: "" };
+        });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setBrandOptions([]);
+        setError(e instanceof Error ? e.message : "Failed to load promotion brands");
+      })
+      .finally(() => {
+        if (!cancelled) setBrandsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [modalOpen, draft.citySlug, draft.categorySlug]);
 
   async function createPromotion(): Promise<void> {
     setSaving(true);
@@ -1390,7 +1433,7 @@ function AdminPromotionsManager() {
                   value={draft.citySlug}
                   disabled={saving || cities.length === 0}
                   onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, citySlug: e.target.value }))
+                    setDraft((prev) => ({ ...prev, citySlug: e.target.value, brand: "" }))
                   }
                 >
                   {cities.map((city) => (
@@ -1410,7 +1453,7 @@ function AdminPromotionsManager() {
                   value={draft.categorySlug}
                   disabled={saving}
                   onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, categorySlug: e.target.value }))
+                    setDraft((prev) => ({ ...prev, categorySlug: e.target.value, brand: "" }))
                   }
                 >
                   {PROMOTION_CATEGORY_OPTIONS.map((category) => (
@@ -1425,15 +1468,23 @@ function AdminPromotionsManager() {
                 <span className="text-xs font-semibold text-muted-foreground">
                   Бренд компании
                 </span>
-                <input
+                <select
                   className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
                   value={draft.brand}
-                  disabled={saving}
-                  placeholder="Пусто = все бренды"
+                  disabled={saving || brandsLoading}
                   onChange={(e) =>
                     setDraft((prev) => ({ ...prev, brand: e.target.value }))
                   }
-                />
+                >
+                  <option value="">
+                    {brandsLoading ? "Загружаем..." : "Все бренды"}
+                  </option>
+                  {brandOptions.map((brand) => (
+                    <option key={brand} value={brand}>
+                      {brand}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <div className="grid gap-3 sm:grid-cols-2">

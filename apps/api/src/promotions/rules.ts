@@ -116,7 +116,7 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
-function extractManufacturerLabel(title: string): string {
+export function extractPromotionBrandLabel(title: string): string {
   const tokens = title
     .replaceAll("_", " ")
     .replaceAll("/", " ")
@@ -141,7 +141,7 @@ function brandMatches(title: string, brand: string | null): boolean {
   const normalizedBrand = normalizeSearchText(brand);
   if (!normalizedBrand) return true;
 
-  const manufacturer = normalizeSearchText(extractManufacturerLabel(title));
+  const manufacturer = normalizeSearchText(extractPromotionBrandLabel(title));
   if (manufacturer && manufacturer === normalizedBrand) return true;
 
   const normalizedTitle = normalizeSearchText(title);

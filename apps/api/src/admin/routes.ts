@@ -10,6 +10,7 @@ import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import { importProductsCsv } from "../import/productsCsv.js";
 import { importPromoProductsCsv } from "../import/promoProductsCsv.js";
 import {
+  extractPromotionBrandLabel,
   getPromotionTypeAdminTitle,
   getPromotionTypePublicTitle,
   normalizePromotionCategorySlug,
@@ -290,6 +291,17 @@ function mapPromotionRuleForAdmin(row: {
   };
 }
 
+function getJoinedProduct(row: {
+  products?: unknown;
+}): { title?: unknown; category_slug?: unknown; is_active?: unknown } | null {
+  const products = row.products;
+  if (Array.isArray(products)) {
+    const first = products[0];
+    return typeof first === "object" && first !== null ? first : null;
+  }
+  return typeof products === "object" && products !== null ? products : null;
+}
+
 function errorToResponse(e: unknown): { statusCode: number; body: ApiFailure } {
   if (
     typeof e === "object" &&
@@ -342,6 +354,78 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         return reply.code(200).send(ok(data ?? []));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.get<{ Querystring: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/promotion-brands",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        const querySchema = z.object({
+          citySlug: z.string().trim().min(1).max(60),
+          categorySlug: z.string().trim().min(1).max(50).optional(),
+        });
+        const parsedQuery = querySchema.safeParse(request.query);
+        if (!parsedQuery.success) {
+          throw new HttpError(
+            400,
+            "BAD_REQUEST",
+            parsedQuery.error.issues[0]?.message ?? "Invalid query",
+          );
+        }
+
+        const supabase = createServiceSupabaseClient();
+        const { data: city, error: cityError } = await supabase
+          .from("cities")
+          .select("id")
+          .eq("slug", parsedQuery.data.citySlug)
+          .maybeSingle();
+
+        if (cityError) {
+          throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
+        }
+        if (!city) {
+          throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
+        }
+
+        const categorySlug = parsedQuery.data.categorySlug
+          ? normalizePromotionCategorySlug(parsedQuery.data.categorySlug)
+          : null;
+        let inventoryQuery = supabase
+          .from("inventory")
+          .select("products!inner(title,category_slug,is_active)")
+          .eq("city_id", city.id)
+          .eq("in_stock", true)
+          .eq("products.is_active", true);
+
+        if (categorySlug) {
+          inventoryQuery = inventoryQuery.eq("products.category_slug", categorySlug);
+        }
+
+        const { data, error } = await inventoryQuery;
+        if (error) {
+          throw new HttpError(500, "DB", `Failed to load promotion brands: ${error.message}`);
+        }
+
+        const brands = new Set<string>();
+        for (const row of (data ?? []) as Array<{ products?: unknown }>) {
+          const product = getJoinedProduct(row);
+          const title = typeof product?.title === "string" ? product.title : "";
+          const brand = extractPromotionBrandLabel(title).trim();
+          if (brand) brands.add(brand);
+        }
+
+        return reply.code(200).send(
+          ok({
+            items: [...brands].sort((a, b) => a.localeCompare(b, "ru")),
+          }),
+        );
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
