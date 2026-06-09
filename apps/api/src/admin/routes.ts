@@ -9,6 +9,13 @@ import { decodeCsvBuffer } from "../import/decodeCsvBuffer.js";
 import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import { importProductsCsv } from "../import/productsCsv.js";
 import { importPromoProductsCsv } from "../import/promoProductsCsv.js";
+import {
+  getPromotionTypeAdminTitle,
+  getPromotionTypePublicTitle,
+  normalizePromotionCategorySlug,
+  parsePromotionRuleType,
+  PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
+} from "../promotions/rules.js";
 import { processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { requireAdmin } from "./requireAdmin.js";
@@ -236,6 +243,53 @@ function getParamId(request: FastifyRequest): string {
   return parsed.data.id;
 }
 
+function parseOptionalIsoDateTime(value: string | null | undefined, fieldName: string): string | null {
+  if (value === undefined || value === null) return null;
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  const date = new Date(trimmed);
+  if (!Number.isFinite(date.getTime())) {
+    throw new HttpError(400, "BAD_REQUEST", `${fieldName} must be a valid date`);
+  }
+
+  return date.toISOString();
+}
+
+function mapPromotionRuleForAdmin(row: {
+  id: number;
+  city_id: number | null;
+  type: string;
+  title: string;
+  category_slug: string;
+  brand: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  is_active: boolean;
+  created_at: string;
+}, cityById?: Map<number, { name: string; slug: string }>) {
+  const type = parsePromotionRuleType(row.type) ?? PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE;
+  const city =
+    typeof row.city_id === "number" && cityById ? cityById.get(row.city_id) ?? null : null;
+
+  return {
+    id: row.id,
+    cityId: row.city_id,
+    citySlug: city?.slug ?? null,
+    cityName: city?.name ?? null,
+    type,
+    adminTitle: getPromotionTypeAdminTitle(type),
+    publicTitle: row.title || getPromotionTypePublicTitle(type),
+    categorySlug: normalizePromotionCategorySlug(row.category_slug),
+    brand: row.brand,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+  };
+}
+
 function errorToResponse(e: unknown): { statusCode: number; body: ApiFailure } {
   if (
     typeof e === "object" &&
@@ -288,6 +342,115 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         return reply.code(200).send(ok(data ?? []));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.get<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/promotions",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const supabase = createServiceSupabaseClient();
+        const [{ data, error }, { data: cities, error: citiesError }] = await Promise.all([
+          supabase
+            .from("promotion_rules")
+            .select("id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at")
+            .order("created_at", { ascending: false })
+            .limit(50),
+          supabase.from("cities").select("id,name,slug"),
+        ]);
+
+        if (error) {
+          throw new HttpError(500, "DB", `Failed to load promotion rules: ${error.message}`);
+        }
+        if (citiesError) {
+          throw new HttpError(500, "DB", `Failed to load cities: ${citiesError.message}`);
+        }
+
+        const cityById = new Map((cities ?? []).map((city) => [city.id, { name: city.name, slug: city.slug }]));
+        return reply
+          .code(200)
+          .send(ok({ items: (data ?? []).map((row) => mapPromotionRuleForAdmin(row, cityById)) }));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Body: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/promotions",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        const schema = z.object({
+          type: z.literal(PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE),
+          citySlug: z.enum(["vvo", "blg"]),
+          categorySlug: z.string().trim().min(1).max(50),
+          brand: z.string().trim().max(100).nullable().optional(),
+          startsAt: z.string().trim().max(80).nullable().optional(),
+          endsAt: z.string().trim().max(80).nullable().optional(),
+        });
+        const parsed = schema.safeParse(request.body);
+        if (!parsed.success) {
+          throw new HttpError(400, "BAD_REQUEST", parsed.error.issues[0]?.message ?? "Invalid body");
+        }
+
+        const type = parsed.data.type;
+        const startsAt = parseOptionalIsoDateTime(parsed.data.startsAt, "startsAt");
+        const endsAt = parseOptionalIsoDateTime(parsed.data.endsAt, "endsAt");
+        if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
+          throw new HttpError(400, "BAD_REQUEST", "endsAt must be after startsAt");
+        }
+
+        const brand =
+          typeof parsed.data.brand === "string" && parsed.data.brand.trim().length > 0
+            ? parsed.data.brand.trim()
+            : null;
+        const supabase = createServiceSupabaseClient();
+        const { data: city, error: cityError } = await supabase
+          .from("cities")
+          .select("id,name,slug")
+          .eq("slug", parsed.data.citySlug)
+          .maybeSingle();
+
+        if (cityError) {
+          throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
+        }
+        if (!city) {
+          throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
+        }
+
+        const { data, error } = await supabase
+          .from("promotion_rules")
+          .insert({
+            city_id: city.id,
+            type,
+            title: getPromotionTypePublicTitle(type),
+            category_slug: normalizePromotionCategorySlug(parsed.data.categorySlug),
+            brand,
+            starts_at: startsAt,
+            ends_at: endsAt,
+            is_active: true,
+          })
+          .select("id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at")
+          .single();
+
+        if (error) {
+          throw new HttpError(500, "DB", `Failed to create promotion rule: ${error.message}`);
+        }
+        if (!data) {
+          throw new HttpError(500, "DB", "Failed to create promotion rule (empty response)");
+        }
+
+        return reply
+          .code(200)
+          .send(ok(mapPromotionRuleForAdmin(data, new Map([[city.id, { name: city.name, slug: city.slug }]]))));
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);

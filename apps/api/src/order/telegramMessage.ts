@@ -33,6 +33,8 @@ type OrderMessageBaseParams = {
   lines: OrderLine[];
   totalPrice: number;
   discountApplied?: boolean;
+  promotionDiscountAmount?: number;
+  pointsDiscountAmount?: number;
   paymentMethod?: OrderPaymentMethod;
   orderId: string;
 };
@@ -90,15 +92,37 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
     ? `\n\u041e\u043f\u043b\u0430\u0442\u0430: <b>${escapeHtml(formatOrderPaymentMethodLabel(params.paymentMethod))}</b>`
     : "";
 
+  const discountLines: string[] = [];
+  const promotionDiscountAmount = Math.max(
+    0,
+    Math.trunc(params.promotionDiscountAmount ?? 0),
+  );
+  const pointsDiscountAmount = Math.max(0, Math.trunc(params.pointsDiscountAmount ?? 0));
+  if (promotionDiscountAmount > 0) {
+    discountLines.push(`\u0410\u043a\u0446\u0438\u044f: -${formatRub(promotionDiscountAmount)}`);
+  }
+  if (pointsDiscountAmount > 0) {
+    discountLines.push(`\u0411\u0430\u043b\u043b\u044b: -${formatRub(pointsDiscountAmount)}`);
+  }
+  const discountsPart = discountLines.length > 0 ? `\n${discountLines.join("\n")}` : "";
+
   const commentPart = params.comment ? `\nКомментарий: ${escapeHtml(params.comment)}` : "";
-  const totalSuffix = params.discountApplied ? " - СКИДКА!" : "";
+  const promotionBadgePart =
+    promotionDiscountAmount > 0 ? `<b>\u0410\u041a\u0426\u0418\u042f!</b>\n` : "";
+  const totalSuffix =
+    promotionDiscountAmount > 0
+      ? " - \u0410\u041a\u0426\u0418\u042f!"
+      : params.discountApplied
+        ? " - \u0421\u041a\u0418\u0414\u041a\u0410!"
+        : "";
 
   return (
     `Город: ${cityLine}\n` +
     `Юзер: ${userLine}\n` +
     `Заказ: <b>#${escapeHtml(shortOrderId(params.orderId))}</b>\n\n` +
+    promotionBadgePart +
     `<b>Позиции</b>\n` +
-    `${itemsLines}\n\n` +
+    `${itemsLines}${discountsPart}\n\n` +
     `<b>Итого:</b> ${formatRub(params.totalPrice)}${totalSuffix}\n` +
     `Получение: ${escapeHtml(params.deliveryMethod)}` +
     paymentPart +

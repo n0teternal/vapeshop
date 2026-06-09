@@ -91,6 +91,7 @@ export function FavoritesPage() {
                       productId: item.productId,
                       title: item.title,
                       price: item.price,
+                      categorySlug: item.categorySlug,
                       imageUrl: item.imageUrl,
                     },
                   })

@@ -11,6 +11,11 @@ import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { buildApiUrl } from "../config";
 import {
+  calculateCartPromotionDiscount,
+  type ActivePromotionRule,
+  type ActivePromotionsResponse,
+} from "../promotions/cartPromotions";
+import {
   getOrderEditRemainingMs,
   useAppState,
   type City,
@@ -289,6 +294,7 @@ export function CartPage() {
   const [pointsMaxSpendPercent, setPointsMaxSpendPercent] = useState(
     DEFAULT_POINTS_MAX_SPEND_PERCENT,
   );
+  const [activePromotionRules, setActivePromotionRules] = useState<ActivePromotionRule[]>([]);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const cityToday = useMemo(() => getTodayIsoDateForCity(state.city, nowMs), [state.city, nowMs]);
   const minDeliveryDate = useMemo(
@@ -332,10 +338,19 @@ export function CartPage() {
       ? getBlgDeliveryFeeRub(itemsTotal)
       : 0;
   const total = itemsTotal + deliveryFee;
+  const promotionDiscount = useMemo(() => {
+    return calculateCartPromotionDiscount({
+      cart: state.cart,
+      rules: activePromotionRules,
+      nowMs,
+    });
+  }, [activePromotionRules, nowMs, state.cart]);
+  const promotionDiscountAmount = Math.min(total, promotionDiscount.discountAmount);
+  const totalAfterPromotionDiscount = Math.max(0, total - promotionDiscountAmount);
 
   const maxPointsByOrderTotal = useMemo(() => {
-    return Math.max(0, Math.floor((total * pointsMaxSpendPercent) / 100));
-  }, [pointsMaxSpendPercent, total]);
+    return Math.max(0, Math.floor((totalAfterPromotionDiscount * pointsMaxSpendPercent) / 100));
+  }, [pointsMaxSpendPercent, totalAfterPromotionDiscount]);
 
   const maxPointsToSpend = useMemo(() => {
     return Math.max(0, Math.min(pointsBalance, maxPointsByOrderTotal));
@@ -349,7 +364,7 @@ export function CartPage() {
     : pointsEnabled
       ? maxPointsToSpend
       : 0;
-  const totalToPay = Math.max(0, total - pointsToSpend);
+  const totalToPay = Math.max(0, totalAfterPromotionDiscount - pointsToSpend);
 
   function openDeliveryDatePicker(): void {
     const input = deliveryDateInputRef.current;
@@ -415,6 +430,32 @@ export function CartPage() {
   useEffect(() => {
     void loadPointsBalance();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!state.city) {
+      setActivePromotionRules([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const query = new URLSearchParams({ citySlug: state.city }).toString();
+    apiGet<ActivePromotionsResponse>(`/api/promotions/active?${query}`, { withTelegramAuth: false })
+      .then((data) => {
+        if (cancelled) return;
+        setActivePromotionRules(data.items);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActivePromotionRules([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.city]);
 
   useEffect(() => {
     if (orderEditSession) {
@@ -757,6 +798,26 @@ export function CartPage() {
             </CardContent>
           </Card>
         ) : null}
+
+        {promotionDiscountAmount > 0 ? (
+          <Card className="border-emerald-300/40 bg-emerald-400/10">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">
+                    {promotionDiscount.title ?? "1+1=3"}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Бесплатно: {promotionDiscount.freeQty} шт. Считаем самые дешёвые товары.
+                  </div>
+                </div>
+                <div className="shrink-0 text-sm font-semibold text-emerald-500">
+                  -{formatPriceRub(promotionDiscountAmount)}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <Card className="border-border/70 bg-card">
@@ -764,7 +825,7 @@ export function CartPage() {
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Оформление</CardTitle>
             <div className="text-right">
-              {pointsToSpend > 0 ? (
+              {promotionDiscountAmount > 0 || pointsToSpend > 0 ? (
                 <div className="text-xs text-muted-foreground line-through">
                   {formatPriceRub(total)}
                 </div>

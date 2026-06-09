@@ -416,6 +416,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       comment: string | null;
       total_price: unknown;
       discount_amount: unknown;
+      promotion_discount_amount: unknown;
       notify_chat_id: number | null;
       notify_message_id: number | null;
       notify_targets: unknown;
@@ -423,7 +424,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     };
 
     const selectCols =
-      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_targets,edited_at";
+      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,promotion_discount_amount,notify_chat_id,notify_message_id,notify_targets,edited_at";
 
     let order: OrderRow | null = null;
 
@@ -622,6 +623,10 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       order.discount_amount === null || order.discount_amount === undefined
         ? 0
         : numberFromUnknown(order.discount_amount);
+    const promotionDiscountAmount =
+      order.promotion_discount_amount === null || order.promotion_discount_amount === undefined
+        ? 0
+        : numberFromUnknown(order.promotion_discount_amount);
     const orderStatus = parseOrderStatus(order.status);
     const isEdited = typeof order.edited_at === "string" && order.edited_at.trim().length > 0;
 
@@ -648,7 +653,9 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       comment: order.comment,
       lines,
       totalPrice,
-      discountApplied: discountAmount > 0,
+      promotionDiscountAmount,
+      pointsDiscountAmount: discountAmount,
+      discountApplied: discountAmount > 0 || promotionDiscountAmount > 0,
       orderId: order.id,
       isEdited,
     });

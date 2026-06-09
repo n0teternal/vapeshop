@@ -94,8 +94,39 @@ type AdminProductsResponse = {
 
 type OrderStatus = "new" | "processing" | "done";
 
+type PromotionRuleType = "buy_2_get_3_cheapest_free";
+
+type AdminPromotionRule = {
+  id: number;
+  cityId: number | null;
+  citySlug: string | null;
+  cityName: string | null;
+  type: PromotionRuleType;
+  adminTitle: string;
+  publicTitle: string;
+  categorySlug: string;
+  brand: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  isActive: boolean;
+  createdAt: string;
+};
+
+type AdminPromotionsResponse = {
+  items: AdminPromotionRule[];
+};
+
 const PRODUCTS_PAGE_SIZE = 120;
 const ORDERS_PAGE_SIZE = 50;
+const PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE =
+  "buy_2_get_3_cheapest_free" as const;
+const PROMOTION_CATEGORY_OPTIONS = [
+  { value: "disposable", label: "Одноразки" },
+  { value: "liquid", label: "Жидкости" },
+  { value: "pod", label: "Pod" },
+  { value: "cartridge", label: "Картриджи" },
+  { value: "tobacco", label: "Табак" },
+] as const;
 
 type OrderItem = {
   product_id: string | null;
@@ -1131,6 +1162,336 @@ function AdminUploadImages() {
   );
 }
 
+function dateInputToIso(value: string, endOfDay: boolean): string | null {
+  if (!value) return null;
+  const suffix = endOfDay ? "T23:59:59.999" : "T00:00:00.000";
+  const date = new Date(`${value}${suffix}`);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function formatPromotionDate(value: string | null): string {
+  if (!value) return "без ограничения";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return date.toLocaleDateString("ru-RU");
+}
+
+function formatPromotionCategory(categorySlug: string): string {
+  return (
+    PROMOTION_CATEGORY_OPTIONS.find((category) => category.value === categorySlug)?.label ??
+    categorySlug
+  );
+}
+
+function AdminPromotionsManager() {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [promotions, setPromotions] = useState<AdminPromotionRule[]>([]);
+  const [cities, setCities] = useState<AdminCity[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [draft, setDraft] = useState({
+    type: PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
+    citySlug: "blg",
+    categorySlug: "disposable",
+    brand: "",
+    startsAt: "",
+    endsAt: "",
+  });
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [promotionsData, citiesData] = await Promise.all([
+        apiGet<AdminPromotionsResponse>("/api/admin/promotions"),
+        apiGet<AdminCity[]>("/api/admin/cities"),
+      ]);
+      setPromotions(promotionsData.items);
+      setCities(citiesData);
+      setDraft((prev) => {
+        if (citiesData.some((city) => city.slug === prev.citySlug)) return prev;
+        return { ...prev, citySlug: citiesData[0]?.slug ?? "blg" };
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load promotions");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function createPromotion(): Promise<void> {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      if (draft.startsAt && draft.endsAt && draft.endsAt < draft.startsAt) {
+        setError("Дата окончания должна быть позже даты начала.");
+        return;
+      }
+
+      const created = await apiPost<AdminPromotionRule>("/api/admin/promotions", {
+        type: draft.type,
+        citySlug: draft.citySlug,
+        categorySlug: draft.categorySlug,
+        brand: draft.brand.trim() || null,
+        startsAt: dateInputToIso(draft.startsAt, false),
+        endsAt: dateInputToIso(draft.endsAt, true),
+      });
+
+      setPromotions((prev) => [created, ...prev]);
+      setNotice("Акция создана.");
+      setModalOpen(false);
+      setDraft({
+        type: PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
+        citySlug: draft.citySlug,
+        categorySlug: "disposable",
+        brand: "",
+        startsAt: "",
+        endsAt: "",
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to create promotion");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const latestPromotions = promotions.slice(0, 3);
+
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Акции</div>
+          <div className="mt-1 text-xs text-muted-foreground/80">
+            Создание правил для автоматической скидки в корзине.
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
+          onClick={() => setModalOpen(true)}
+        >
+          Создать акцию
+        </button>
+      </div>
+
+      {error ? (
+        <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className="mt-3 rounded-xl border border-emerald-400/35 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-500">
+          {notice}
+        </div>
+      ) : null}
+
+      <div className="mt-3 space-y-2">
+        {loading ? (
+          <div className="h-16 animate-pulse rounded-2xl bg-muted/60" />
+        ) : latestPromotions.length === 0 ? (
+          <div className="rounded-2xl border border-border/70 bg-card/90 p-3 text-sm text-muted-foreground">
+            Акций пока нет
+          </div>
+        ) : (
+          latestPromotions.map((promotion) => (
+            <div
+              key={promotion.id}
+              className="rounded-2xl border border-border/70 bg-card/90 p-3 text-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold">
+                    {promotion.cityName
+                      ? `${promotion.cityName} (${promotion.citySlug?.toUpperCase() ?? ""})`
+                      : "Все города"}{" "}
+                    · {promotion.adminTitle} · {formatPromotionCategory(promotion.categorySlug)}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {promotion.brand ? `Бренд: ${promotion.brand}` : "Все бренды"} ·{" "}
+                    {formatPromotionDate(promotion.startsAt)} -{" "}
+                    {formatPromotionDate(promotion.endsAt)}
+                  </div>
+                </div>
+                <span
+                  className={[
+                    "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                    promotion.isActive
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-muted/60 text-foreground/80",
+                  ].join(" ")}
+                >
+                  {promotion.isActive ? "active" : "off"}
+                </span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {modalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md rounded-2xl border border-border/70 bg-card p-4 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold">Создать акцию</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  1+1=3 дарит самые дешёвые товары в группе.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+                disabled={saving}
+                onClick={() => setModalOpen(false)}
+              >
+                Закрыть
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">Вид акции</span>
+                <select
+                  className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                  value={draft.type}
+                  disabled={saving}
+                  onChange={(e) =>
+                    setDraft((prev) => ({
+                      ...prev,
+                      type: e.target.value as PromotionRuleType,
+                    }))
+                  }
+                >
+                  <option value={PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE}>
+                    1+1=3
+                  </option>
+                </select>
+              </label>
+
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">Город</span>
+                <select
+                  className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                  value={draft.citySlug}
+                  disabled={saving || cities.length === 0}
+                  onChange={(e) =>
+                    setDraft((prev) => ({ ...prev, citySlug: e.target.value }))
+                  }
+                >
+                  {cities.map((city) => (
+                    <option key={city.id} value={city.slug}>
+                      {formatCityLabel(city)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">
+                  Категория товара
+                </span>
+                <select
+                  className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                  value={draft.categorySlug}
+                  disabled={saving}
+                  onChange={(e) =>
+                    setDraft((prev) => ({ ...prev, categorySlug: e.target.value }))
+                  }
+                >
+                  {PROMOTION_CATEGORY_OPTIONS.map((category) => (
+                    <option key={category.value} value={category.value}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">
+                  Бренд компании
+                </span>
+                <input
+                  className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                  value={draft.brand}
+                  disabled={saving}
+                  placeholder="Пусто = все бренды"
+                  onChange={(e) =>
+                    setDraft((prev) => ({ ...prev, brand: e.target.value }))
+                  }
+                />
+              </label>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-semibold text-muted-foreground">Начало</span>
+                  <input
+                    type="date"
+                    className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                    value={draft.startsAt}
+                    disabled={saving}
+                    onChange={(e) =>
+                      setDraft((prev) => ({ ...prev, startsAt: e.target.value }))
+                    }
+                  />
+                </label>
+
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Окончание
+                  </span>
+                  <input
+                    type="date"
+                    className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                    value={draft.endsAt}
+                    disabled={saving}
+                    onChange={(e) =>
+                      setDraft((prev) => ({ ...prev, endsAt: e.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+                disabled={saving}
+                onClick={() => setModalOpen(false)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
+                disabled={saving || cities.length === 0}
+                onClick={() => void createPromotion()}
+              >
+                {saving ? "Создаём..." : "Создать"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
 function AdminProductsManager() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<AdminProductsTab>("active");
@@ -1561,6 +1922,7 @@ export function AdminPage() {
         <>
           <AdminImportProductsCsv />
           <AdminUploadImages />
+          <AdminPromotionsManager />
           <AdminProductsManager />
           <AdminOrdersView />
         </>

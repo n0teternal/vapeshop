@@ -1,5 +1,9 @@
 import { HttpError } from "../httpError.js";
 import { getMaxPointsDiscountForTotal } from "../referral/service.js";
+import {
+  calculatePromotionDiscount,
+  loadActivePromotionRules,
+} from "../promotions/rules.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
   getBlgDeliveryFeeRub,
@@ -42,6 +46,7 @@ type ProductRow = {
   id: string;
   title: string;
   image_url: string | null;
+  category_slug: string;
   base_price: unknown;
   is_active: boolean;
 };
@@ -79,6 +84,7 @@ type PointsSpendRow = {
 export type OrderEditCartItem = {
   productId: string;
   title: string;
+  categorySlug: string | null;
   price: number;
   qty: number;
   imageUrl: string | null;
@@ -252,7 +258,7 @@ async function loadProductsById(productIds: string[]): Promise<Map<string, Produ
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
     .from("products")
-    .select("id,title,image_url,base_price,is_active")
+    .select("id,title,image_url,category_slug,base_price,is_active")
     .in("id", productIds);
 
   if (error) {
@@ -526,6 +532,7 @@ export async function startOrderEditSession(params: {
       return {
         productId: row.product_id,
         title: product?.title ?? "Unknown",
+        categorySlug: product?.category_slug ?? null,
         price,
         qty: row.qty,
         imageUrl: product?.image_url ?? null,
@@ -628,8 +635,14 @@ export async function applyOrderEdit(params: {
       : Promise.resolve(new Map<string, number>()),
   ]);
 
-  const lines: Array<{ productId: string; title: string; qty: number; unitPrice: number }> = [];
-  let totalBeforeDiscount = 0;
+  const lines: Array<{
+    productId: string;
+    title: string;
+    categorySlug: string;
+    qty: number;
+    unitPrice: number;
+  }> = [];
+  let itemsSubtotal = 0;
 
   for (const [productId, requestedQty] of requested.entries()) {
     const currentQty = currentQtyByProductId.get(productId) ?? 0;
@@ -669,17 +682,29 @@ export async function applyOrderEdit(params: {
     lines.push({
       productId,
       title: product.title,
+      categorySlug: product.category_slug,
       qty: requestedQty,
       unitPrice,
     });
-    totalBeforeDiscount += unitPrice * requestedQty;
+    itemsSubtotal += unitPrice * requestedQty;
   }
 
-  totalBeforeDiscount += getDeliveryFeeRub({
+  const promotionRules = await loadActivePromotionRules({ supabase, cityId: city.id });
+  const promotionDiscount = calculatePromotionDiscount({
+    rules: promotionRules,
+    lines,
+  });
+  const promotionDiscountAmount = promotionDiscount.discountAmount;
+  const deliveryFee = getDeliveryFeeRub({
     citySlug: params.payload.citySlug,
     deliveryMethod: params.payload.deliveryMethod,
-    itemsSubtotalRub: totalBeforeDiscount,
+    itemsSubtotalRub: itemsSubtotal,
   });
+  const totalBeforeDiscount = itemsSubtotal + deliveryFee;
+  const totalAfterPromotionDiscount = Math.max(
+    0,
+    totalBeforeDiscount - promotionDiscountAmount,
+  );
 
   const previousDiscountAmount =
     order.discount_amount === null || order.discount_amount === undefined
@@ -687,9 +712,9 @@ export async function applyOrderEdit(params: {
       : Math.max(0, Math.trunc(numberFromUnknown(order.discount_amount, "orders.discount_amount")));
   const nextDiscountAmount = Math.min(
     previousDiscountAmount,
-    getMaxPointsDiscountForTotal(totalBeforeDiscount),
+    getMaxPointsDiscountForTotal(totalAfterPromotionDiscount),
   );
-  const totalAfterDiscount = Math.max(0, totalBeforeDiscount - nextDiscountAmount);
+  const totalAfterDiscount = Math.max(0, totalAfterPromotionDiscount - nextDiscountAmount);
 
   const inventoryUpdates: RestorableInventoryUpdate[] = [];
   for (const productId of productIds) {
@@ -812,6 +837,7 @@ export async function applyOrderEdit(params: {
       status: "new",
       total_price: totalAfterDiscount,
       total_before_discount: totalBeforeDiscount,
+      promotion_discount_amount: promotionDiscountAmount,
       discount_amount: nextDiscountAmount,
       total_after_discount: totalAfterDiscount,
       edited_at: nowIso,

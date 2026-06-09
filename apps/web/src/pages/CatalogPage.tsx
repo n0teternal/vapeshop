@@ -1456,6 +1456,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                 productId: item.id,
                 title: item.title,
                 price: item.newPrice,
+                categorySlug: item.categorySlug,
                 imageUrl: item.imageUrl,
               },
             });
@@ -1532,6 +1533,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                       productId: item.id,
                       title: item.title,
                       price: item.price,
+                      categorySlug: item.categorySlug,
                       imageUrl: item.imageUrl,
                     },
                   });
@@ -1545,6 +1547,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                       productId: item.id,
                       title: item.title,
                       price: item.price,
+                      categorySlug: item.categorySlug,
                       imageUrl: item.imageUrl,
                       inStock: item.inStock,
                     },

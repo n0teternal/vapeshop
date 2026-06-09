@@ -14,6 +14,7 @@ export type CartItem = {
   productId: string;
   title: string;
   price: number;
+  categorySlug?: string | null;
   qty: number;
   imageUrl?: string | null;
 };
@@ -22,6 +23,7 @@ export type FavoriteItem = {
   productId: string;
   title: string;
   price: number;
+  categorySlug?: string | null;
   imageUrl: string | null;
   inStock: boolean;
 };
@@ -126,6 +128,9 @@ function isCartItem(value: unknown): value is CartItem {
     typeof value.title === "string" &&
     typeof value.price === "number" &&
     Number.isFinite(value.price) &&
+    (value.categorySlug === undefined ||
+      value.categorySlug === null ||
+      typeof value.categorySlug === "string") &&
     typeof value.qty === "number" &&
     Number.isInteger(value.qty) &&
     value.qty > 0 &&
@@ -142,6 +147,9 @@ function isFavoriteItem(value: unknown): value is FavoriteItem {
     typeof value.title === "string" &&
     typeof value.price === "number" &&
     Number.isFinite(value.price) &&
+      (value.categorySlug === undefined ||
+        value.categorySlug === null ||
+        typeof value.categorySlug === "string") &&
       typeof value.inStock === "boolean" &&
       (value.imageUrl === null || typeof value.imageUrl === "string")
   );
@@ -289,6 +297,7 @@ function reducer(state: AppState, action: Action): AppState {
               ? {
                   ...x,
                   price: action.item.price,
+                  categorySlug: x.categorySlug ?? action.item.categorySlug ?? null,
                   qty: x.qty + 1,
                   imageUrl: x.imageUrl ?? action.item.imageUrl ?? null,
                 }
@@ -301,7 +310,12 @@ function reducer(state: AppState, action: Action): AppState {
         cartCity: state.city,
         cart: [
           ...state.cart,
-          { ...action.item, qty: 1, imageUrl: action.item.imageUrl ?? null },
+          {
+            ...action.item,
+            categorySlug: action.item.categorySlug ?? null,
+            qty: 1,
+            imageUrl: action.item.imageUrl ?? null,
+          },
         ],
       };
     }

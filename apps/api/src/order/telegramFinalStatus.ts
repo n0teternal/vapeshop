@@ -42,6 +42,7 @@ type OrderRow = {
   comment: string | null;
   total_price: unknown;
   discount_amount: unknown;
+  promotion_discount_amount: unknown;
   notify_chat_id: number | null;
   notify_message_id: number | null;
   notify_targets: unknown;
@@ -200,6 +201,7 @@ async function loadOrderContext(orderId: string): Promise<{
   lines: Array<{ title: string; qty: number; unitPrice: number }>;
   totalPrice: number;
   discountAmount: number;
+  promotionDiscountAmount: number;
   isEdited: boolean;
 }> {
   const supabase = createServiceSupabaseClient();
@@ -207,7 +209,7 @@ async function loadOrderContext(orderId: string): Promise<{
   const { data: orderData, error: orderError } = await supabase
     .from("orders")
     .select(
-      "id,status,created_at,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,notify_chat_id,notify_message_id,notify_targets,edited_at",
+      "id,status,created_at,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,promotion_discount_amount,notify_chat_id,notify_message_id,notify_targets,edited_at",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -289,6 +291,10 @@ async function loadOrderContext(orderId: string): Promise<{
       order.discount_amount === null || order.discount_amount === undefined
         ? 0
         : numberFromUnknown(order.discount_amount),
+    promotionDiscountAmount:
+      order.promotion_discount_amount === null || order.promotion_discount_amount === undefined
+        ? 0
+        : numberFromUnknown(order.promotion_discount_amount),
     isEdited: typeof order.edited_at === "string" && order.edited_at.trim().length > 0,
   };
 }
@@ -351,7 +357,9 @@ export async function syncFinalOrderTelegramState(params: {
     comment: context.order.comment,
     lines: context.lines,
     totalPrice: context.totalPrice,
-    discountApplied: context.discountAmount > 0,
+    promotionDiscountAmount: context.promotionDiscountAmount,
+    pointsDiscountAmount: context.discountAmount,
+    discountApplied: context.discountAmount > 0 || context.promotionDiscountAmount > 0,
     orderId: context.order.id,
     isEdited: context.isEdited,
   };
@@ -372,7 +380,9 @@ export async function syncFinalOrderTelegramState(params: {
     comment: context.order.comment,
     lines: context.lines,
     totalPrice: context.totalPrice,
-    discountApplied: context.discountAmount > 0,
+    promotionDiscountAmount: context.promotionDiscountAmount,
+    pointsDiscountAmount: context.discountAmount,
+    discountApplied: context.discountAmount > 0 || context.promotionDiscountAmount > 0,
     orderId: context.order.id,
     isEdited: context.isEdited,
   });
@@ -561,7 +571,9 @@ export async function syncEditedOrderTelegramState(params: {
     comment: context.order.comment,
     lines: context.lines,
     totalPrice: context.totalPrice,
-    discountApplied: context.discountAmount > 0,
+    promotionDiscountAmount: context.promotionDiscountAmount,
+    pointsDiscountAmount: context.discountAmount,
+    discountApplied: context.discountAmount > 0 || context.promotionDiscountAmount > 0,
     orderId: context.order.id,
     isEdited: true,
   });

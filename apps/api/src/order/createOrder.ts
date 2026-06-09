@@ -1,5 +1,9 @@
 import { HttpError } from "../httpError.js";
 import { getMaxPointsDiscountForTotal, spendPointsForOrder } from "../referral/service.js";
+import {
+  calculatePromotionDiscount,
+  loadActivePromotionRules,
+} from "../promotions/rules.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { getBlgDeliveryFeeRub } from "./deliverySchedule.js";
 import { buildOrderComment } from "./orderComment.js";
@@ -36,6 +40,7 @@ type TgUser = { id: number; username: string | null };
 type OrderLine = {
   productId: string;
   title: string;
+  categorySlug: string;
   qty: number;
   unitPrice: number;
 };
@@ -57,6 +62,7 @@ type InventoryRow = {
 type ProductRow = {
   id: string;
   title: string;
+  category_slug: string;
   base_price: unknown;
   is_active: boolean;
 };
@@ -151,6 +157,7 @@ function isProductRow(value: unknown): value is ProductRow {
     value !== null &&
     typeof (value as ProductRow).id === "string" &&
     typeof (value as ProductRow).title === "string" &&
+    typeof (value as ProductRow).category_slug === "string" &&
     typeof (value as ProductRow).is_active === "boolean"
   );
 }
@@ -283,7 +290,7 @@ export async function createOrder(params: {
 
   const { data: productRows, error: prodError } = await supabase
     .from("products")
-    .select("id,title,base_price,is_active")
+    .select("id,title,category_slug,base_price,is_active")
     .in("id", productIds);
 
   if (prodError) {
@@ -307,7 +314,7 @@ export async function createOrder(params: {
       : new Map<string, number>();
 
   const lines: OrderLine[] = [];
-  let totalBeforeDiscount = 0;
+  let itemsSubtotal = 0;
 
   for (const [productId, qty] of requested.entries()) {
     const inv = inventoryByProductId.get(productId);
@@ -340,20 +347,37 @@ export async function createOrder(params: {
         : numberFromUnknown(inv.price_override);
     const unitPrice = promoPriceByProductId.get(productId) ?? overridePrice ?? basePrice;
 
-    lines.push({ productId, title: product.title, qty, unitPrice });
-    totalBeforeDiscount += unitPrice * qty;
+    lines.push({
+      productId,
+      title: product.title,
+      categorySlug: product.category_slug,
+      qty,
+      unitPrice,
+    });
+    itemsSubtotal += unitPrice * qty;
   }
 
-  totalBeforeDiscount += getDeliveryFeeRub({
+  const promotionRules = await loadActivePromotionRules({ supabase, cityId: city.id });
+  const promotionDiscount = calculatePromotionDiscount({
+    rules: promotionRules,
+    lines,
+  });
+  const promotionDiscountAmount = promotionDiscount.discountAmount;
+  const deliveryFee = getDeliveryFeeRub({
     citySlug: params.payload.citySlug,
     deliveryMethod: params.payload.deliveryMethod,
-    itemsSubtotalRub: totalBeforeDiscount,
+    itemsSubtotalRub: itemsSubtotal,
   });
+  const totalBeforeDiscount = itemsSubtotal + deliveryFee;
+  const totalAfterPromotionDiscount = Math.max(
+    0,
+    totalBeforeDiscount - promotionDiscountAmount,
+  );
 
   const requestedPointsToSpend = Math.max(0, Math.trunc(params.payload.pointsToSpend));
-  const maxPointsByOrderTotal = getMaxPointsDiscountForTotal(totalBeforeDiscount);
+  const maxPointsByOrderTotal = getMaxPointsDiscountForTotal(totalAfterPromotionDiscount);
   const discountAmount = Math.min(requestedPointsToSpend, maxPointsByOrderTotal);
-  const totalAfterDiscount = Math.max(0, totalBeforeDiscount - discountAmount);
+  const totalAfterDiscount = Math.max(0, totalAfterPromotionDiscount - discountAmount);
 
   const reservations: ReservedInventory[] = [];
 
@@ -405,6 +429,7 @@ export async function createOrder(params: {
     comment: orderComment,
     total_price: totalAfterDiscount,
     total_before_discount: totalBeforeDiscount,
+    promotion_discount_amount: promotionDiscountAmount,
     discount_amount: discountAmount,
     total_after_discount: totalAfterDiscount,
     // Let DB assign default status.
@@ -484,7 +509,9 @@ export async function createOrder(params: {
       comment: orderComment,
       lines,
       totalPrice: totalAfterDiscount,
-      discountApplied: discountAmount > 0,
+      promotionDiscountAmount,
+      pointsDiscountAmount: discountAmount,
+      discountApplied: promotionDiscountAmount > 0 || discountAmount > 0,
       orderId: createdOrder.id,
     }),
   };

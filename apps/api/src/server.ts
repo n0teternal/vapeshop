@@ -36,6 +36,7 @@ import {
   type CatalogItem,
 } from "./catalog/getCatalog.js";
 import { config } from "./config.js";
+import { loadActivePromotionRules } from "./promotions/rules.js";
 import { bootstrapReferralProfile, getReferralOverview } from "./referral/service.js";
 import { createServiceSupabaseClient } from "./supabase/serviceClient.js";
 import { sendMessage } from "./telegram/api.js";
@@ -485,6 +486,54 @@ app.get<{
         : "Unexpected error";
 
     request.log.error({ err: e }, "Catalog request failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.get<{
+  Querystring: { citySlug?: string };
+  Reply:
+    | ApiSuccess<{
+        items: Awaited<ReturnType<typeof loadActivePromotionRules>>;
+      }>
+    | ErrorResponse;
+}>("/api/promotions/active", async (request, reply) => {
+  try {
+    const citySlug = request.query.citySlug;
+    if (citySlug !== "vvo" && citySlug !== "blg") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
+    }
+
+    const supabase = createServiceSupabaseClient();
+    const { data: city, error: cityError } = await supabase
+      .from("cities")
+      .select("id")
+      .eq("slug", citySlug)
+      .maybeSingle();
+
+    if (cityError) {
+      throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
+    }
+    if (!city) {
+      throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
+    }
+
+    const items = await loadActivePromotionRules({ supabase, cityId: city.id });
+
+    return reply
+      .header("Cache-Control", "public, max-age=30, s-maxage=120, stale-while-revalidate=300")
+      .code(200)
+      .send(ok({ items }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Promotion rules request failed");
     return reply.code(statusCode).send({ ok: false, error: { code, message } });
   }
 });

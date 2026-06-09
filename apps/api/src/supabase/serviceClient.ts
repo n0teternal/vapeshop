@@ -108,6 +108,48 @@ export type Database = {
         };
         Relationships: [];
       };
+      promotion_rules: {
+        Row: {
+          id: number;
+          city_id: number | null;
+          type: string;
+          title: string;
+          category_slug: string;
+          brand: string | null;
+          starts_at: string | null;
+          ends_at: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          city_id?: number | null;
+          type: string;
+          title: string;
+          category_slug?: string;
+          brand?: string | null;
+          starts_at?: string | null;
+          ends_at?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: number;
+          city_id?: number | null;
+          type?: string;
+          title?: string;
+          category_slug?: string;
+          brand?: string | null;
+          starts_at?: string | null;
+          ends_at?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       customer_profiles: {
         Row: {
           tg_user_id: number;
@@ -265,6 +307,7 @@ export type Database = {
           notify_targets: Json;
           coupon_id: string | null;
           total_before_discount: number | null;
+          promotion_discount_amount: number;
           discount_amount: number;
           total_after_discount: number | null;
           edited_at: string | null;
@@ -286,6 +329,7 @@ export type Database = {
           notify_targets?: Json;
           coupon_id?: string | null;
           total_before_discount?: number | null;
+          promotion_discount_amount?: number;
           discount_amount?: number;
           total_after_discount?: number | null;
           edited_at?: string | null;
@@ -307,6 +351,7 @@ export type Database = {
           notify_targets?: Json;
           coupon_id?: string | null;
           total_before_discount?: number | null;
+          promotion_discount_amount?: number;
           discount_amount?: number;
           total_after_discount?: number | null;
           edited_at?: string | null;
