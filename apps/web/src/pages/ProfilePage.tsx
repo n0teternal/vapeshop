@@ -17,25 +17,30 @@ export function ProfilePage() {
   const { webApp, isTelegram } = useTelegram();
 
   const [admin, setAdmin] = useState<AdminMe | null>(null);
+  const [showCredit, setShowCredit] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    setShowCredit(false);
 
     apiGet<AdminMe>("/api/admin/me")
       .then((me) => {
         if (cancelled) return;
         setAdmin(me);
+        setShowCredit(false);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
         setAdmin(null);
 
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          setShowCredit(true);
           return;
         }
 
+        setShowCredit(false);
         setError(e instanceof Error ? e.message : "Не удалось проверить доступ");
       });
 
@@ -144,6 +149,12 @@ export function ProfilePage() {
             ) : null}
           </CardContent>
         </Card>
+      ) : null}
+
+      {showCredit ? (
+        <div className="pb-3 pt-2 text-center text-[11px] font-medium text-muted-foreground/60">
+          сделано @nottt_eternal
+        </div>
       ) : null}
     </div>
   );

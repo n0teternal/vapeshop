@@ -784,9 +784,8 @@ function PromoProductsBanner({
           <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary text-primary-foreground">
             <BadgePercent className="h-4 w-4" aria-hidden="true" />
           </span>
-          <div>
-            <div className="text-sm font-bold leading-5 text-foreground">Акции</div>
-            <div className="text-xs text-muted-foreground">Промо-цены на товары города</div>
+          <div className="text-3xl font-black uppercase leading-none tracking-wide text-primary">
+            АКЦИИ
           </div>
         </div>
       </div>
@@ -1332,8 +1331,8 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
             <BadgePercent className="h-4 w-4" aria-hidden="true" />
           </span>
           <div className="min-w-0">
-            <div className="text-base font-bold leading-tight text-foreground">
-              {"\u0410\u043a\u0446\u0438\u0438"}
+            <div className="text-2xl font-black uppercase leading-none tracking-wide text-primary">
+              АКЦИИ
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
               {"\u0412\u0441\u0435 \u0442\u043e\u0432\u0430\u0440\u044b \u0441\u043e \u0441\u043d\u0438\u0436\u0435\u043d\u043d\u043e\u0439 \u0446\u0435\u043d\u043e\u0439"}
