@@ -411,6 +411,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           .from("inventory")
           .select("products!inner(title,category_slug,is_active)")
           .eq("city_id", city.id)
+          .eq("in_stock", true)
           .eq("products.is_active", true);
 
         if (categorySlug) {
