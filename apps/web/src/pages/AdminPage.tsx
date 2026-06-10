@@ -179,7 +179,7 @@ function buildPublicFileUrl(baseUrl: string, name: string): string {
 
 function Card({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-border/70 bg-card/90 p-4 shadow-sm">
+    <div className="min-w-0 rounded-2xl border border-border/70 bg-card/90 p-4 shadow-sm">
       {children}
     </div>
   );
@@ -1810,30 +1810,32 @@ function AdminOrdersView() {
 
   return (
     <Card>
-      <div className="flex items-center justify-between">
-        <div className="text-lg font-semibold">Заказы</div>
-        <div className="flex items-center gap-2">
-          <select
-            className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm font-semibold"
-            value={status}
-            disabled={loading}
-            onChange={(e) => {
-              const v = e.target.value;
-              setStatus(v === "done" ? "done" : v === "processing" ? "processing" : "new");
-            }}
-          >
-            <option value="new">new</option>
-            <option value="processing">processing</option>
-            <option value="done">done</option>
-          </select>
-          <button
-            type="button"
-            className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
-            onClick={() => void load(status)}
-            disabled={loading}
-          >
-            Обновить
-          </button>
+      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+        <div className="flex min-w-max items-center justify-between gap-4">
+          <div className="text-lg font-semibold">Заказы</div>
+          <div className="flex items-center gap-2">
+            <select
+              className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm font-semibold"
+              value={status}
+              disabled={loading}
+              onChange={(e) => {
+                const v = e.target.value;
+                setStatus(v === "done" ? "done" : v === "processing" ? "processing" : "new");
+              }}
+            >
+              <option value="new">new</option>
+              <option value="processing">processing</option>
+              <option value="done">done</option>
+            </select>
+            <button
+              type="button"
+              className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+              onClick={() => void load(status)}
+              disabled={loading}
+            >
+              Обновить
+            </button>
+          </div>
         </div>
       </div>
       {error ? (
@@ -1850,17 +1852,17 @@ function AdminOrdersView() {
       ) : orders.length === 0 ? (
         <div className="mt-3 text-sm text-muted-foreground">Пусто</div>
       ) : (
-        <div className="mt-3 grid gap-3">
+        <div className="mt-3 grid min-w-0 gap-3">
           {orders.map((o) => (
             <Card key={o.id}>
               <div className="flex items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0">
                   <div className="text-sm font-semibold">
                     {formatDateTime(o.created_at)} •{" "}
                     {o.city_slug ? o.city_slug.toUpperCase() : "—"} •{" "}
                     <span className="text-muted-foreground">{o.status}</span>
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
+                  <div className="mt-1 break-words text-xs text-muted-foreground">
                     Юзер:{" "}
                     {o.tg_username ? `@${o.tg_username} (${o.tg_user_id})` : o.tg_user_id}
                     {" • "}
@@ -1887,8 +1889,8 @@ function AdminOrdersView() {
                 <div className="text-xs font-semibold text-muted-foreground/80">Позиции</div>
                 <div className="mt-2 space-y-1 text-sm">
                   {o.items.map((it, idx) => (
-                    <div key={`${o.id}:${idx}`} className="flex justify-between gap-3">
-                      <div className="truncate">
+                    <div key={`${o.id}:${idx}`} className="flex min-w-0 justify-between gap-3">
+                      <div className="min-w-0 truncate">
                         {it.title ?? it.product_id ?? "unknown"} ×{it.qty}
                       </div>
                       <div className="shrink-0 font-semibold text-foreground/80">
