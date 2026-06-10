@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, apiUpload } from "../api/client";
 import { buildApiUrl } from "../config";
+import { fetchCatalog, type CatalogItem, type CitySlug } from "../supabase/catalog";
+import {
+  CATALOG_FILTER_CATEGORIES_UI,
+  normalizeCatalogCategoryId,
+  normalizeManufacturerId,
+  resolveCatalogManufacturerLabel,
+} from "./CatalogPage";
 
 type AdminMe = {
   tgUserId: number;
@@ -121,21 +128,14 @@ type AdminPromotionBrandOption = {
   count: number;
 };
 
-type AdminPromotionBrandsResponse = {
-  items: AdminPromotionBrandOption[];
-};
-
 const PRODUCTS_PAGE_SIZE = 120;
 const ORDERS_PAGE_SIZE = 50;
 const PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE =
   "buy_2_get_3_cheapest_free" as const;
-const PROMOTION_CATEGORY_OPTIONS = [
-  { value: "disposable", label: "Одноразки" },
-  { value: "liquid", label: "Жидкости" },
-  { value: "pod", label: "Pod" },
-  { value: "cartridge", label: "Картриджи" },
-  { value: "tobacco", label: "Табак" },
-] as const;
+const PROMOTION_CATEGORY_OPTIONS = CATALOG_FILTER_CATEGORIES_UI.map((category) => ({
+  value: category.id,
+  label: category.label,
+}));
 
 type OrderItem = {
   product_id: string | null;
@@ -1197,6 +1197,50 @@ function formatPromotionBrandScope(brand: string | null): string {
   return brand.includes(",") ? `Бренды: ${brand}` : `Бренд: ${brand}`;
 }
 
+function parseCatalogCitySlug(value: string): CitySlug | null {
+  return value === "vvo" || value === "blg" ? value : null;
+}
+
+function getCatalogItemCategoryId(item: CatalogItem): string {
+  return typeof item.categorySlug === "string" && item.categorySlug.trim().length > 0
+    ? normalizeCatalogCategoryId(item.categorySlug) ?? item.categorySlug.trim().toLowerCase()
+    : "other";
+}
+
+function buildPromotionBrandOptionsFromCatalog(params: {
+  items: CatalogItem[];
+  citySlug: CitySlug;
+  categorySlug: string;
+}): AdminPromotionBrandOption[] {
+  const selectedCategoryId =
+    normalizeCatalogCategoryId(params.categorySlug) ?? params.categorySlug.trim().toLowerCase();
+  const stats = new Map<string, { label: string; count: number }>();
+
+  for (const item of params.items) {
+    if (!item.inStock) continue;
+
+    const categoryId = getCatalogItemCategoryId(item);
+    if (categoryId !== selectedCategoryId) continue;
+
+    const manufacturerLabel = resolveCatalogManufacturerLabel({
+      title: item.title,
+      categoryId,
+      citySlug: params.citySlug,
+    });
+    const manufacturerId = normalizeManufacturerId(manufacturerLabel);
+    const prev = stats.get(manufacturerId);
+    if (prev) {
+      prev.count += 1;
+    } else {
+      stats.set(manufacturerId, { label: manufacturerLabel, count: 1 });
+    }
+  }
+
+  return Array.from(stats.values())
+    .map((value) => ({ brand: value.label, count: value.count }))
+    .sort((a, b) => b.count - a.count || a.brand.localeCompare(b.brand, "ru"));
+}
+
 function AdminPromotionsManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [promotions, setPromotions] = useState<AdminPromotionRule[]>([]);
@@ -1242,25 +1286,26 @@ function AdminPromotionsManager() {
   }, [load]);
 
   useEffect(() => {
-    if (!modalOpen || !draft.citySlug) {
+    const citySlug = parseCatalogCitySlug(draft.citySlug);
+    if (!modalOpen || !citySlug) {
       setBrandOptions([]);
       setBrandsLoading(false);
       return;
     }
 
     let cancelled = false;
-    const params = new URLSearchParams({
-      citySlug: draft.citySlug,
-      categorySlug: draft.categorySlug,
-    });
-
     setBrandsLoading(true);
-    apiGet<AdminPromotionBrandsResponse>(`/api/admin/promotion-brands?${params.toString()}`)
+    fetchCatalog(citySlug)
       .then((data) => {
         if (cancelled) return;
-        setBrandOptions(data.items);
+        const items = buildPromotionBrandOptionsFromCatalog({
+          items: data.items,
+          citySlug,
+          categorySlug: draft.categorySlug,
+        });
+        setBrandOptions(items);
         setDraft((prev) => {
-          const availableBrands = new Set(data.items.map((item) => item.brand));
+          const availableBrands = new Set(items.map((item) => item.brand));
           const brands = prev.brands.filter((brand) => availableBrands.has(brand));
           if (brands.length === prev.brands.length) return prev;
           return { ...prev, brands };

@@ -95,7 +95,7 @@ function formatCategoryLabel(categorySlug: string): string {
     .join(" ");
 }
 
-type CatalogFilterCategoryId = "liquid" | "disposable" | "pod" | "cartridge" | "tobacco";
+export type CatalogFilterCategoryId = "liquid" | "disposable" | "pod" | "cartridge" | "tobacco";
 
 const CATALOG_FILTER_CATEGORIES: Array<{ id: CatalogFilterCategoryId; label: string }> = [
   { id: "liquid", label: "Жидкости" },
@@ -105,7 +105,7 @@ const CATALOG_FILTER_CATEGORIES: Array<{ id: CatalogFilterCategoryId; label: str
   { id: "cartridge", label: "Картриджи" },
 ];
 
-const CATALOG_FILTER_CATEGORIES_UI: Array<{ id: CatalogFilterCategoryId; label: string }> =
+export const CATALOG_FILTER_CATEGORIES_UI: Array<{ id: CatalogFilterCategoryId; label: string }> =
   CATALOG_FILTER_CATEGORIES.map((category) =>
     category.id === "tobacco"
       ? { ...category, label: TOBACCO_LABEL }
@@ -114,7 +114,7 @@ const CATALOG_FILTER_CATEGORIES_UI: Array<{ id: CatalogFilterCategoryId; label: 
         : category,
   );
 
-function normalizeCatalogCategoryId(value: string): CatalogFilterCategoryId | null {
+export function normalizeCatalogCategoryId(value: string): CatalogFilterCategoryId | null {
   const normalized = value.trim().toLowerCase();
 
   if (
@@ -612,7 +612,7 @@ function normalizeManufacturerLabel(value: string): string {
   return MANUFACTURER_LABEL_ALIASES.get(normalized) ?? value;
 }
 
-function normalizeManufacturerId(value: string): string {
+export function normalizeManufacturerId(value: string): string {
   return normalizeSearchText(normalizeManufacturerLabel(value)).replaceAll(" ", "-");
 }
 
@@ -646,7 +646,7 @@ function extractManufacturerLabel(title: string): string {
   return "Other";
 }
 
-function resolveCatalogManufacturerLabel(params: {
+export function resolveCatalogManufacturerLabel(params: {
   title: string;
   categoryId: string;
   citySlug: string | null;
