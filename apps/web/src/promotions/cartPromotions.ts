@@ -36,15 +36,44 @@ type Unit = {
 const MANUFACTURER_STOP_WORDS = new Set([
   "pod",
   "pods",
+  "salt",
+  "vape",
   "pro",
   "max",
   "mini",
+  "liquid",
+  "cartridge",
   "disposable",
   "disposables",
   "одноразка",
+  "одноразовый",
+  "одноразовая",
   "одноразки",
+  "вейп",
   "вкус",
 ]);
+
+const MANUFACTURER_SYNONYM_GROUPS = [
+  ["CATSWILL", "catswill"],
+  ["D.L.T.A.", "dlta", "d l t a"],
+  ["DUAL EXTREME", "dual", "dual extreme"],
+  ["Elf Bar", "elf", "elf bar"],
+  ["FEDRS", "fedrs"],
+  ["Fummo", "fummo"],
+  ["Geekvape", "aegis", "geek", "geek vape", "geekvape"],
+  ["HQD", "hqd"],
+  ["Lost Mary", "lost mary", "lostmary"],
+  ["ODENS", "odens"],
+  ["OGGO", "oggo"],
+  ["Podonki", "podonki"],
+  ["Puffmi", "puffmi"],
+  ["RnM", "rnm"],
+  ["SMOANT", "pasito", "smoant"],
+  ["Vozol", "vozol"],
+  ["WAKA", "waka"],
+  ["XROS", "xros"],
+  ["ГРЕХ", "greh"],
+] as const;
 
 export function normalizePromotionCategorySlug(value: string | null | undefined): string {
   const normalized = (value ?? "").trim().toLowerCase();
@@ -74,6 +103,24 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
+const MANUFACTURER_LABEL_ALIASES = new Map<string, string>();
+for (const group of MANUFACTURER_SYNONYM_GROUPS) {
+  const [canonicalLabel, ...terms] = group;
+  for (const term of [canonicalLabel, ...terms]) {
+    const normalized = normalizeSearchText(term);
+    if (normalized) MANUFACTURER_LABEL_ALIASES.set(normalized, canonicalLabel);
+  }
+}
+
+function normalizeManufacturerLabel(value: string): string {
+  const normalized = normalizeSearchText(value);
+  return MANUFACTURER_LABEL_ALIASES.get(normalized) ?? value;
+}
+
+function normalizePromotionBrandKey(value: string): string {
+  return normalizeSearchText(normalizeManufacturerLabel(value)).replaceAll(" ", "-");
+}
+
 function extractManufacturerLabel(title: string): string {
   const tokens = title
     .replaceAll("_", " ")
@@ -82,12 +129,23 @@ function extractManufacturerLabel(title: string): string {
     .map((token) => token.replaceAll(/[^\p{L}\p{N}-]+/gu, ""))
     .filter((token) => token.length > 0);
 
-  for (const token of tokens) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? "";
     const normalized = normalizeSearchText(token);
     if (normalized.length < 2) continue;
     if (/^\d/.test(normalized)) continue;
     if (MANUFACTURER_STOP_WORDS.has(normalized)) continue;
-    return token;
+
+    const nextNormalized = normalizeSearchText(tokens[index + 1] ?? "");
+    const compoundManufacturer =
+      nextNormalized.length > 0
+        ? MANUFACTURER_LABEL_ALIASES.get(`${normalized} ${nextNormalized}`)
+        : undefined;
+    if (compoundManufacturer) {
+      return compoundManufacturer;
+    }
+
+    return normalizeManufacturerLabel(token);
   }
 
   return "";
@@ -97,7 +155,7 @@ function parsePromotionBrandFilters(brand: string | null): string[] {
   if (!brand) return [];
   return brand
     .split(/[,;\n]+/g)
-    .map(normalizeSearchText)
+    .map(normalizePromotionBrandKey)
     .filter((value) => value.length > 0);
 }
 
@@ -105,12 +163,12 @@ function brandMatches(title: string, brand: string | null): boolean {
   const normalizedBrands = parsePromotionBrandFilters(brand);
   if (normalizedBrands.length === 0) return true;
 
-  const manufacturer = normalizeSearchText(extractManufacturerLabel(title));
+  const manufacturer = normalizePromotionBrandKey(extractManufacturerLabel(title));
   const normalizedTitle = normalizeSearchText(title);
   return normalizedBrands.some(
     (normalizedBrand) =>
       (manufacturer && manufacturer === normalizedBrand) ||
-      normalizedTitle.startsWith(`${normalizedBrand} `),
+      normalizedTitle.startsWith(`${normalizedBrand.replaceAll("-", " ")} `),
   );
 }
 

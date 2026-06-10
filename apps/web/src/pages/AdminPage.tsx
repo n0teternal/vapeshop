@@ -116,8 +116,13 @@ type AdminPromotionsResponse = {
   items: AdminPromotionRule[];
 };
 
+type AdminPromotionBrandOption = {
+  brand: string;
+  count: number;
+};
+
 type AdminPromotionBrandsResponse = {
-  items: string[];
+  items: AdminPromotionBrandOption[];
 };
 
 const PRODUCTS_PAGE_SIZE = 120;
@@ -1196,7 +1201,7 @@ function AdminPromotionsManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [promotions, setPromotions] = useState<AdminPromotionRule[]>([]);
   const [cities, setCities] = useState<AdminCity[]>([]);
-  const [brandOptions, setBrandOptions] = useState<string[]>([]);
+  const [brandOptions, setBrandOptions] = useState<AdminPromotionBrandOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [brandsLoading, setBrandsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1255,7 +1260,8 @@ function AdminPromotionsManager() {
         if (cancelled) return;
         setBrandOptions(data.items);
         setDraft((prev) => {
-          const brands = prev.brands.filter((brand) => data.items.includes(brand));
+          const availableBrands = new Set(data.items.map((item) => item.brand));
+          const brands = prev.brands.filter((brand) => availableBrands.has(brand));
           if (brands.length === prev.brands.length) return prev;
           return { ...prev, brands };
         });
@@ -1313,6 +1319,7 @@ function AdminPromotionsManager() {
   }
 
   const latestPromotions = promotions.slice(0, 3);
+  const brandTotalCount = brandOptions.reduce((sum, item) => sum + item.count, 0);
 
   return (
     <Card>
@@ -1483,13 +1490,20 @@ function AdminPromotionsManager() {
                       disabled={saving || brandsLoading}
                       onChange={() => setDraft((prev) => ({ ...prev, brands: [] }))}
                     />
-                    <span>{brandsLoading ? "Загружаем..." : "Все бренды"}</span>
+                    <span className="min-w-0 flex-1">
+                      {brandsLoading ? "Загружаем..." : "Все бренды"}
+                    </span>
+                    {!brandsLoading && brandTotalCount > 0 ? (
+                      <span className="shrink-0 text-xs font-semibold text-muted-foreground">
+                        {brandTotalCount}
+                      </span>
+                    ) : null}
                   </label>
-                  {brandOptions.map((brand) => {
-                    const checked = draft.brands.includes(brand);
+                  {brandOptions.map((option) => {
+                    const checked = draft.brands.includes(option.brand);
                     return (
                       <label
-                        key={brand}
+                        key={option.brand}
                         className="flex min-h-9 items-center gap-2 rounded-lg px-2 text-sm hover:bg-muted/45"
                       >
                         <input
@@ -1501,12 +1515,17 @@ function AdminPromotionsManager() {
                             setDraft((prev) => ({
                               ...prev,
                               brands: e.target.checked
-                                ? [...prev.brands, brand]
-                                : prev.brands.filter((selectedBrand) => selectedBrand !== brand),
+                                ? [...prev.brands, option.brand]
+                                : prev.brands.filter(
+                                    (selectedBrand) => selectedBrand !== option.brand,
+                                  ),
                             }))
                           }
                         />
-                        <span className="min-w-0 truncate">{brand}</span>
+                        <span className="min-w-0 flex-1 truncate">{option.brand}</span>
+                        <span className="shrink-0 text-xs font-semibold text-muted-foreground">
+                          {option.count}
+                        </span>
                       </label>
                     );
                   })}

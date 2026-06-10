@@ -13,6 +13,7 @@ import {
   extractPromotionBrandLabel,
   getPromotionTypeAdminTitle,
   getPromotionTypePublicTitle,
+  normalizePromotionBrandKey,
   normalizePromotionCategorySlug,
   parsePromotionRuleType,
   PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
@@ -302,6 +303,15 @@ function getJoinedProduct(row: {
   return typeof products === "object" && products !== null ? products : null;
 }
 
+function getPromotionBrandLabelScore(value: string): number {
+  let score = 0;
+  for (const char of value) {
+    if (/\p{Lu}/u.test(char)) score += 1;
+  }
+  if (/^[\p{Lu}\d-]+$/u.test(value)) score += 3;
+  return score;
+}
+
 function errorToResponse(e: unknown): { statusCode: number; body: ApiFailure } {
   if (
     typeof e === "object" &&
@@ -412,17 +422,32 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           throw new HttpError(500, "DB", `Failed to load promotion brands: ${error.message}`);
         }
 
-        const brands = new Set<string>();
+        const brands = new Map<string, { brand: string; count: number; score: number }>();
         for (const row of (data ?? []) as Array<{ products?: unknown }>) {
           const product = getJoinedProduct(row);
           const title = typeof product?.title === "string" ? product.title : "";
           const brand = extractPromotionBrandLabel(title).trim();
-          if (brand) brands.add(brand);
+          const key = normalizePromotionBrandKey(brand);
+          if (!key) continue;
+
+          const score = getPromotionBrandLabelScore(brand);
+          const existing = brands.get(key);
+          if (existing) {
+            existing.count += 1;
+            if (score > existing.score) {
+              existing.brand = brand;
+              existing.score = score;
+            }
+          } else {
+            brands.set(key, { brand, count: 1, score });
+          }
         }
 
         return reply.code(200).send(
           ok({
-            items: [...brands].sort((a, b) => a.localeCompare(b, "ru")),
+            items: [...brands.values()]
+              .map(({ brand, count }) => ({ brand, count }))
+              .sort((a, b) => b.count - a.count || a.brand.localeCompare(b.brand, "ru")),
           }),
         );
       } catch (e) {
