@@ -53,18 +53,12 @@ function createMockInitDataUnsafe(): WebAppInitData {
 }
 
 function createMockWebApp(): TelegramWebAppLike {
-  const colorScheme =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-
   return {
     initData: "",
     initDataUnsafe: createMockInitDataUnsafe(),
     platform: "unknown",
     version: "dev",
-    colorScheme,
+    colorScheme: "dark",
     onEvent: () => undefined,
     offEvent: () => undefined,
     setHeaderColor: () => undefined,
@@ -77,11 +71,12 @@ function createMockWebApp(): TelegramWebAppLike {
   };
 }
 
-function applyThemeToDocument(colorScheme: "light" | "dark"): void {
+function applyThemeToDocument(): void {
   if (typeof document === "undefined") return;
 
-  document.documentElement.dataset.theme = colorScheme;
-  document.documentElement.style.colorScheme = colorScheme;
+  const fixedScheme = "dark";
+  document.documentElement.dataset.theme = fixedScheme;
+  document.documentElement.style.colorScheme = fixedScheme;
 }
 
 function clearDocumentTheme(): void {
@@ -119,12 +114,11 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
     }
 
     const syncTheme = () => {
-      const nextScheme = webApp.colorScheme === "dark" ? "dark" : "light";
-      applyThemeToDocument(nextScheme);
+      applyThemeToDocument();
 
       try {
-        webApp.setHeaderColor(nextScheme === "dark" ? "secondary_bg_color" : "bg_color");
-        webApp.setBackgroundColor("bg_color");
+        webApp.setHeaderColor("secondary_bg_color");
+        webApp.setBackgroundColor("#111827");
       } catch {
         // ignore
       }

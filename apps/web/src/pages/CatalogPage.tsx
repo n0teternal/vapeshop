@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BadgePercent } from "lucide-react";
+import { BadgePercent, Check } from "lucide-react";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
@@ -1055,7 +1055,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
       parts.push(formatCategoryLabel(selectedCategoryId));
     }
     if (selectedManufacturerIds.length > 0) {
-      parts.push(`Производителей: ${selectedManufacturerIds.length}`);
+      parts.push(`Брендов: ${selectedManufacturerIds.length}`);
     }
     return parts.join(" • ");
   }, [selectedCategoryId, selectedManufacturerIds.length]);
@@ -1710,7 +1710,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
             onClick={() => setFiltersOpen(false)}
           />
 
-          <div className="relative w-full max-w-md rounded-2xl border border-border/70 bg-card/90 p-4 shadow-xl">
+          <div className="relative max-h-[calc(100vh-5rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border/70 bg-card/90 p-4 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-base font-semibold text-foreground">Фильтры каталога</div>
@@ -1741,72 +1741,75 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
               >
                 <span>Весь магазин</span>
                 {selectedCategoryId === null ? (
-                  <span aria-hidden="true" className="text-base leading-none">
-                    ✓
-                  </span>
+                  <Check aria-hidden="true" className="h-5 w-5" />
                 ) : null}
               </button>
 
-              {categories.map((category, index) => {
+              {categories.map((category) => {
                 const active = selectedCategoryId === category.id;
                 const disabled = category.count === 0;
 
                 return (
-                  <button
-                    key={category.id}
-                    type="button"
-                    disabled={disabled}
-                    className={[
-                      "flex w-full items-center justify-between px-4 py-3.5 text-left text-sm font-medium transition-colors",
-                      index === 0 ? "border-t border-border/70" : "border-t border-border/70",
-                      disabled
-                        ? "cursor-not-allowed text-muted-foreground/45"
-                        : active
-                          ? "bg-primary/14 text-[#8fbeff]"
-                          : "text-foreground/90 hover:bg-muted/45",
-                    ].join(" ")}
-                    onClick={() => toggleCategory(category.id as CatalogFilterCategoryId)}
-                  >
-                    <span>{category.label}</span>
+                  <div key={category.id} className="border-t border-border/70">
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      className={[
+                        "flex w-full items-center justify-between px-4 py-3.5 text-left text-sm font-medium transition-colors",
+                        disabled
+                          ? "cursor-not-allowed text-muted-foreground/45"
+                          : active
+                            ? "bg-primary/14 text-[#8fbeff]"
+                            : "text-foreground/90 hover:bg-muted/45",
+                      ].join(" ")}
+                      onClick={() => toggleCategory(category.id as CatalogFilterCategoryId)}
+                    >
+                      <span>{category.label}</span>
+                      {active ? <Check aria-hidden="true" className="h-5 w-5" /> : null}
+                    </button>
+
                     {active ? (
-                      <span aria-hidden="true" className="text-base leading-none">
-                        ✓
-                      </span>
+                      manufacturers.length === 0 ? (
+                        <div className="border-t border-border/70 bg-background/60 px-5 py-3 text-sm text-muted-foreground">
+                          Для этой категории бренды пока не определились.
+                        </div>
+                      ) : (
+                        <div className="max-h-72 overflow-y-auto border-t border-primary/25 bg-primary/[0.07]">
+                          {manufacturers.map((manufacturer, manufacturerIndex) => {
+                            const manufacturerActive = selectedManufacturersSet.has(
+                              manufacturer.id,
+                            );
+
+                            return (
+                              <button
+                                key={manufacturer.id}
+                                type="button"
+                                aria-pressed={manufacturerActive}
+                                className={[
+                                  "flex w-full items-center justify-between px-5 py-3 text-left text-sm font-semibold transition-colors",
+                                  manufacturerIndex === 0 ? "" : "border-t border-primary/20",
+                                  manufacturerActive
+                                    ? "bg-primary/[0.12] text-[#a9d5ff]"
+                                    : "text-[#d2e8ff] hover:bg-primary/[0.09]",
+                                ].join(" ")}
+                                onClick={() => toggleManufacturer(manufacturer.id)}
+                              >
+                                <span className="min-w-0 flex-1 truncate">
+                                  {manufacturer.label}
+                                </span>
+                                {manufacturerActive ? (
+                                  <Check aria-hidden="true" className="ml-3 h-4 w-4 shrink-0" />
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )
                     ) : null}
-                  </button>
+                  </div>
                 );
               })}
             </div>
-
-            <div className="mt-5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Производитель
-            </div>
-            {!selectedCategoryId ? null : manufacturers.length === 0 ? (
-              <div className="mt-2 text-sm text-muted-foreground">
-                Для этой категории бренды пока не определились.
-              </div>
-            ) : (
-              <div className="mt-2 flex max-h-48 flex-wrap gap-2 overflow-y-auto pr-1">
-                {manufacturers.map((manufacturer) => {
-                  const active = selectedManufacturersSet.has(manufacturer.id);
-                  return (
-                    <button
-                      key={manufacturer.id}
-                      type="button"
-                      className={[
-                        "rounded-xl border px-3 py-2 text-xs font-semibold transition-colors",
-                        active
-                          ? "border-primary bg-primary text-white"
-                          : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
-                      ].join(" ")}
-                      onClick={() => toggleManufacturer(manufacturer.id)}
-                    >
-                      {manufacturer.label} ({manufacturer.count})
-                    </button>
-                  );
-                })}
-              </div>
-            )}
 
             <div className="mt-4 flex items-center justify-between gap-3">
               <button
