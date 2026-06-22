@@ -852,6 +852,58 @@ type CategoryStat = {
   count: number;
 };
 
+function MainCategoryRoll({
+  categories,
+  selectedCategoryId,
+  onSelectCategory,
+}: {
+  categories: CategoryStat[];
+  selectedCategoryId: CatalogFilterCategoryId | null;
+  onSelectCategory: (categoryId: CatalogFilterCategoryId | null) => void;
+}) {
+  const visibleCategories = categories.filter((category) => category.count > 0);
+  if (visibleCategories.length === 0) return null;
+
+  return (
+    <div className="-mx-4 overflow-x-auto px-4 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex w-max min-w-full gap-2" aria-label="Основные разделы">
+        <button
+          type="button"
+          className={[
+            "h-10 shrink-0 rounded-full border px-4 text-sm font-semibold transition-colors",
+            selectedCategoryId === null
+              ? "border-primary bg-primary text-primary-foreground shadow-glow"
+              : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
+          ].join(" ")}
+          onClick={() => onSelectCategory(null)}
+        >
+          Все
+        </button>
+
+        {visibleCategories.map((category) => {
+          const active = selectedCategoryId === category.id;
+
+          return (
+            <button
+              key={category.id}
+              type="button"
+              className={[
+                "h-10 shrink-0 rounded-full border px-4 text-sm font-semibold transition-colors",
+                active
+                  ? "border-primary bg-primary text-primary-foreground shadow-glow"
+                  : "border-border/70 bg-background text-foreground/85 hover:bg-muted/55",
+              ].join(" ")}
+              onClick={() => onSelectCategory(category.id as CatalogFilterCategoryId)}
+            >
+              {category.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 type CatalogRow = {
   item: CatalogItem;
   categoryId: string;
@@ -1427,6 +1479,12 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
             />
           </label>
         ) : null}
+
+        <MainCategoryRoll
+          categories={categories}
+          selectedCategoryId={selectedCategoryId}
+          onSelectCategory={toggleCategory}
+        />
       </div>
 
       {mode === "promos" ? (
