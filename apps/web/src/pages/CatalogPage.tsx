@@ -865,7 +865,7 @@ function MainCategoryRoll({
   if (visibleCategories.length === 0) return null;
 
   return (
-    <div className="-mx-4 overflow-x-auto px-4 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="w-full overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <div className="flex w-max min-w-full gap-2" aria-label="Основные разделы">
         <button
           type="button"

@@ -365,6 +365,14 @@ export function CartPage() {
       ? maxPointsToSpend
       : 0;
   const totalToPay = Math.max(0, totalAfterPromotionDiscount - pointsToSpend);
+  const checkoutHasDiscount = totalToPay < total;
+  const checkoutButtonLabel = submitting
+    ? orderEditSession
+      ? "Обновляем..."
+      : "Отправляем..."
+    : orderEditSession
+      ? "Обновить заказ"
+      : "К оформлению";
 
   function openDeliveryDatePicker(): void {
     const input = deliveryDateInputRef.current;
@@ -1036,17 +1044,21 @@ export function CartPage() {
 
           <Button
             type="button"
-            className="w-full"
+            className="grid h-14 w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-0 rounded-xl px-3 text-base font-bold"
             disabled={!canSubmit}
             onClick={() => void submitOrder()}
           >
-            {submitting
-              ? orderEditSession
-                ? "Обновляем заказ..."
-                : "Отправляем..."
-              : orderEditSession
-                ? "Обновить заказ"
-                : "Оформить"}
+            <span className="col-start-2 justify-self-center">{checkoutButtonLabel}</span>
+            <span className="col-start-3 flex min-w-0 items-baseline justify-self-end gap-1.5 pl-2">
+              <span className="shrink-0 text-base font-black leading-none">
+                {formatPriceRub(totalToPay)}
+              </span>
+              {checkoutHasDiscount ? (
+                <span className="shrink-0 text-xs font-semibold leading-none text-primary-foreground/55 line-through decoration-primary-foreground/60">
+                  {formatPriceRub(total)}
+                </span>
+              ) : null}
+            </span>
           </Button>
 
           {orderEditSession && editSessionExpired ? (
