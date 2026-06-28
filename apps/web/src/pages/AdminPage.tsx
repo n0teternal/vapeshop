@@ -101,7 +101,9 @@ type AdminProductsResponse = {
 
 type OrderStatus = "new" | "processing" | "done";
 
-type PromotionRuleType = "buy_2_get_3_cheapest_free";
+type PromotionRuleType =
+  | "buy_2_get_3_cheapest_free"
+  | "buy_pod_get_liquid_cheapest_free";
 
 type AdminPromotionRule = {
   id: number;
@@ -128,10 +130,21 @@ type AdminPromotionBrandOption = {
   count: number;
 };
 
+type AdminPromotionDraft = {
+  type: PromotionRuleType;
+  citySlug: string;
+  categorySlug: string;
+  brands: string[];
+  startsAt: string;
+  endsAt: string;
+};
+
 const PRODUCTS_PAGE_SIZE = 120;
 const ORDERS_PAGE_SIZE = 50;
 const PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE =
   "buy_2_get_3_cheapest_free" as const;
+const PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE =
+  "buy_pod_get_liquid_cheapest_free" as const;
 const PROMOTION_CATEGORY_OPTIONS = CATALOG_FILTER_CATEGORIES_UI.map((category) => ({
   value: category.id,
   label: category.label,
@@ -1251,7 +1264,7 @@ function AdminPromotionsManager() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<AdminPromotionDraft>({
     type: PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
     citySlug: "blg",
     categorySlug: "disposable",
@@ -1365,6 +1378,8 @@ function AdminPromotionsManager() {
 
   const latestPromotions = promotions.slice(0, 3);
   const brandTotalCount = brandOptions.reduce((sum, item) => sum + item.count, 0);
+  const isPodLiquidDraft =
+    draft.type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE;
 
   return (
     <Card>
@@ -1475,11 +1490,21 @@ function AdminPromotionsManager() {
                     setDraft((prev) => ({
                       ...prev,
                       type: e.target.value as PromotionRuleType,
+                      categorySlug:
+                        e.target.value === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE
+                          ? "pod"
+                          : prev.categorySlug === "pod"
+                            ? "disposable"
+                            : prev.categorySlug,
+                      brands: [],
                     }))
                   }
                 >
                   <option value={PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE}>
                     1+1=3
+                  </option>
+                  <option value={PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE}>
+                    Pod + жижа
                   </option>
                 </select>
               </label>
@@ -1509,7 +1534,7 @@ function AdminPromotionsManager() {
                 <select
                   className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
                   value={draft.categorySlug}
-                  disabled={saving}
+                  disabled={saving || isPodLiquidDraft}
                   onChange={(e) =>
                     setDraft((prev) => ({ ...prev, categorySlug: e.target.value, brands: [] }))
                   }

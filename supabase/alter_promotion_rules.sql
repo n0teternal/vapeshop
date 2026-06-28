@@ -13,7 +13,8 @@ create table if not exists public.promotion_rules (
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check (type in ('buy_2_get_3_cheapest_free')),
+  constraint promotion_rules_type_check
+    check (type in ('buy_2_get_3_cheapest_free', 'buy_pod_get_liquid_cheapest_free')),
   check (category_slug <> ''),
   check (ends_at is null or starts_at is null or ends_at >= starts_at)
 );
@@ -23,6 +24,13 @@ alter table public.orders
 
 alter table public.promotion_rules
   add column if not exists city_id bigint null references public.cities (id) on delete cascade;
+
+alter table public.promotion_rules
+  drop constraint if exists promotion_rules_type_check;
+
+alter table public.promotion_rules
+  add constraint promotion_rules_type_check
+  check (type in ('buy_2_get_3_cheapest_free', 'buy_pod_get_liquid_cheapest_free'));
 
 drop index if exists public.promotion_rules_active_window_idx;
 

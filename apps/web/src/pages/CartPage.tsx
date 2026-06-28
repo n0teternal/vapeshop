@@ -52,6 +52,7 @@ type ReferralOverviewBalance = {
 const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
 const DEFAULT_POINTS_MAX_SPEND_PERCENT = 50;
 const BLG_JUNE_2026_DELIVERY_TIME_SLOTS = [
+  "11:00-13:00",
   "13:00-15:00",
   "15:00-17:00",
   "17:00-19:00",
@@ -82,7 +83,8 @@ const BLG_ORDER_CUTOFF_BY_TIME_SLOT: Record<
   DeliveryTimeSlot,
   { dayOffset: number; minutesOfDay: number }
 > = {
-  "13:00-15:00": { dayOffset: 0, minutesOfDay: 0 },
+  "11:00-13:00": { dayOffset: -1, minutesOfDay: 0 },
+  "13:00-15:00": { dayOffset: 0, minutesOfDay: 13 * 60 },
   "15:00-17:00": { dayOffset: 0, minutesOfDay: 15 * 60 },
   "17:00-19:00": { dayOffset: 0, minutesOfDay: 17 * 60 },
   "19:00-21:00": { dayOffset: 0, minutesOfDay: 19 * 60 },

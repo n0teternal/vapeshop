@@ -78,7 +78,8 @@ create table if not exists public.promotion_rules (
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check (type in ('buy_2_get_3_cheapest_free')),
+  constraint promotion_rules_type_check
+    check (type in ('buy_2_get_3_cheapest_free', 'buy_pod_get_liquid_cheapest_free')),
   check (category_slug <> ''),
   check (ends_at is null or starts_at is null or ends_at >= starts_at)
 );

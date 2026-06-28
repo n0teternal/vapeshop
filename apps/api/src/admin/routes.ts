@@ -17,6 +17,7 @@ import {
   normalizePromotionCategorySlug,
   parsePromotionRuleType,
   PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
+  PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE,
 } from "../promotions/rules.js";
 import { processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
@@ -498,7 +499,10 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         await requireAdmin(request);
 
         const schema = z.object({
-          type: z.literal(PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE),
+          type: z.enum([
+            PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
+            PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE,
+          ]),
           citySlug: z.enum(["vvo", "blg"]),
           categorySlug: z.string().trim().min(1).max(50),
           brand: z.string().trim().max(1000).nullable().optional(),
@@ -512,6 +516,10 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const type = parsed.data.type;
+        const categorySlug =
+          type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE
+            ? "pod"
+            : normalizePromotionCategorySlug(parsed.data.categorySlug);
         const startsAt = parseOptionalIsoDateTime(parsed.data.startsAt, "startsAt");
         const endsAt = parseOptionalIsoDateTime(parsed.data.endsAt, "endsAt");
         if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
@@ -547,7 +555,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             city_id: city.id,
             type,
             title: getPromotionTypePublicTitle(type),
-            category_slug: normalizePromotionCategorySlug(parsed.data.categorySlug),
+            category_slug: categorySlug,
             brand,
             starts_at: startsAt,
             ends_at: endsAt,

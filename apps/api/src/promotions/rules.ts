@@ -3,8 +3,12 @@ import type { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 
 export const PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE =
   "buy_2_get_3_cheapest_free" as const;
+export const PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE =
+  "buy_pod_get_liquid_cheapest_free" as const;
 
-export type PromotionRuleType = typeof PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE;
+export type PromotionRuleType =
+  | typeof PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE
+  | typeof PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE;
 
 export type PromotionRule = {
   id: number;
@@ -103,6 +107,7 @@ const MANUFACTURER_SYNONYM_GROUPS = [
 
 export function getPromotionTypeAdminTitle(type: PromotionRuleType): string {
   if (type === PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE) return "1+1=3";
+  if (type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE) return "Pod + жижа";
   return type;
 }
 
@@ -110,11 +115,17 @@ export function getPromotionTypePublicTitle(type: PromotionRuleType): string {
   if (type === PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE) {
     return "1+1 одноразка = 3-я одноразка в подарок";
   }
+  if (type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE) {
+    return "Pod + жижа: самая дешёвая жижа в подарок";
+  }
   return type;
 }
 
 export function parsePromotionRuleType(value: unknown): PromotionRuleType | null {
-  return value === PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE ? value : null;
+  return value === PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE ||
+    value === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE
+    ? value
+    : null;
 }
 
 export function normalizePromotionCategorySlug(value: string): string {
@@ -259,6 +270,35 @@ function isRuleActiveNow(rule: PromotionRule, nowMs: number): boolean {
   return true;
 }
 
+function buildUnits(lines: PromotionLine[], consumedUnitKeys: Set<string>): Unit[] {
+  const units: Unit[] = [];
+
+  for (const line of lines) {
+    const qty = Math.max(0, Math.trunc(line.qty));
+    for (let index = 0; index < qty; index += 1) {
+      const key = `${line.productId}:${index}`;
+      if (consumedUnitKeys.has(key)) continue;
+      units.push({
+        key,
+        productId: line.productId,
+        title: line.title,
+        unitPrice: line.unitPrice,
+      });
+    }
+  }
+
+  return units;
+}
+
+function sortUnitsByCheapestFirst(a: Unit, b: Unit): number {
+  return (
+    a.unitPrice - b.unitPrice ||
+    a.title.localeCompare(b.title, "ru") ||
+    a.productId.localeCompare(b.productId) ||
+    a.key.localeCompare(b.key)
+  );
+}
+
 export async function loadActivePromotionRules(params: {
   supabase: ReturnType<typeof createServiceSupabaseClient>;
   cityId?: number | null;
@@ -300,6 +340,45 @@ export function calculatePromotionDiscount(params: {
   let discountAmount = 0;
 
   for (const rule of params.rules) {
+    if (rule.type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE) {
+      const podUnits = buildUnits(
+        params.lines.filter(
+          (line) =>
+            normalizePromotionCategorySlug(line.categorySlug) === "pod" &&
+            brandMatches(line.title, rule.brand),
+        ),
+        consumedUnitKeys,
+      );
+      const liquidUnits = buildUnits(
+        params.lines.filter(
+          (line) => normalizePromotionCategorySlug(line.categorySlug) === "liquid",
+        ),
+        consumedUnitKeys,
+      );
+      const freeQty = Math.min(podUnits.length, liquidUnits.length);
+      if (freeQty <= 0) continue;
+
+      const freeUnits = [...liquidUnits].sort(sortUnitsByCheapestFirst).slice(0, freeQty);
+      const ruleDiscount = freeUnits.reduce((sum, unit) => sum + unit.unitPrice, 0);
+      if (ruleDiscount <= 0) continue;
+
+      for (const unit of podUnits.slice(0, freeQty)) {
+        consumedUnitKeys.add(unit.key);
+      }
+      for (const unit of freeUnits) {
+        consumedUnitKeys.add(unit.key);
+      }
+
+      discountAmount += ruleDiscount;
+      applications.push({
+        ruleId: rule.id,
+        title: rule.title || getPromotionTypePublicTitle(rule.type),
+        freeQty,
+        discountAmount: ruleDiscount,
+      });
+      continue;
+    }
+
     if (rule.type !== PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE) continue;
 
     const eligibleUnits: Unit[] = [];
@@ -324,12 +403,7 @@ export function calculatePromotionDiscount(params: {
     const freeQty = Math.floor(eligibleUnits.length / 3);
     if (freeQty <= 0) continue;
 
-    const sortedByPrice = [...eligibleUnits].sort(
-      (a, b) =>
-        a.unitPrice - b.unitPrice ||
-        a.title.localeCompare(b.title, "ru") ||
-        a.productId.localeCompare(b.productId),
-    );
+    const sortedByPrice = [...eligibleUnits].sort(sortUnitsByCheapestFirst);
     const freeUnits = sortedByPrice.slice(0, freeQty);
     const ruleDiscount = freeUnits.reduce((sum, unit) => sum + unit.unitPrice, 0);
     if (ruleDiscount <= 0) continue;

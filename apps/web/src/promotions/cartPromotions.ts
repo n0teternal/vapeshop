@@ -2,11 +2,17 @@ import type { CartItem } from "../state/AppStateProvider";
 
 export const PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE =
   "buy_2_get_3_cheapest_free" as const;
+export const PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE =
+  "buy_pod_get_liquid_cheapest_free" as const;
+
+export type PromotionRuleType =
+  | typeof PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE
+  | typeof PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE;
 
 export type ActivePromotionRule = {
   id: number;
   cityId: number | null;
-  type: typeof PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE;
+  type: PromotionRuleType;
   title: string;
   categorySlug: string;
   brand: string | null;
@@ -184,6 +190,35 @@ function isRuleActiveNow(rule: ActivePromotionRule, nowMs: number): boolean {
   return true;
 }
 
+function buildUnits(cart: CartItem[], consumedUnitKeys: Set<string>): Unit[] {
+  const units: Unit[] = [];
+
+  for (const item of cart) {
+    const qty = Math.max(0, Math.trunc(item.qty));
+    for (let index = 0; index < qty; index += 1) {
+      const key = `${item.productId}:${index}`;
+      if (consumedUnitKeys.has(key)) continue;
+      units.push({
+        key,
+        productId: item.productId,
+        title: item.title,
+        unitPrice: item.price,
+      });
+    }
+  }
+
+  return units;
+}
+
+function sortUnitsByCheapestFirst(a: Unit, b: Unit): number {
+  return (
+    a.unitPrice - b.unitPrice ||
+    a.title.localeCompare(b.title, "ru") ||
+    a.productId.localeCompare(b.productId) ||
+    a.key.localeCompare(b.key)
+  );
+}
+
 export function calculateCartPromotionDiscount(params: {
   cart: CartItem[];
   rules: ActivePromotionRule[];
@@ -206,6 +241,43 @@ export function calculateCartPromotionDiscount(params: {
     });
 
   for (const rule of activeRules) {
+    if (rule.type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE) {
+      const podUnits = buildUnits(
+        params.cart.filter(
+          (item) =>
+            normalizePromotionCategorySlug(item.categorySlug) === "pod" &&
+            brandMatches(item.title, rule.brand),
+        ),
+        consumedUnitKeys,
+      );
+      const liquidUnits = buildUnits(
+        params.cart.filter(
+          (item) => normalizePromotionCategorySlug(item.categorySlug) === "liquid",
+        ),
+        consumedUnitKeys,
+      );
+      const ruleFreeQty = Math.min(podUnits.length, liquidUnits.length);
+      if (ruleFreeQty <= 0) continue;
+
+      const freeUnits = [...liquidUnits]
+        .sort(sortUnitsByCheapestFirst)
+        .slice(0, ruleFreeQty);
+      const ruleDiscount = freeUnits.reduce((sum, unit) => sum + unit.unitPrice, 0);
+      if (ruleDiscount <= 0) continue;
+
+      for (const unit of podUnits.slice(0, ruleFreeQty)) {
+        consumedUnitKeys.add(unit.key);
+      }
+      for (const unit of freeUnits) {
+        consumedUnitKeys.add(unit.key);
+      }
+
+      discountAmount += ruleDiscount;
+      freeQty += ruleFreeQty;
+      title = title ?? rule.title;
+      continue;
+    }
+
     if (rule.type !== PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE) continue;
 
     const eligibleUnits: Unit[] = [];
@@ -230,12 +302,7 @@ export function calculateCartPromotionDiscount(params: {
     if (ruleFreeQty <= 0) continue;
 
     const ruleDiscount = [...eligibleUnits]
-      .sort(
-        (a, b) =>
-          a.unitPrice - b.unitPrice ||
-          a.title.localeCompare(b.title, "ru") ||
-          a.productId.localeCompare(b.productId),
-      )
+      .sort(sortUnitsByCheapestFirst)
       .slice(0, ruleFreeQty)
       .reduce((sum, unit) => sum + unit.unitPrice, 0);
 
