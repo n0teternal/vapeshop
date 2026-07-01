@@ -16,6 +16,7 @@ export type ActivePromotionRule = {
   title: string;
   categorySlug: string;
   brand: string | null;
+  productIds?: string[];
   startsAt: string | null;
   endsAt: string | null;
   isActive: boolean;
@@ -178,6 +179,16 @@ function brandMatches(title: string, brand: string | null): boolean {
   );
 }
 
+function getRuleProductIds(rule: ActivePromotionRule): string[] {
+  return Array.isArray(rule.productIds)
+    ? rule.productIds.filter((productId) => typeof productId === "string" && productId.length > 0)
+    : [];
+}
+
+function productMatches(productId: string, productIds: string[]): boolean {
+  return productIds.length === 0 || productIds.includes(productId);
+}
+
 function isRuleActiveNow(rule: ActivePromotionRule, nowMs: number): boolean {
   if (!rule.isActive) return false;
 
@@ -237,15 +248,21 @@ export function calculateCartPromotionDiscount(params: {
       if (citySpecificity !== 0) return citySpecificity;
       const brandSpecificity = Number(b.brand !== null) - Number(a.brand !== null);
       if (brandSpecificity !== 0) return brandSpecificity;
+      const productSpecificity =
+        Number(getRuleProductIds(b).length > 0) - Number(getRuleProductIds(a).length > 0);
+      if (productSpecificity !== 0) return productSpecificity;
       return b.id - a.id;
     });
 
   for (const rule of activeRules) {
+    const ruleProductIds = getRuleProductIds(rule);
+
     if (rule.type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE) {
       const podUnits = buildUnits(
         params.cart.filter(
           (item) =>
             normalizePromotionCategorySlug(item.categorySlug) === "pod" &&
+            productMatches(item.productId, ruleProductIds) &&
             brandMatches(item.title, rule.brand),
         ),
         consumedUnitKeys,
@@ -283,6 +300,7 @@ export function calculateCartPromotionDiscount(params: {
     const eligibleUnits: Unit[] = [];
     for (const item of params.cart) {
       if (normalizePromotionCategorySlug(item.categorySlug) !== rule.categorySlug) continue;
+      if (!productMatches(item.productId, ruleProductIds)) continue;
       if (!brandMatches(item.title, rule.brand)) continue;
 
       const qty = Math.max(0, Math.trunc(item.qty));

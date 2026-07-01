@@ -10,6 +10,7 @@ import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import { importProductsCsv } from "../import/productsCsv.js";
 import { importPromoProductsCsv } from "../import/promoProductsCsv.js";
 import {
+  brandMatches,
   extractPromotionBrandLabel,
   getPromotionTypeAdminTitle,
   getPromotionTypePublicTitle,
@@ -135,6 +136,24 @@ const DEFAULT_IMAGE_CACHE_CONTROL_SECONDS = "2592000";
 
 type ListedImageFile = { name: string; size: number; updatedAt: string };
 type StorageLocation = { bucket: string; prefix: string };
+type PromotionRuleAdminRow = {
+  id: number;
+  city_id: number | null;
+  type: string;
+  title: string;
+  category_slug: string;
+  brand: string | null;
+  product_ids?: string[] | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  is_active: boolean;
+  created_at: string;
+};
+
+const PROMOTION_RULE_ADMIN_SELECT_WITH_PRODUCT_IDS =
+  "id,city_id,type,title,category_slug,brand,product_ids,starts_at,ends_at,is_active,created_at";
+const PROMOTION_RULE_ADMIN_SELECT_WITHOUT_PRODUCT_IDS =
+  "id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at";
 
 function parseStorageLocationFromBaseUrl(baseUrl: string | null): StorageLocation | null {
   if (!baseUrl) return null;
@@ -260,18 +279,17 @@ function parseOptionalIsoDateTime(value: string | null | undefined, fieldName: s
   return date.toISOString();
 }
 
-type PromotionRuleAdminRow = {
-  id: number;
-  city_id: number | null;
-  type: string;
-  title: string;
-  category_slug: string;
-  brand: string | null;
-  starts_at: string | null;
-  ends_at: string | null;
-  is_active: boolean;
-  created_at: string;
-};
+function normalizePromotionProductIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return [
+    ...new Set(
+      value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter((item) => item.length > 0),
+    ),
+  ];
+}
 
 function isPromotionRuleActiveAt(row: PromotionRuleAdminRow, nowMs: number): boolean {
   if (!row.is_active) return false;
@@ -304,6 +322,7 @@ function mapPromotionRuleForAdmin(
     publicTitle: row.title || getPromotionTypePublicTitle(type),
     categorySlug: normalizePromotionCategorySlug(row.category_slug),
     brand: row.brand,
+    productIds: normalizePromotionProductIds(row.product_ids),
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     isActive: isPromotionRuleActiveAt(row, nowMs),
@@ -322,6 +341,55 @@ function getJoinedProduct(row: {
   return typeof products === "object" && products !== null ? products : null;
 }
 
+async function validatePromotionProductIds(params: {
+  supabase: ReturnType<typeof createServiceSupabaseClient>;
+  cityId: number;
+  categorySlug: string;
+  brand: string | null;
+  productIds: string[];
+}): Promise<string[]> {
+  if (params.productIds.length === 0) return [];
+
+  const { data, error } = await params.supabase
+    .from("inventory")
+    .select("product_id,products!inner(title,category_slug,is_active)")
+    .eq("city_id", params.cityId)
+    .eq("in_stock", true)
+    .eq("products.is_active", true)
+    .in("product_id", params.productIds);
+
+  if (error) {
+    throw new HttpError(500, "DB", `Failed to validate promotion models: ${error.message}`);
+  }
+
+  const validIds = new Set<string>();
+  for (const row of (data ?? []) as Array<{ product_id?: unknown; products?: unknown }>) {
+    const productId = typeof row.product_id === "string" ? row.product_id : "";
+    const product = getJoinedProduct(row);
+    const title = typeof product?.title === "string" ? product.title : "";
+    const categorySlug =
+      typeof product?.category_slug === "string"
+        ? normalizePromotionCategorySlug(product.category_slug)
+        : "";
+
+    if (!productId) continue;
+    if (categorySlug !== params.categorySlug) continue;
+    if (!brandMatches(title, params.brand)) continue;
+
+    validIds.add(productId);
+  }
+
+  if (validIds.size !== params.productIds.length) {
+    throw new HttpError(
+      400,
+      "BAD_REQUEST",
+      "Selected models must belong to the selected city, category and brands",
+    );
+  }
+
+  return params.productIds.filter((productId) => validIds.has(productId));
+}
+
 function getPromotionBrandLabelScore(value: string): number {
   let score = 0;
   for (const char of value) {
@@ -331,14 +399,27 @@ function getPromotionBrandLabelScore(value: string): number {
   return score;
 }
 
-function isPromotionRulesTypeConstraintError(error: {
+function isPromotionRulesProductIdsColumnError(error: {
   code?: string;
   message?: string;
   details?: string | null;
 } | null): boolean {
   if (!error) return false;
   const text = `${error.code ?? ""} ${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
-  return text.includes("promotion_rules_type_check");
+  return (
+    text.includes("product_ids") &&
+    (text.includes("schema cache") || text.includes("column") || text.includes("promotion_rules"))
+  );
+}
+
+function isPromotionRulesSchemaOutdatedError(error: {
+  code?: string;
+  message?: string;
+  details?: string | null;
+} | null): boolean {
+  if (!error) return false;
+  const text = `${error.code ?? ""} ${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+  return text.includes("promotion_rules_type_check") || isPromotionRulesProductIdsColumnError(error);
 }
 
 function errorToResponse(e: unknown): { statusCode: number; body: ApiFailure } {
@@ -496,16 +577,30 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         const now = new Date();
         const nowIso = now.toISOString();
         const nowMs = now.getTime();
-        const [{ data, error }, { data: cities, error: citiesError }] = await Promise.all([
-          supabase
+        const citiesPromise = supabase.from("cities").select("id,name,slug");
+        const rulesResponse = await supabase
+          .from("promotion_rules")
+          .select(PROMOTION_RULE_ADMIN_SELECT_WITH_PRODUCT_IDS)
+          .eq("is_active", true)
+          .or(`ends_at.is.null,ends_at.gte.${nowIso}`)
+          .order("created_at", { ascending: false })
+          .limit(50);
+        let data = rulesResponse.data as PromotionRuleAdminRow[] | null;
+        let error = rulesResponse.error;
+
+        if (error && isPromotionRulesProductIdsColumnError(error)) {
+          const fallback = await supabase
             .from("promotion_rules")
-            .select("id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at")
+            .select(PROMOTION_RULE_ADMIN_SELECT_WITHOUT_PRODUCT_IDS)
             .eq("is_active", true)
             .or(`ends_at.is.null,ends_at.gte.${nowIso}`)
             .order("created_at", { ascending: false })
-            .limit(50),
-          supabase.from("cities").select("id,name,slug"),
-        ]);
+            .limit(50);
+          data = fallback.data as PromotionRuleAdminRow[] | null;
+          error = fallback.error;
+        }
+
+        const { data: cities, error: citiesError } = await citiesPromise;
 
         if (error) {
           throw new HttpError(500, "DB", `Failed to load promotion rules: ${error.message}`);
@@ -540,6 +635,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           categorySlug: z.string().trim().min(1).max(50),
           brand: z.string().trim().max(1000).nullable().optional(),
           brands: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+          productIds: z.array(z.string().uuid()).max(500).optional(),
           startsAt: z.string().trim().max(80).nullable().optional(),
           endsAt: z.string().trim().max(80).nullable().optional(),
         });
@@ -571,6 +667,14 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             : typeof parsed.data.brand === "string" && parsed.data.brand.trim().length > 0
               ? parsed.data.brand.trim()
               : null;
+        const requestedProductIds =
+          type === PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE
+            ? normalizePromotionProductIds(parsed.data.productIds)
+            : [];
+        if (requestedProductIds.length > 0 && selectedBrands.length === 0) {
+          throw new HttpError(400, "BAD_REQUEST", "productIds require selected brands");
+        }
+
         const supabase = createServiceSupabaseClient();
         const { data: city, error: cityError } = await supabase
           .from("cities")
@@ -585,23 +689,46 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
         }
 
-        const { data, error } = await supabase
-          .from("promotion_rules")
-          .insert({
-            city_id: city.id,
-            type,
-            title: getPromotionTypePublicTitle(type),
-            category_slug: categorySlug,
-            brand,
-            starts_at: startsAt,
-            ends_at: endsAt,
-            is_active: true,
-          })
-          .select("id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at")
-          .single();
+        const productIds =
+          requestedProductIds.length > 0
+            ? await validatePromotionProductIds({
+                supabase,
+                cityId: city.id,
+                categorySlug,
+                brand,
+                productIds: requestedProductIds,
+              })
+            : [];
+
+        const insertPayload = {
+          city_id: city.id,
+          type,
+          title: getPromotionTypePublicTitle(type),
+          category_slug: categorySlug,
+          brand,
+          starts_at: startsAt,
+          ends_at: endsAt,
+          is_active: true,
+          ...(productIds.length > 0 ? { product_ids: productIds } : {}),
+        };
+
+        const createdResponse =
+          productIds.length > 0
+            ? await supabase
+                .from("promotion_rules")
+                .insert(insertPayload)
+                .select(PROMOTION_RULE_ADMIN_SELECT_WITH_PRODUCT_IDS)
+                .single()
+            : await supabase
+                .from("promotion_rules")
+                .insert(insertPayload)
+                .select(PROMOTION_RULE_ADMIN_SELECT_WITHOUT_PRODUCT_IDS)
+                .single();
+        const data = createdResponse.data as PromotionRuleAdminRow | null;
+        const error = createdResponse.error;
 
         if (error) {
-          if (isPromotionRulesTypeConstraintError(error)) {
+          if (isPromotionRulesSchemaOutdatedError(error)) {
             throw new HttpError(
               500,
               "DB_SCHEMA_OUTDATED",

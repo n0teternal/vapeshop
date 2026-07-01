@@ -73,6 +73,7 @@ create table if not exists public.promotion_rules (
   title text not null,
   category_slug text not null default 'disposable',
   brand text null,
+  product_ids uuid[] null,
   starts_at timestamptz null,
   ends_at timestamptz null,
   is_active boolean not null default true,
@@ -80,6 +81,8 @@ create table if not exists public.promotion_rules (
   updated_at timestamptz not null default now(),
   constraint promotion_rules_type_check
     check (type in ('buy_2_get_3_cheapest_free', 'buy_pod_get_liquid_cheapest_free')),
+  constraint promotion_rules_product_ids_check
+    check (product_ids is null or (type = 'buy_2_get_3_cheapest_free' and cardinality(product_ids) > 0)),
   check (category_slug <> ''),
   check (ends_at is null or starts_at is null or ends_at >= starts_at)
 );

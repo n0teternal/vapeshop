@@ -17,6 +17,7 @@ export type PromotionRule = {
   title: string;
   categorySlug: string;
   brand: string | null;
+  productIds: string[];
   startsAt: string | null;
   endsAt: string | null;
   isActive: boolean;
@@ -50,6 +51,7 @@ type PromotionRuleRow = {
   title: string;
   category_slug: string;
   brand: string | null;
+  product_ids?: string[] | null;
   starts_at: string | null;
   ends_at: string | null;
   is_active: boolean;
@@ -212,7 +214,7 @@ function parsePromotionBrandFilters(brand: string | null): string[] {
     .filter((value) => value.length > 0);
 }
 
-function brandMatches(title: string, brand: string | null): boolean {
+export function brandMatches(title: string, brand: string | null): boolean {
   const normalizedBrands = parsePromotionBrandFilters(brand);
   if (normalizedBrands.length === 0) return true;
 
@@ -225,6 +227,22 @@ function brandMatches(title: string, brand: string | null): boolean {
   );
 }
 
+function normalizePromotionProductIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return [
+    ...new Set(
+      value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter((item) => item.length > 0),
+    ),
+  ];
+}
+
+function productMatches(productId: string, productIds: string[]): boolean {
+  return productIds.length === 0 || productIds.includes(productId);
+}
+
 function isMissingPromotionRulesTableError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const maybeError = error as { code?: unknown; message?: unknown };
@@ -234,6 +252,20 @@ function isMissingPromotionRulesTableError(error: unknown): boolean {
     code === "PGRST205" ||
     (message.includes("promotion_rules") && message.includes("schema cache")) ||
     (message.includes("relation") && message.includes("promotion_rules"))
+  );
+}
+
+function isMissingPromotionRulesProductIdsColumnError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: unknown; message?: unknown };
+  const code = typeof maybeError.code === "string" ? maybeError.code : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  return (
+    (code === "PGRST204" || code === "42703") &&
+    message.includes("product_ids")
+  ) || (
+    message.includes("product_ids") &&
+    (message.includes("schema cache") || message.includes("column"))
   );
 }
 
@@ -251,6 +283,7 @@ function mapPromotionRuleRow(row: PromotionRuleRow): PromotionRule | null {
       typeof row.brand === "string" && row.brand.trim().length > 0
         ? row.brand.trim()
         : null,
+    productIds: normalizePromotionProductIds(row.product_ids),
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     isActive: row.is_active,
@@ -304,11 +337,28 @@ export async function loadActivePromotionRules(params: {
   cityId?: number | null;
   nowMs?: number;
 }): Promise<PromotionRule[]> {
-  const { data, error } = await params.supabase
+  const selectWithProductIds =
+    "id,city_id,type,title,category_slug,brand,product_ids,starts_at,ends_at,is_active,created_at";
+  const selectWithoutProductIds =
+    "id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at";
+
+  const rulesResponse = await params.supabase
     .from("promotion_rules")
-    .select("id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at")
+    .select(selectWithProductIds)
     .eq("is_active", true)
     .order("created_at", { ascending: false });
+  let data = rulesResponse.data as PromotionRuleRow[] | null;
+  let error = rulesResponse.error;
+
+  if (error && isMissingPromotionRulesProductIdsColumnError(error)) {
+    const fallback = await params.supabase
+      .from("promotion_rules")
+      .select(selectWithoutProductIds)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+    data = fallback.data as PromotionRuleRow[] | null;
+    error = fallback.error;
+  }
 
   if (error) {
     if (isMissingPromotionRulesTableError(error)) return [];
@@ -327,6 +377,9 @@ export async function loadActivePromotionRules(params: {
       if (citySpecificity !== 0) return citySpecificity;
       const brandSpecificity = Number(b.brand !== null) - Number(a.brand !== null);
       if (brandSpecificity !== 0) return brandSpecificity;
+      const productSpecificity =
+        Number(b.productIds.length > 0) - Number(a.productIds.length > 0);
+      if (productSpecificity !== 0) return productSpecificity;
       return b.id - a.id;
     });
 }
@@ -345,6 +398,7 @@ export function calculatePromotionDiscount(params: {
         params.lines.filter(
           (line) =>
             normalizePromotionCategorySlug(line.categorySlug) === "pod" &&
+            productMatches(line.productId, rule.productIds) &&
             brandMatches(line.title, rule.brand),
         ),
         consumedUnitKeys,
@@ -385,6 +439,7 @@ export function calculatePromotionDiscount(params: {
 
     for (const line of params.lines) {
       if (normalizePromotionCategorySlug(line.categorySlug) !== rule.categorySlug) continue;
+      if (!productMatches(line.productId, rule.productIds)) continue;
       if (!brandMatches(line.title, rule.brand)) continue;
 
       const qty = Math.max(0, Math.trunc(line.qty));

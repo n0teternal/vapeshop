@@ -116,6 +116,7 @@ export type Database = {
           title: string;
           category_slug: string;
           brand: string | null;
+          product_ids: string[] | null;
           starts_at: string | null;
           ends_at: string | null;
           is_active: boolean;
@@ -129,6 +130,7 @@ export type Database = {
           title: string;
           category_slug?: string;
           brand?: string | null;
+          product_ids?: string[] | null;
           starts_at?: string | null;
           ends_at?: string | null;
           is_active?: boolean;
@@ -142,6 +144,7 @@ export type Database = {
           title?: string;
           category_slug?: string;
           brand?: string | null;
+          product_ids?: string[] | null;
           starts_at?: string | null;
           ends_at?: string | null;
           is_active?: boolean;

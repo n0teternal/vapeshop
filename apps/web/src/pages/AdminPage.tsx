@@ -115,6 +115,7 @@ type AdminPromotionRule = {
   publicTitle: string;
   categorySlug: string;
   brand: string | null;
+  productIds: string[];
   startsAt: string | null;
   endsAt: string | null;
   isActive: boolean;
@@ -130,11 +131,20 @@ type AdminPromotionBrandOption = {
   count: number;
 };
 
+type AdminPromotionModelOption = {
+  productId: string;
+  title: string;
+  brand: string;
+  price: number;
+};
+
 type AdminPromotionDraft = {
   type: PromotionRuleType;
   citySlug: string;
   categorySlug: string;
   brands: string[];
+  modelScope: "brand" | "models";
+  productIds: string[];
   startsAt: string;
   endsAt: string;
 };
@@ -1210,6 +1220,11 @@ function formatPromotionBrandScope(brand: string | null): string {
   return brand.includes(",") ? `Бренды: ${brand}` : `Бренд: ${brand}`;
 }
 
+function formatPromotionProductScope(productIds: string[]): string | null {
+  if (productIds.length === 0) return null;
+  return `Конкретных моделей: ${productIds.length}`;
+}
+
 function parseCatalogCitySlug(value: string): CitySlug | null {
   return value === "vvo" || value === "blg" ? value : null;
 }
@@ -1254,11 +1269,55 @@ function buildPromotionBrandOptionsFromCatalog(params: {
     .sort((a, b) => b.count - a.count || a.brand.localeCompare(b.brand, "ru"));
 }
 
+function buildPromotionModelOptionsFromCatalog(params: {
+  items: CatalogItem[];
+  citySlug: CitySlug;
+  categorySlug: string;
+  brands: string[];
+}): AdminPromotionModelOption[] {
+  if (params.brands.length === 0) return [];
+
+  const selectedCategoryId =
+    normalizeCatalogCategoryId(params.categorySlug) ?? params.categorySlug.trim().toLowerCase();
+  const selectedBrandIds = new Set(params.brands.map((brand) => normalizeManufacturerId(brand)));
+  const models = new Map<string, AdminPromotionModelOption>();
+
+  for (const item of params.items) {
+    if (!item.inStock) continue;
+
+    const categoryId = getCatalogItemCategoryId(item);
+    if (categoryId !== selectedCategoryId) continue;
+
+    const manufacturerLabel = resolveCatalogManufacturerLabel({
+      title: item.title,
+      categoryId,
+      citySlug: params.citySlug,
+    });
+    const manufacturerId = normalizeManufacturerId(manufacturerLabel);
+    if (!selectedBrandIds.has(manufacturerId)) continue;
+
+    models.set(item.id, {
+      productId: item.id,
+      title: item.title,
+      brand: manufacturerLabel,
+      price: item.price,
+    });
+  }
+
+  return Array.from(models.values()).sort(
+    (a, b) =>
+      a.brand.localeCompare(b.brand, "ru") ||
+      a.title.localeCompare(b.title, "ru") ||
+      a.productId.localeCompare(b.productId),
+  );
+}
+
 function AdminPromotionsManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [promotions, setPromotions] = useState<AdminPromotionRule[]>([]);
   const [cities, setCities] = useState<AdminCity[]>([]);
   const [brandOptions, setBrandOptions] = useState<AdminPromotionBrandOption[]>([]);
+  const [promotionCatalogItems, setPromotionCatalogItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [brandsLoading, setBrandsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1269,6 +1328,8 @@ function AdminPromotionsManager() {
     citySlug: "blg",
     categorySlug: "disposable",
     brands: [] as string[],
+    modelScope: "brand",
+    productIds: [],
     startsAt: "",
     endsAt: "",
   });
@@ -1285,7 +1346,13 @@ function AdminPromotionsManager() {
       setCities(citiesData);
       setDraft((prev) => {
         if (citiesData.some((city) => city.slug === prev.citySlug)) return prev;
-        return { ...prev, citySlug: citiesData[0]?.slug ?? "blg", brands: [] };
+        return {
+          ...prev,
+          citySlug: citiesData[0]?.slug ?? "blg",
+          brands: [],
+          modelScope: "brand",
+          productIds: [],
+        };
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to load promotions");
@@ -1302,6 +1369,7 @@ function AdminPromotionsManager() {
     const citySlug = parseCatalogCitySlug(draft.citySlug);
     if (!modalOpen || !citySlug) {
       setBrandOptions([]);
+      setPromotionCatalogItems([]);
       setBrandsLoading(false);
       return;
     }
@@ -1311,6 +1379,7 @@ function AdminPromotionsManager() {
     fetchCatalog(citySlug)
       .then((data) => {
         if (cancelled) return;
+        setPromotionCatalogItems(data.items);
         const items = buildPromotionBrandOptionsFromCatalog({
           items: data.items,
           citySlug,
@@ -1320,13 +1389,35 @@ function AdminPromotionsManager() {
         setDraft((prev) => {
           const availableBrands = new Set(items.map((item) => item.brand));
           const brands = prev.brands.filter((brand) => availableBrands.has(brand));
-          if (brands.length === prev.brands.length) return prev;
-          return { ...prev, brands };
+          const modelOptions = buildPromotionModelOptionsFromCatalog({
+            items: data.items,
+            citySlug,
+            categorySlug: draft.categorySlug,
+            brands,
+          });
+          const availableProductIds = new Set(
+            modelOptions.map((model) => model.productId),
+          );
+          const productIds = prev.productIds.filter((productId) =>
+            availableProductIds.has(productId),
+          );
+          const modelScope =
+            brands.length > 0 && productIds.length > 0 ? prev.modelScope : "brand";
+
+          if (
+            brands.length === prev.brands.length &&
+            productIds.length === prev.productIds.length &&
+            modelScope === prev.modelScope
+          ) {
+            return prev;
+          }
+          return { ...prev, brands, productIds, modelScope };
         });
       })
       .catch((e: unknown) => {
         if (cancelled) return;
         setBrandOptions([]);
+        setPromotionCatalogItems([]);
         setError(e instanceof Error ? e.message : "Failed to load promotion brands");
       })
       .finally(() => {
@@ -1338,6 +1429,57 @@ function AdminPromotionsManager() {
     };
   }, [modalOpen, draft.citySlug, draft.categorySlug]);
 
+  const latestPromotions = promotions.slice(0, 3);
+  const brandTotalCount = brandOptions.reduce((sum, item) => sum + item.count, 0);
+  const isPodLiquidDraft =
+    draft.type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE;
+  const canUseModelMode = !isPodLiquidDraft && draft.brands.length > 0;
+  const promotionModelOptions = useMemo(() => {
+    const citySlug = parseCatalogCitySlug(draft.citySlug);
+    if (!citySlug || !canUseModelMode) return [];
+
+    return buildPromotionModelOptionsFromCatalog({
+      items: promotionCatalogItems,
+      citySlug,
+      categorySlug: draft.categorySlug,
+      brands: draft.brands,
+    });
+  }, [
+    canUseModelMode,
+    draft.brands,
+    draft.categorySlug,
+    draft.citySlug,
+    promotionCatalogItems,
+  ]);
+  const selectedModelCount = draft.productIds.length;
+
+  useEffect(() => {
+    const availableProductIds = new Set(
+      promotionModelOptions.map((model) => model.productId),
+    );
+
+    setDraft((prev) => {
+      const nextProductIds =
+        canUseModelMode && prev.modelScope === "models"
+          ? prev.productIds.filter((productId) => availableProductIds.has(productId))
+          : [];
+      const nextModelScope = canUseModelMode ? prev.modelScope : "brand";
+
+      if (
+        nextProductIds.length === prev.productIds.length &&
+        nextModelScope === prev.modelScope
+      ) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        modelScope: nextModelScope,
+        productIds: nextProductIds,
+      };
+    });
+  }, [canUseModelMode, promotionModelOptions]);
+
   async function createPromotion(): Promise<void> {
     setSaving(true);
     setError(null);
@@ -1348,12 +1490,18 @@ function AdminPromotionsManager() {
         setError("Дата окончания должна быть позже даты начала.");
         return;
       }
+      if (canUseModelMode && draft.modelScope === "models" && draft.productIds.length === 0) {
+        setError("Выберите хотя бы одну модель для режима «Конкретные модели».");
+        return;
+      }
 
       const created = await apiPost<AdminPromotionRule>("/api/admin/promotions", {
         type: draft.type,
         citySlug: draft.citySlug,
         categorySlug: draft.categorySlug,
         brands: draft.brands,
+        productIds:
+          canUseModelMode && draft.modelScope === "models" ? draft.productIds : [],
         startsAt: dateInputToIso(draft.startsAt, false),
         endsAt: dateInputToIso(draft.endsAt, true),
       });
@@ -1366,6 +1514,8 @@ function AdminPromotionsManager() {
         citySlug: draft.citySlug,
         categorySlug: "disposable",
         brands: [],
+        modelScope: "brand",
+        productIds: [],
         startsAt: "",
         endsAt: "",
       });
@@ -1375,11 +1525,6 @@ function AdminPromotionsManager() {
       setSaving(false);
     }
   }
-
-  const latestPromotions = promotions.slice(0, 3);
-  const brandTotalCount = brandOptions.reduce((sum, item) => sum + item.count, 0);
-  const isPodLiquidDraft =
-    draft.type === PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE;
 
   return (
     <Card>
@@ -1434,7 +1579,11 @@ function AdminPromotionsManager() {
                     · {promotion.adminTitle} · {formatPromotionCategory(promotion.categorySlug)}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {formatPromotionBrandScope(promotion.brand)} ·{" "}
+                    {formatPromotionBrandScope(promotion.brand)}
+                    {formatPromotionProductScope(promotion.productIds) ? (
+                      <> · {formatPromotionProductScope(promotion.productIds)}</>
+                    ) : null}{" "}
+                    ·{" "}
                     {formatPromotionDate(promotion.startsAt)} -{" "}
                     {formatPromotionDate(promotion.endsAt)}
                   </div>
@@ -1460,7 +1609,7 @@ function AdminPromotionsManager() {
           <div
             role="dialog"
             aria-modal="true"
-            className="w-full max-w-md rounded-2xl border border-border/70 bg-card p-4 shadow-xl"
+            className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border/70 bg-card p-4 shadow-xl"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1497,6 +1646,8 @@ function AdminPromotionsManager() {
                             ? "disposable"
                             : prev.categorySlug,
                       brands: [],
+                      modelScope: "brand",
+                      productIds: [],
                     }))
                   }
                 >
@@ -1516,7 +1667,13 @@ function AdminPromotionsManager() {
                   value={draft.citySlug}
                   disabled={saving || cities.length === 0}
                   onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, citySlug: e.target.value, brands: [] }))
+                    setDraft((prev) => ({
+                      ...prev,
+                      citySlug: e.target.value,
+                      brands: [],
+                      modelScope: "brand",
+                      productIds: [],
+                    }))
                   }
                 >
                   {cities.map((city) => (
@@ -1536,7 +1693,13 @@ function AdminPromotionsManager() {
                   value={draft.categorySlug}
                   disabled={saving || isPodLiquidDraft}
                   onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, categorySlug: e.target.value, brands: [] }))
+                    setDraft((prev) => ({
+                      ...prev,
+                      categorySlug: e.target.value,
+                      brands: [],
+                      modelScope: "brand",
+                      productIds: [],
+                    }))
                   }
                 >
                   {PROMOTION_CATEGORY_OPTIONS.map((category) => (
@@ -1558,7 +1721,14 @@ function AdminPromotionsManager() {
                       className="size-4 accent-primary"
                       checked={draft.brands.length === 0}
                       disabled={saving || brandsLoading}
-                      onChange={() => setDraft((prev) => ({ ...prev, brands: [] }))}
+                      onChange={() =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          brands: [],
+                          modelScope: "brand",
+                          productIds: [],
+                        }))
+                      }
                     />
                     <span className="min-w-0 flex-1">
                       {brandsLoading ? "Загружаем..." : "Все бренды"}
@@ -1582,14 +1752,19 @@ function AdminPromotionsManager() {
                           checked={checked}
                           disabled={saving || brandsLoading}
                           onChange={(e) =>
-                            setDraft((prev) => ({
-                              ...prev,
-                              brands: e.target.checked
+                            setDraft((prev) => {
+                              const brands = e.target.checked
                                 ? [...prev.brands, option.brand]
                                 : prev.brands.filter(
                                     (selectedBrand) => selectedBrand !== option.brand,
-                                  ),
-                            }))
+                                  );
+                              return {
+                                ...prev,
+                                brands,
+                                modelScope: brands.length > 0 ? prev.modelScope : "brand",
+                                productIds: [],
+                              };
+                            })
                           }
                         />
                         <span className="min-w-0 flex-1 truncate">{option.brand}</span>
@@ -1601,6 +1776,119 @@ function AdminPromotionsManager() {
                   })}
                 </div>
               </fieldset>
+
+              {canUseModelMode ? (
+                <fieldset className="grid gap-1.5 text-sm">
+                  <legend className="text-xs font-semibold text-muted-foreground">
+                    Охват выбранных брендов
+                  </legend>
+                  <div className="grid grid-cols-2 gap-1 rounded-xl border border-border/70 bg-card/90 p-1">
+                    <button
+                      type="button"
+                      className={[
+                        "min-h-9 rounded-lg px-2 text-xs font-semibold",
+                        draft.modelScope === "brand"
+                          ? "bg-primary text-white"
+                          : "text-muted-foreground hover:bg-muted/45",
+                      ].join(" ")}
+                      disabled={saving}
+                      onClick={() =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          modelScope: "brand",
+                          productIds: [],
+                        }))
+                      }
+                    >
+                      Все модели брендов
+                    </button>
+                    <button
+                      type="button"
+                      className={[
+                        "min-h-9 rounded-lg px-2 text-xs font-semibold",
+                        draft.modelScope === "models"
+                          ? "bg-primary text-white"
+                          : "text-muted-foreground hover:bg-muted/45",
+                      ].join(" ")}
+                      disabled={saving || promotionModelOptions.length === 0}
+                      onClick={() =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          modelScope: "models",
+                        }))
+                      }
+                    >
+                      Конкретные модели
+                    </button>
+                  </div>
+
+                  {draft.modelScope === "models" ? (
+                    <div className="rounded-xl border border-border/70 bg-card/90 p-2">
+                      <div className="mb-2 flex items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
+                        <span>
+                          Выбрано {selectedModelCount} из {promotionModelOptions.length}
+                        </span>
+                        <button
+                          type="button"
+                          className="font-semibold text-primary disabled:text-muted-foreground"
+                          disabled={saving || selectedModelCount === 0}
+                          onClick={() =>
+                            setDraft((prev) => ({ ...prev, productIds: [] }))
+                          }
+                        >
+                          Сбросить
+                        </button>
+                      </div>
+
+                      {promotionModelOptions.length === 0 ? (
+                        <div className="px-2 py-3 text-xs text-muted-foreground">
+                          Для выбранных брендов нет доступных карточек.
+                        </div>
+                      ) : (
+                        <div className="max-h-52 overflow-y-auto">
+                          {promotionModelOptions.map((model) => {
+                            const checked = draft.productIds.includes(model.productId);
+                            return (
+                              <label
+                                key={model.productId}
+                                className="flex min-h-11 items-start gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted/45"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 size-4 shrink-0 accent-primary"
+                                  checked={checked}
+                                  disabled={saving}
+                                  onChange={(e) =>
+                                    setDraft((prev) => ({
+                                      ...prev,
+                                      productIds: e.target.checked
+                                        ? [...prev.productIds, model.productId]
+                                        : prev.productIds.filter(
+                                            (productId) => productId !== model.productId,
+                                          ),
+                                    }))
+                                  }
+                                />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate font-semibold">
+                                    {model.title}
+                                  </span>
+                                  <span className="block truncate text-xs text-muted-foreground">
+                                    {model.brand}
+                                  </span>
+                                </span>
+                                <span className="shrink-0 text-xs font-semibold text-muted-foreground">
+                                  {formatRub(model.price)}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </fieldset>
+              ) : null}
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="grid gap-1.5 text-sm">

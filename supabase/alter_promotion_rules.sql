@@ -26,16 +26,29 @@ alter table public.promotion_rules
   add column if not exists city_id bigint null references public.cities (id) on delete cascade;
 
 alter table public.promotion_rules
+  add column if not exists product_ids uuid[] null;
+
+alter table public.promotion_rules
   drop constraint if exists promotion_rules_type_check;
 
 alter table public.promotion_rules
   add constraint promotion_rules_type_check
   check (type in ('buy_2_get_3_cheapest_free', 'buy_pod_get_liquid_cheapest_free'));
 
+alter table public.promotion_rules
+  drop constraint if exists promotion_rules_product_ids_check;
+
+alter table public.promotion_rules
+  add constraint promotion_rules_product_ids_check
+  check (product_ids is null or (type = 'buy_2_get_3_cheapest_free' and cardinality(product_ids) > 0));
+
 drop index if exists public.promotion_rules_active_window_idx;
 
 create index if not exists promotion_rules_active_window_idx
   on public.promotion_rules (city_id, is_active, starts_at, ends_at, id);
+
+create index if not exists promotion_rules_product_ids_idx
+  on public.promotion_rules using gin (product_ids);
 
 revoke all on public.promotion_rules from anon, authenticated;
 
