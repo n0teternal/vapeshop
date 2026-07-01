@@ -260,7 +260,7 @@ function parseOptionalIsoDateTime(value: string | null | undefined, fieldName: s
   return date.toISOString();
 }
 
-function mapPromotionRuleForAdmin(row: {
+type PromotionRuleAdminRow = {
   id: number;
   city_id: number | null;
   type: string;
@@ -271,7 +271,25 @@ function mapPromotionRuleForAdmin(row: {
   ends_at: string | null;
   is_active: boolean;
   created_at: string;
-}, cityById?: Map<number, { name: string; slug: string }>) {
+};
+
+function isPromotionRuleActiveAt(row: PromotionRuleAdminRow, nowMs: number): boolean {
+  if (!row.is_active) return false;
+
+  const startsAtMs = row.starts_at ? new Date(row.starts_at).getTime() : Number.NaN;
+  if (Number.isFinite(startsAtMs) && startsAtMs > nowMs) return false;
+
+  const endsAtMs = row.ends_at ? new Date(row.ends_at).getTime() : Number.NaN;
+  if (Number.isFinite(endsAtMs) && endsAtMs < nowMs) return false;
+
+  return true;
+}
+
+function mapPromotionRuleForAdmin(
+  row: PromotionRuleAdminRow,
+  cityById?: Map<number, { name: string; slug: string }>,
+  nowMs = Date.now(),
+) {
   const type = parsePromotionRuleType(row.type) ?? PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE;
   const city =
     typeof row.city_id === "number" && cityById ? cityById.get(row.city_id) ?? null : null;
@@ -288,7 +306,7 @@ function mapPromotionRuleForAdmin(row: {
     brand: row.brand,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
-    isActive: row.is_active,
+    isActive: isPromotionRuleActiveAt(row, nowMs),
     createdAt: row.created_at,
   };
 }
@@ -311,6 +329,16 @@ function getPromotionBrandLabelScore(value: string): number {
   }
   if (/^[\p{Lu}\d-]+$/u.test(value)) score += 3;
   return score;
+}
+
+function isPromotionRulesTypeConstraintError(error: {
+  code?: string;
+  message?: string;
+  details?: string | null;
+} | null): boolean {
+  if (!error) return false;
+  const text = `${error.code ?? ""} ${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+  return text.includes("promotion_rules_type_check");
 }
 
 function errorToResponse(e: unknown): { statusCode: number; body: ApiFailure } {
@@ -465,10 +493,15 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       try {
         await requireAdmin(request);
         const supabase = createServiceSupabaseClient();
+        const now = new Date();
+        const nowIso = now.toISOString();
+        const nowMs = now.getTime();
         const [{ data, error }, { data: cities, error: citiesError }] = await Promise.all([
           supabase
             .from("promotion_rules")
             .select("id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at")
+            .eq("is_active", true)
+            .or(`ends_at.is.null,ends_at.gte.${nowIso}`)
             .order("created_at", { ascending: false })
             .limit(50),
           supabase.from("cities").select("id,name,slug"),
@@ -484,7 +517,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         const cityById = new Map((cities ?? []).map((city) => [city.id, { name: city.name, slug: city.slug }]));
         return reply
           .code(200)
-          .send(ok({ items: (data ?? []).map((row) => mapPromotionRuleForAdmin(row, cityById)) }));
+          .send(ok({ items: (data ?? []).map((row) => mapPromotionRuleForAdmin(row, cityById, nowMs)) }));
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
@@ -524,6 +557,9 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         const endsAt = parseOptionalIsoDateTime(parsed.data.endsAt, "endsAt");
         if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
           throw new HttpError(400, "BAD_REQUEST", "endsAt must be after startsAt");
+        }
+        if (endsAt && new Date(endsAt).getTime() < Date.now()) {
+          throw new HttpError(400, "BAD_REQUEST", "endsAt must be in the future");
         }
 
         const selectedBrands = [
@@ -565,6 +601,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           .single();
 
         if (error) {
+          if (isPromotionRulesTypeConstraintError(error)) {
+            throw new HttpError(
+              500,
+              "DB_SCHEMA_OUTDATED",
+              "Promotion rules schema is outdated. Run supabase/alter_promotion_rules.sql in Supabase SQL Editor.",
+            );
+          }
           throw new HttpError(500, "DB", `Failed to create promotion rule: ${error.message}`);
         }
         if (!data) {
