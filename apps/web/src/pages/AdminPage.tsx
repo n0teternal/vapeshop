@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ApiError, apiDelete, apiGet, apiPost, apiPut, apiUpload } from "../api/client";
+import {
+  ApiError,
+  apiDelete,
+  apiDownloadBlob,
+  apiGet,
+  apiPost,
+  apiPut,
+  apiUpload,
+} from "../api/client";
 import { buildApiUrl } from "../config";
 import { fetchCatalog, type CatalogItem, type CitySlug } from "../supabase/catalog";
 import {
@@ -1946,6 +1954,146 @@ function AdminPromotionsManager() {
   );
 }
 
+function AdminBusinessReportsManager() {
+  const [password, setPassword] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  function openReports(): void {
+    setError(null);
+    setNotice(null);
+
+    if (password !== "1799q!") {
+      setError("Неверный пароль.");
+      return;
+    }
+
+    setModalOpen(true);
+  }
+
+  async function downloadReport(): Promise<void> {
+    setDownloading(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const { blob, filename } = await apiDownloadBlob("/api/admin/reports/business", {
+        password,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename ?? "business-report-done-orders.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice("Отчёт скачан.");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось скачать отчёт");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Отчётность</div>
+          <div className="mt-1 text-xs text-muted-foreground/80">
+            Выполненные заказы, товары, клиенты, адреса, рефералка и промокоды.
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          type="password"
+          className="h-10 min-w-0 flex-1 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+          value={password}
+          placeholder="Пароль"
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") openReports();
+          }}
+        />
+        <button
+          type="button"
+          className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
+          onClick={openReports}
+        >
+          Открыть
+        </button>
+      </div>
+
+      {error ? (
+        <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className="mt-3 rounded-xl border border-emerald-400/35 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-500">
+          {notice}
+        </div>
+      ) : null}
+
+      {modalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md rounded-2xl border border-border/70 bg-card p-4 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold">Бизнес-отчёт</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  XLSX по двум городам только по выполненным заказам.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+                disabled={downloading}
+                onClick={() => setModalOpen(false)}
+              >
+                Закрыть
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-border/70 bg-muted/25 p-3 text-xs text-muted-foreground">
+              Листы: заказы, позиции, города, товары, клиенты, адреса, рефералка, промокоды.
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+                disabled={downloading}
+                onClick={() => setModalOpen(false)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
+                disabled={downloading}
+                onClick={() => void downloadReport()}
+              >
+                {downloading ? "Готовим..." : "Скачать отчёт"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
 function AdminProductsManager() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<AdminProductsTab>("active");
@@ -2379,6 +2527,7 @@ export function AdminPage() {
           <AdminImportProductsCsv />
           <AdminUploadImages />
           <AdminPromotionsManager />
+          <AdminBusinessReportsManager />
           <AdminProductsManager />
           <AdminOrdersView />
         </>

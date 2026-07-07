@@ -62,9 +62,13 @@ const BLG_JUNE_2026_DELIVERY_TIME_SLOTS = [
 ] as const;
 
 const BLG_WEEKDAY_DELIVERY_TIME_SLOTS = [
-  "18:00-20:00",
-  "20:00-22:00",
-  "22:00-00:00",
+  "11:00-13:00",
+  "13:00-15:00",
+  "15:00-17:00",
+  "17:00-19:00",
+  "19:00-21:00",
+  "21:00-23:00",
+  "23:00-00:00",
 ] as const;
 
 const BLG_WEEKEND_DELIVERY_TIME_SLOTS = [

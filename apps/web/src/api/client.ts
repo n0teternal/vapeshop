@@ -172,3 +172,43 @@ export function apiUpload<T>(path: string, form: FormData): Promise<T> {
     body: form,
   });
 }
+
+function parseFilenameFromContentDisposition(value: string | null): string | null {
+  if (!value) return null;
+
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(value);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+
+  const asciiMatch = /filename="?([^";]+)"?/i.exec(value);
+  return asciiMatch?.[1]?.trim() ?? null;
+}
+
+export async function apiDownloadBlob(
+  path: string,
+  body: unknown,
+): Promise<{ blob: Blob; filename: string | null }> {
+  const res = await fetch(buildApiUrl(path), {
+    method: "POST",
+    headers: buildHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const json = (await res.json().catch(() => null)) as unknown;
+    const envelope = parseApiEnvelope<unknown>(json);
+    const code = envelope.ok === false ? envelope.error.code : "HTTP_ERROR";
+    const message = envelope.ok === false ? envelope.error.message : "Download failed";
+    throw new ApiError({ code, message, status: res.status });
+  }
+
+  return {
+    blob: await res.blob(),
+    filename: parseFilenameFromContentDisposition(res.headers.get("Content-Disposition")),
+  };
+}

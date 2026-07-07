@@ -7,6 +7,7 @@ import { config } from "../config.js";
 import { HttpError, isHttpError } from "../httpError.js";
 import { decodeCsvBuffer } from "../import/decodeCsvBuffer.js";
 import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
+import { parseOrderComment } from "../order/orderComment.js";
 import { importProductsCsv } from "../import/productsCsv.js";
 import { importPromoProductsCsv } from "../import/promoProductsCsv.js";
 import {
@@ -133,6 +134,8 @@ function inferMimeType(fileName: string): string | null {
 
 const VERSIONED_IMAGE_CACHE_CONTROL_SECONDS = "31536000";
 const DEFAULT_IMAGE_CACHE_CONTROL_SECONDS = "2592000";
+const ADMIN_REPORT_PASSWORD = "1799q!";
+const REPORT_PAGE_SIZE = 1000;
 
 type ListedImageFile = { name: string; size: number; updatedAt: string };
 type StorageLocation = { bucket: string; prefix: string };
@@ -154,6 +157,88 @@ const PROMOTION_RULE_ADMIN_SELECT_WITH_PRODUCT_IDS =
   "id,city_id,type,title,category_slug,brand,product_ids,starts_at,ends_at,is_active,created_at";
 const PROMOTION_RULE_ADMIN_SELECT_WITHOUT_PRODUCT_IDS =
   "id,city_id,type,title,category_slug,brand,starts_at,ends_at,is_active,created_at";
+
+type ReportOrderRow = {
+  id: string;
+  created_at: string;
+  status: string;
+  city_id: number | null;
+  tg_user_id: number;
+  tg_username: string | null;
+  delivery_method: string;
+  comment: string | null;
+  total_price: unknown;
+  total_before_discount: unknown;
+  promotion_discount_amount: unknown;
+  discount_amount: unknown;
+  total_after_discount: unknown;
+  coupon_id?: string | null;
+};
+
+type ReportOrderItemRow = {
+  order_id: string;
+  product_id: string | null;
+  qty: number;
+  unit_price: unknown;
+};
+
+type ReportProductRow = {
+  id: string;
+  title: string;
+  category_slug: string;
+};
+
+type ReportCityRow = {
+  id: number;
+  name: string;
+  slug: string;
+};
+
+type ReportLoyaltyRow = {
+  id: number;
+  tg_user_id: number;
+  delta_points: number;
+  kind: string;
+  referral_id: number | null;
+  order_id: string | null;
+  created_at: string;
+};
+
+type ReportCouponRow = {
+  id: string;
+  tg_user_id: number;
+  kind: string;
+  value: number;
+  min_order_sum: number;
+  max_discount: number | null;
+  source: string;
+  referral_id: number | null;
+  is_used: boolean;
+  used_order_id: string | null;
+  expires_at: string | null;
+  created_at: string;
+  used_at: string | null;
+};
+
+type ReportReferralRow = {
+  id: number;
+  inviter_tg_user_id: number;
+  invitee_tg_user_id: number;
+  status: string;
+  qualified_order_id: string | null;
+  qualified_at: string | null;
+  rewarded_at: string | null;
+  created_at: string;
+};
+
+type ReportProfileRow = {
+  tg_user_id: number;
+  referral_code: string;
+  referred_by_tg_user_id: number | null;
+  referral_bound_at: string | null;
+  tg_username: string | null;
+  created_at: string;
+};
 
 function parseStorageLocationFromBaseUrl(baseUrl: string | null): StorageLocation | null {
   if (!baseUrl) return null;
@@ -180,6 +265,38 @@ function parseStorageLocationFromBaseUrl(baseUrl: string | null): StorageLocatio
 
 function joinStoragePath(prefix: string, filename: string): string {
   return prefix ? `${prefix}/${filename}` : filename;
+}
+
+function isMissingDbObjectError(error: unknown, objectName: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: unknown; message?: unknown };
+  const code = typeof maybeError.code === "string" ? maybeError.code : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  const normalizedObject = objectName.toLowerCase();
+  return (
+    code === "PGRST205" ||
+    code === "42P01" ||
+    (message.includes(normalizedObject) &&
+      (message.includes("schema cache") ||
+        message.includes("relation") ||
+        message.includes("does not exist")))
+  );
+}
+
+function isMissingColumnError(error: unknown, columnName: string): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: unknown; message?: unknown };
+  const code = typeof maybeError.code === "string" ? maybeError.code : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  const normalizedColumn = columnName.toLowerCase();
+  return (
+    code === "PGRST204" ||
+    code === "42703" ||
+    (message.includes(normalizedColumn) &&
+      (message.includes("schema cache") ||
+        message.includes("column") ||
+        message.includes("does not exist")))
+  );
 }
 
 function isStorageNotFoundError(error: unknown): boolean {
@@ -388,6 +505,754 @@ async function validatePromotionProductIds(params: {
   }
 
   return params.productIds.filter((productId) => validIds.has(productId));
+}
+
+function moneyFromUnknown(value: unknown, fieldName: string): number {
+  if (value === null || value === undefined) return 0;
+  return toNumber(value, fieldName);
+}
+
+function formatReportDate(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return date.toLocaleString("ru-RU", {
+    timeZone: "Asia/Vladivostok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function reportFileDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function shortOrderId(orderId: string): string {
+  return orderId.slice(0, 8).toUpperCase();
+}
+
+function cityLabel(city: ReportCityRow | undefined | null): string {
+  if (!city) return "Не указан";
+  return `${city.name} (${city.slug.toUpperCase()})`;
+}
+
+function customerLabel(params: {
+  tgUserId: number;
+  tgUsername: string | null;
+  profile?: ReportProfileRow | undefined;
+}): string {
+  const username = params.tgUsername ?? params.profile?.tg_username ?? null;
+  return username ? `@${username.replace(/^@+/, "")}` : String(params.tgUserId);
+}
+
+function categoryReportLabel(categorySlug: string | null | undefined): string {
+  const normalized = normalizePromotionCategorySlug(categorySlug ?? "");
+  const labels: Record<string, string> = {
+    disposable: "Одноразки",
+    liquid: "Жидкости",
+    pod: "Pod",
+    cartridge: "Картриджи",
+    tobacco: "Табак",
+    other: "Прочее",
+  };
+  return labels[normalized] ?? normalized;
+}
+
+function normalizeAddressForReport(value: string | null): string {
+  return (value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[.,;:]+$/g, "")
+    .toLowerCase();
+}
+
+function appendJsonSheet(
+  workbook: XLSX.WorkBook,
+  sheetName: string,
+  rows: Array<Record<string, unknown>>,
+): void {
+  const data = rows.length > 0 ? rows : [{ "Нет данных": "" }];
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const headers = Object.keys(data[0] ?? {});
+
+  worksheet["!cols"] = headers.map((header) => {
+    const maxCellLength = data.reduce((max, row) => {
+      const value = row[header];
+      const text =
+        value === null || value === undefined
+          ? ""
+          : value instanceof Date
+            ? value.toISOString()
+            : String(value);
+      return Math.max(max, text.length);
+    }, header.length);
+
+    return { wch: Math.max(10, Math.min(54, maxCellLength + 2)) };
+  });
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
+}
+
+async function fetchDoneReportOrders(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+): Promise<ReportOrderRow[]> {
+  const selectWithCoupon =
+    "id,created_at,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,total_before_discount,promotion_discount_amount,discount_amount,total_after_discount,coupon_id";
+  const selectWithoutCoupon =
+    "id,created_at,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,total_before_discount,promotion_discount_amount,discount_amount,total_after_discount";
+
+  let select = selectWithCoupon;
+
+  for (;;) {
+    const rows: ReportOrderRow[] = [];
+    let offset = 0;
+
+    for (;;) {
+      const { data, error } = await supabase
+        .from("orders")
+        .select(select)
+        .eq("status", "done")
+        .order("created_at", { ascending: false })
+        .range(offset, offset + REPORT_PAGE_SIZE - 1);
+
+      if (error) {
+        if (select === selectWithCoupon && isMissingColumnError(error, "coupon_id")) {
+          select = selectWithoutCoupon;
+          break;
+        }
+        throw new HttpError(500, "DB", `Failed to load done orders: ${error.message}`);
+      }
+
+      const page = (data ?? []) as unknown as ReportOrderRow[];
+      rows.push(...page);
+      if (page.length < REPORT_PAGE_SIZE) return rows;
+      offset += page.length;
+    }
+  }
+}
+
+async function fetchReportOrderItems(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  orderIds: string[],
+): Promise<ReportOrderItemRow[]> {
+  const rows: ReportOrderItemRow[] = [];
+
+  for (const part of chunk(orderIds, 300)) {
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from("order_items")
+        .select("order_id,product_id,qty,unit_price")
+        .in("order_id", part)
+        .range(offset, offset + REPORT_PAGE_SIZE - 1);
+
+      if (error) {
+        throw new HttpError(500, "DB", `Failed to load report order items: ${error.message}`);
+      }
+
+      const page = (data ?? []) as ReportOrderItemRow[];
+      rows.push(...page);
+      if (page.length < REPORT_PAGE_SIZE) break;
+      offset += page.length;
+    }
+  }
+
+  return rows;
+}
+
+async function fetchReportProducts(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  productIds: string[],
+): Promise<ReportProductRow[]> {
+  const rows: ReportProductRow[] = [];
+
+  for (const part of chunk(productIds, 500)) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("id,title,category_slug")
+      .in("id", part);
+
+    if (error) {
+      throw new HttpError(500, "DB", `Failed to load report products: ${error.message}`);
+    }
+
+    rows.push(...((data ?? []) as ReportProductRow[]));
+  }
+
+  return rows;
+}
+
+async function fetchReportCities(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+): Promise<ReportCityRow[]> {
+  const { data, error } = await supabase
+    .from("cities")
+    .select("id,name,slug")
+    .order("slug", { ascending: true });
+
+  if (error) {
+    throw new HttpError(500, "DB", `Failed to load report cities: ${error.message}`);
+  }
+
+  return (data ?? []) as ReportCityRow[];
+}
+
+async function fetchReportLoyaltyTransactions(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  orderIds: string[],
+): Promise<ReportLoyaltyRow[]> {
+  const rows: ReportLoyaltyRow[] = [];
+
+  for (const part of chunk(orderIds, 500)) {
+    const { data, error } = await supabase
+      .from("loyalty_transactions")
+      .select("id,tg_user_id,delta_points,kind,referral_id,order_id,created_at")
+      .in("order_id", part);
+
+    if (error) {
+      if (isMissingDbObjectError(error, "loyalty_transactions")) return [];
+      throw new HttpError(500, "DB", `Failed to load loyalty transactions: ${error.message}`);
+    }
+
+    rows.push(...((data ?? []) as ReportLoyaltyRow[]));
+  }
+
+  return rows;
+}
+
+async function fetchReportCoupons(params: {
+  supabase: ReturnType<typeof createServiceSupabaseClient>;
+  orderIds: string[];
+  couponIds: string[];
+}): Promise<ReportCouponRow[]> {
+  const byId = new Map<string, ReportCouponRow>();
+  const select =
+    "id,tg_user_id,kind,value,min_order_sum,max_discount,source,referral_id,is_used,used_order_id,expires_at,created_at,used_at";
+
+  for (const part of chunk(params.orderIds, 500)) {
+    const { data, error } = await params.supabase
+      .from("coupons")
+      .select(select)
+      .in("used_order_id", part);
+
+    if (error) {
+      if (isMissingDbObjectError(error, "coupons")) return [];
+      throw new HttpError(500, "DB", `Failed to load coupons by order: ${error.message}`);
+    }
+
+    for (const row of (data ?? []) as ReportCouponRow[]) byId.set(row.id, row);
+  }
+
+  for (const part of chunk(params.couponIds, 500)) {
+    if (part.length === 0) continue;
+    const { data, error } = await params.supabase.from("coupons").select(select).in("id", part);
+
+    if (error) {
+      if (isMissingDbObjectError(error, "coupons")) return Array.from(byId.values());
+      throw new HttpError(500, "DB", `Failed to load coupons by id: ${error.message}`);
+    }
+
+    for (const row of (data ?? []) as ReportCouponRow[]) byId.set(row.id, row);
+  }
+
+  return Array.from(byId.values());
+}
+
+async function fetchReportReferrals(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  userIds: number[],
+): Promise<ReportReferralRow[]> {
+  const rows: ReportReferralRow[] = [];
+
+  for (const part of chunk(userIds, 500)) {
+    const { data, error } = await supabase
+      .from("referrals")
+      .select("id,inviter_tg_user_id,invitee_tg_user_id,status,qualified_order_id,qualified_at,rewarded_at,created_at")
+      .in("invitee_tg_user_id", part);
+
+    if (error) {
+      if (isMissingDbObjectError(error, "referrals")) return [];
+      throw new HttpError(500, "DB", `Failed to load referrals: ${error.message}`);
+    }
+
+    rows.push(...((data ?? []) as ReportReferralRow[]));
+  }
+
+  return rows;
+}
+
+async function fetchReportProfiles(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  userIds: number[],
+): Promise<ReportProfileRow[]> {
+  const rows: ReportProfileRow[] = [];
+
+  for (const part of chunk(userIds, 500)) {
+    const { data, error } = await supabase
+      .from("customer_profiles")
+      .select("tg_user_id,referral_code,referred_by_tg_user_id,referral_bound_at,tg_username,created_at")
+      .in("tg_user_id", part);
+
+    if (error) {
+      if (isMissingDbObjectError(error, "customer_profiles")) return [];
+      throw new HttpError(500, "DB", `Failed to load customer profiles: ${error.message}`);
+    }
+
+    rows.push(...((data ?? []) as ReportProfileRow[]));
+  }
+
+  return rows;
+}
+
+async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename: string }> {
+  const supabase = createServiceSupabaseClient();
+  const orders = await fetchDoneReportOrders(supabase);
+  const orderIds = orders.map((order) => order.id);
+  const userIds = Array.from(new Set(orders.map((order) => order.tg_user_id)));
+  const couponIds = Array.from(
+    new Set(
+      orders
+        .map((order) => order.coupon_id)
+        .filter((couponId): couponId is string => typeof couponId === "string" && couponId.length > 0),
+    ),
+  );
+
+  const items = orderIds.length > 0 ? await fetchReportOrderItems(supabase, orderIds) : [];
+  const productIds = Array.from(
+    new Set(items.map((item) => item.product_id).filter((id): id is string => typeof id === "string")),
+  );
+
+  const [cities, products, loyaltyRows, coupons, referrals] = await Promise.all([
+    fetchReportCities(supabase),
+    productIds.length > 0 ? fetchReportProducts(supabase, productIds) : Promise.resolve([]),
+    orderIds.length > 0 ? fetchReportLoyaltyTransactions(supabase, orderIds) : Promise.resolve([]),
+    orderIds.length > 0 || couponIds.length > 0
+      ? fetchReportCoupons({ supabase, orderIds, couponIds })
+      : Promise.resolve([]),
+    userIds.length > 0 ? fetchReportReferrals(supabase, userIds) : Promise.resolve([]),
+  ]);
+
+  const referralUserIds = Array.from(
+    new Set([
+      ...userIds,
+      ...referrals.map((referral) => referral.inviter_tg_user_id),
+      ...referrals.map((referral) => referral.invitee_tg_user_id),
+    ]),
+  );
+  const profiles =
+    referralUserIds.length > 0 ? await fetchReportProfiles(supabase, referralUserIds) : [];
+
+  const cityById = new Map(cities.map((city) => [city.id, city]));
+  const productById = new Map(products.map((product) => [product.id, product]));
+  const profileByUserId = new Map(profiles.map((profile) => [profile.tg_user_id, profile]));
+  const referralByInviteeId = new Map(referrals.map((referral) => [referral.invitee_tg_user_id, referral]));
+  const couponsByOrderId = new Map<string, ReportCouponRow>();
+  const couponById = new Map(coupons.map((coupon) => [coupon.id, coupon]));
+  for (const coupon of coupons) {
+    if (coupon.used_order_id) couponsByOrderId.set(coupon.used_order_id, coupon);
+  }
+
+  const loyaltyByOrderId = new Map<string, ReportLoyaltyRow[]>();
+  for (const row of loyaltyRows) {
+    if (!row.order_id) continue;
+    const current = loyaltyByOrderId.get(row.order_id) ?? [];
+    current.push(row);
+    loyaltyByOrderId.set(row.order_id, current);
+  }
+
+  const itemsByOrderId = new Map<string, ReportOrderItemRow[]>();
+  for (const item of items) {
+    const current = itemsByOrderId.get(item.order_id) ?? [];
+    current.push(item);
+    itemsByOrderId.set(item.order_id, current);
+  }
+
+  const cityStats = new Map<
+    string,
+    {
+      city: string;
+      orders: number;
+      revenue: number;
+      beforeDiscount: number;
+      promoDiscount: number;
+      pointsSpent: number;
+      qty: number;
+      customers: Set<number>;
+      delivery: number;
+      pickup: number;
+    }
+  >();
+  const productStats = new Map<
+    string,
+    {
+      city: string;
+      category: string;
+      productId: string;
+      title: string;
+      qty: number;
+      revenue: number;
+      orders: Set<string>;
+      customers: Set<number>;
+    }
+  >();
+  const customerStats = new Map<
+    number,
+    {
+      userId: number;
+      username: string | null;
+      orders: number;
+      revenue: number;
+      beforeDiscount: number;
+      promoDiscount: number;
+      pointsSpent: number;
+      qty: number;
+      cities: Set<string>;
+      addresses: Set<string>;
+      firstOrderAt: string | null;
+      lastOrderAt: string | null;
+    }
+  >();
+  const addressStats = new Map<
+    string,
+    {
+      city: string;
+      address: string;
+      orders: number;
+      revenue: number;
+      customers: Set<number>;
+      lastOrderAt: string | null;
+    }
+  >();
+
+  const orderRows: Array<Record<string, unknown>> = [];
+  const itemRows: Array<Record<string, unknown>> = [];
+
+  orders.forEach((order, index) => {
+    const orderItems = itemsByOrderId.get(order.id) ?? [];
+    const city = cityById.get(order.city_id ?? -1);
+    const cityName = cityLabel(city);
+    const parsedComment = parseOrderComment(order.comment);
+    const totalBeforeDiscount = moneyFromUnknown(
+      order.total_before_discount ?? order.total_price,
+      "orders.total_before_discount",
+    );
+    const totalPaid = moneyFromUnknown(
+      order.total_after_discount ?? order.total_price,
+      "orders.total_after_discount",
+    );
+    const promoDiscount = moneyFromUnknown(
+      order.promotion_discount_amount,
+      "orders.promotion_discount_amount",
+    );
+    const pointsSpentFromOrder = moneyFromUnknown(order.discount_amount, "orders.discount_amount");
+    const pointsSpentFromLedger = (loyaltyByOrderId.get(order.id) ?? [])
+      .filter((row) => row.kind === "order_points_spend" && row.delta_points < 0)
+      .reduce((sum, row) => sum + Math.abs(row.delta_points), 0);
+    const pointsSpent = Math.max(pointsSpentFromOrder, pointsSpentFromLedger);
+    const coupon = order.coupon_id
+      ? couponById.get(order.coupon_id) ?? couponsByOrderId.get(order.id) ?? null
+      : couponsByOrderId.get(order.id) ?? null;
+    const referral = referralByInviteeId.get(order.tg_user_id) ?? null;
+    const profile = profileByUserId.get(order.tg_user_id);
+    const inviterProfile =
+      referral && profileByUserId.has(referral.inviter_tg_user_id)
+        ? profileByUserId.get(referral.inviter_tg_user_id)
+        : undefined;
+    const customer = customerLabel({
+      tgUserId: order.tg_user_id,
+      tgUsername: order.tg_username,
+      profile,
+    });
+    const itemQty = orderItems.reduce((sum, item) => sum + Math.max(0, Math.trunc(item.qty)), 0);
+    const categories = Array.from(
+      new Set(
+        orderItems.map((item) =>
+          categoryReportLabel(
+            item.product_id ? productById.get(item.product_id)?.category_slug ?? "other" : "other",
+          ),
+        ),
+      ),
+    ).join(", ");
+    const reportOrderNumber = index + 1;
+
+    orderRows.push({
+      "№": reportOrderNumber,
+      "Номер заказа": shortOrderId(order.id),
+      "ID заказа": order.id,
+      "Дата": formatReportDate(order.created_at),
+      "Дата ISO": order.created_at,
+      "Город": cityName,
+      "Клиент": customer,
+      "tg_user_id": order.tg_user_id,
+      "username": order.tg_username ? `@${order.tg_username}` : "",
+      "Тип доставки": order.delivery_method,
+      "Адрес": parsedComment.address ?? "",
+      "Дата доставки": parsedComment.deliveryDate ?? "",
+      "Время доставки": parsedComment.deliveryTimeSlot ?? "",
+      "Комментарий": parsedComment.comment ?? "",
+      "Типы продуктов": categories,
+      "Товаров, шт": itemQty,
+      "Строк товаров": orderItems.length,
+      "Сумма до скидок": totalBeforeDiscount,
+      "Скидка 1+1/акции": promoDiscount,
+      "Реферальные баллы списано": pointsSpent,
+      "Промокод использован": coupon ? "да" : "нет",
+      "Промокод": coupon?.id ?? order.coupon_id ?? "",
+      "Промокод тип": coupon?.kind ?? "",
+      "Промокод источник": coupon?.source ?? "",
+      "Рефералка": referral ? "да" : "нет",
+      "Статус рефералки": referral?.status ?? "",
+      "Кто пригласил": referral
+        ? customerLabel({
+            tgUserId: referral.inviter_tg_user_id,
+            tgUsername: null,
+            profile: inviterProfile,
+          })
+        : "",
+      "Итого оплачено": totalPaid,
+    });
+
+    const cityKey = city?.slug ?? "unknown";
+    const cityStat = cityStats.get(cityKey) ?? {
+      city: cityName,
+      orders: 0,
+      revenue: 0,
+      beforeDiscount: 0,
+      promoDiscount: 0,
+      pointsSpent: 0,
+      qty: 0,
+      customers: new Set<number>(),
+      delivery: 0,
+      pickup: 0,
+    };
+    cityStat.orders += 1;
+    cityStat.revenue += totalPaid;
+    cityStat.beforeDiscount += totalBeforeDiscount;
+    cityStat.promoDiscount += promoDiscount;
+    cityStat.pointsSpent += pointsSpent;
+    cityStat.qty += itemQty;
+    cityStat.customers.add(order.tg_user_id);
+    if (order.delivery_method === "delivery") cityStat.delivery += 1;
+    else cityStat.pickup += 1;
+    cityStats.set(cityKey, cityStat);
+
+    const customerStat = customerStats.get(order.tg_user_id) ?? {
+      userId: order.tg_user_id,
+      username: order.tg_username,
+      orders: 0,
+      revenue: 0,
+      beforeDiscount: 0,
+      promoDiscount: 0,
+      pointsSpent: 0,
+      qty: 0,
+      cities: new Set<string>(),
+      addresses: new Set<string>(),
+      firstOrderAt: null,
+      lastOrderAt: null,
+    };
+    customerStat.orders += 1;
+    customerStat.revenue += totalPaid;
+    customerStat.beforeDiscount += totalBeforeDiscount;
+    customerStat.promoDiscount += promoDiscount;
+    customerStat.pointsSpent += pointsSpent;
+    customerStat.qty += itemQty;
+    customerStat.cities.add(cityName);
+    if (parsedComment.address) customerStat.addresses.add(parsedComment.address);
+    if (!customerStat.firstOrderAt || order.created_at < customerStat.firstOrderAt) {
+      customerStat.firstOrderAt = order.created_at;
+    }
+    if (!customerStat.lastOrderAt || order.created_at > customerStat.lastOrderAt) {
+      customerStat.lastOrderAt = order.created_at;
+    }
+    customerStats.set(order.tg_user_id, customerStat);
+
+    const normalizedAddress = normalizeAddressForReport(parsedComment.address);
+    if (normalizedAddress) {
+      const addressKey = `${cityKey}:${normalizedAddress}`;
+      const addressStat = addressStats.get(addressKey) ?? {
+        city: cityName,
+        address: parsedComment.address ?? normalizedAddress,
+        orders: 0,
+        revenue: 0,
+        customers: new Set<number>(),
+        lastOrderAt: null,
+      };
+      addressStat.orders += 1;
+      addressStat.revenue += totalPaid;
+      addressStat.customers.add(order.tg_user_id);
+      if (!addressStat.lastOrderAt || order.created_at > addressStat.lastOrderAt) {
+        addressStat.lastOrderAt = order.created_at;
+      }
+      addressStats.set(addressKey, addressStat);
+    }
+
+    for (const item of orderItems) {
+      const product = item.product_id ? productById.get(item.product_id) : undefined;
+      const qty = Math.max(0, Math.trunc(item.qty));
+      const unitPrice = moneyFromUnknown(item.unit_price, "order_items.unit_price");
+      const lineTotal = unitPrice * qty;
+      const category = categoryReportLabel(product?.category_slug);
+      const productTitle = product?.title ?? "Товар удалён";
+      const productId = item.product_id ?? "";
+
+      itemRows.push({
+        "№ заказа": reportOrderNumber,
+        "Номер заказа": shortOrderId(order.id),
+        "ID заказа": order.id,
+        "Дата": formatReportDate(order.created_at),
+        "Город": cityName,
+        "Клиент": customer,
+        "tg_user_id": order.tg_user_id,
+        "Адрес": parsedComment.address ?? "",
+        "product_id": productId,
+        "Название товара": productTitle,
+        "Тип продукта": category,
+        "Кол-во": qty,
+        "Цена за шт": unitPrice,
+        "Сумма строки": lineTotal,
+      });
+
+      const productKey = `${cityKey}:${productId || productTitle}`;
+      const productStat = productStats.get(productKey) ?? {
+        city: cityName,
+        category,
+        productId,
+        title: productTitle,
+        qty: 0,
+        revenue: 0,
+        orders: new Set<string>(),
+        customers: new Set<number>(),
+      };
+      productStat.qty += qty;
+      productStat.revenue += lineTotal;
+      productStat.orders.add(order.id);
+      productStat.customers.add(order.tg_user_id);
+      productStats.set(productKey, productStat);
+    }
+  });
+
+  const cityRows = Array.from(cityStats.values())
+    .sort((a, b) => b.revenue - a.revenue)
+    .map((stat) => ({
+      "Город": stat.city,
+      "Выполненных заказов": stat.orders,
+      "Выручка": stat.revenue,
+      "Средний чек": stat.orders > 0 ? Math.round(stat.revenue / stat.orders) : 0,
+      "Сумма до скидок": stat.beforeDiscount,
+      "Скидка 1+1/акции": stat.promoDiscount,
+      "Реферальные баллы списано": stat.pointsSpent,
+      "Товаров, шт": stat.qty,
+      "Уникальных клиентов": stat.customers.size,
+      "Доставка": stat.delivery,
+      "Самовывоз": stat.pickup,
+    }));
+
+  const productRows = Array.from(productStats.values())
+    .sort((a, b) => b.revenue - a.revenue || b.qty - a.qty)
+    .map((stat) => ({
+      "Город": stat.city,
+      "Тип продукта": stat.category,
+      "product_id": stat.productId,
+      "Название товара": stat.title,
+      "Кол-во": stat.qty,
+      "Выручка по строкам": stat.revenue,
+      "Заказов": stat.orders.size,
+      "Уникальных клиентов": stat.customers.size,
+    }));
+
+  const customerRows = Array.from(customerStats.values())
+    .sort((a, b) => b.revenue - a.revenue || b.orders - a.orders)
+    .map((stat) => {
+      const profile = profileByUserId.get(stat.userId);
+      const referral = referralByInviteeId.get(stat.userId);
+      return {
+        "Клиент": customerLabel({
+          tgUserId: stat.userId,
+          tgUsername: stat.username,
+          profile,
+        }),
+        "tg_user_id": stat.userId,
+        "username": stat.username ? `@${stat.username}` : profile?.tg_username ? `@${profile.tg_username}` : "",
+        "Заказов": stat.orders,
+        "Выручка": stat.revenue,
+        "Средний чек": stat.orders > 0 ? Math.round(stat.revenue / stat.orders) : 0,
+        "Сумма до скидок": stat.beforeDiscount,
+        "Скидка 1+1/акции": stat.promoDiscount,
+        "Реферальные баллы списано": stat.pointsSpent,
+        "Товаров, шт": stat.qty,
+        "Города": Array.from(stat.cities).join(", "),
+        "Адреса": Array.from(stat.addresses).join(" | "),
+        "Первый заказ": stat.firstOrderAt ? formatReportDate(stat.firstOrderAt) : "",
+        "Последний заказ": stat.lastOrderAt ? formatReportDate(stat.lastOrderAt) : "",
+        "Пришёл по рефералке": referral ? "да" : "нет",
+        "Статус рефералки": referral?.status ?? "",
+      };
+    });
+
+  const addressRows = Array.from(addressStats.values())
+    .sort((a, b) => b.orders - a.orders || b.revenue - a.revenue)
+    .map((stat) => ({
+      "Город": stat.city,
+      "Адрес": stat.address,
+      "Заказов": stat.orders,
+      "Выручка": stat.revenue,
+      "Уникальных клиентов": stat.customers.size,
+      "Последний заказ": stat.lastOrderAt ? formatReportDate(stat.lastOrderAt) : "",
+    }));
+
+  const referralRows = referrals.map((referral) => ({
+    "referral_id": referral.id,
+    "Пригласивший": customerLabel({
+      tgUserId: referral.inviter_tg_user_id,
+      tgUsername: null,
+      profile: profileByUserId.get(referral.inviter_tg_user_id),
+    }),
+    "ID пригласившего": referral.inviter_tg_user_id,
+    "Приглашенный": customerLabel({
+      tgUserId: referral.invitee_tg_user_id,
+      tgUsername: null,
+      profile: profileByUserId.get(referral.invitee_tg_user_id),
+    }),
+    "ID приглашенного": referral.invitee_tg_user_id,
+    "Статус": referral.status,
+    "Квалифицированный заказ": referral.qualified_order_id ?? "",
+    "Начислено": referral.rewarded_at ? "да" : "нет",
+    "Дата создания": formatReportDate(referral.created_at),
+    "Дата награды": referral.rewarded_at ? formatReportDate(referral.rewarded_at) : "",
+  }));
+
+  const couponRows = coupons.map((coupon) => ({
+    "Промокод": coupon.id,
+    "tg_user_id": coupon.tg_user_id,
+    "Тип": coupon.kind,
+    "Значение": coupon.value,
+    "Мин. сумма": coupon.min_order_sum,
+    "Макс. скидка": coupon.max_discount ?? "",
+    "Источник": coupon.source,
+    "referral_id": coupon.referral_id ?? "",
+    "Использован": coupon.is_used ? "да" : "нет",
+    "ID заказа": coupon.used_order_id ?? "",
+    "Создан": formatReportDate(coupon.created_at),
+    "Использован в дату": coupon.used_at ? formatReportDate(coupon.used_at) : "",
+  }));
+
+  const workbook = XLSX.utils.book_new();
+  appendJsonSheet(workbook, "Заказы", orderRows);
+  appendJsonSheet(workbook, "Позиции", itemRows);
+  appendJsonSheet(workbook, "Города", cityRows);
+  appendJsonSheet(workbook, "Товары", productRows);
+  appendJsonSheet(workbook, "Клиенты", customerRows);
+  appendJsonSheet(workbook, "Адреса", addressRows);
+  appendJsonSheet(workbook, "Рефералка", referralRows);
+  appendJsonSheet(workbook, "Промокоды", couponRows);
+
+  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+  return {
+    buffer,
+    filename: `business-report-done-orders-${reportFileDate()}.xlsx`,
+  };
 }
 
 function getPromotionBrandLabelScore(value: string): number {
@@ -1915,6 +2780,34 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           const body = fail("NOT_FOUND", "File not found");
           return reply.code(404).send(body);
         }
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Body: unknown; Reply: Buffer | ApiFailure }>(
+    "/api/admin/reports/business",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        const schema = z.object({
+          password: z.string(),
+        });
+        const parsed = schema.safeParse(request.body);
+        if (!parsed.success || parsed.data.password !== ADMIN_REPORT_PASSWORD) {
+          throw new HttpError(403, "FORBIDDEN", "Invalid report password");
+        }
+
+        const { buffer, filename } = await buildBusinessReportWorkbook();
+        return reply
+          .code(200)
+          .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+          .header("Content-Disposition", `attachment; filename="${filename}"`)
+          .header("Cache-Control", "no-store")
+          .send(buffer);
+      } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
       }
