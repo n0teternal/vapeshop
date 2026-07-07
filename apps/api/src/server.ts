@@ -119,6 +119,25 @@ function requireCustomerTelegramUser(params: {
   return requireVerifiedTelegramRequest(params).user;
 }
 
+function requireReferralTelegramContext(params: {
+  headers: Record<string, unknown>;
+  initDataFallback?: string | undefined;
+}): { user: { id: number; username: string | null }; startParam: string | null } {
+  const devHeaderOn = getHeaderString(params.headers["x-dev-admin"]) === "1";
+  if (config.isDev && devHeaderOn && config.dev.adminTgUserId) {
+    return { user: { id: config.dev.adminTgUserId, username: null }, startParam: null };
+  }
+  if (config.isDev && devHeaderOn) {
+    return { user: { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" }, startParam: null };
+  }
+
+  const verified = requireVerifiedTelegramRequest(params);
+  const startParam =
+    typeof verified.params.start_param === "string" ? verified.params.start_param : null;
+
+  return { user: verified.user, startParam };
+}
+
 function parseOptionalTrimmedString(value: unknown, fieldName: string): string | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== "string") {
@@ -544,16 +563,14 @@ app.post<{
     | ErrorResponse;
 }>("/api/referrals/bootstrap", async (request, reply) => {
   try {
-    const verified = requireVerifiedTelegramRequest({
+    const context = requireReferralTelegramContext({
       headers: request.headers as Record<string, unknown>,
     });
 
-    const startParam =
-      typeof verified.params.start_param === "string" ? verified.params.start_param : null;
     const result = await bootstrapReferralProfile({
-      tgUserId: verified.user.id,
-      tgUsername: verified.user.username,
-      startParam,
+      tgUserId: context.user.id,
+      tgUsername: context.user.username,
+      startParam: context.startParam,
     });
 
     return reply.code(200).send(ok(result));
@@ -576,7 +593,7 @@ app.get<{
   Reply: ApiSuccess<Awaited<ReturnType<typeof getReferralOverview>>> | ErrorResponse;
 }>("/api/referrals/overview", async (request, reply) => {
   try {
-    const verified = requireVerifiedTelegramRequest({
+    const context = requireReferralTelegramContext({
       headers: request.headers as Record<string, unknown>,
     });
 
@@ -585,13 +602,10 @@ app.get<{
     const limit = Number.isFinite(limitRaw) && Number.isInteger(limitRaw) ? limitRaw : 20;
     const offset = Number.isFinite(offsetRaw) && Number.isInteger(offsetRaw) ? offsetRaw : 0;
 
-    const startParam =
-      typeof verified.params.start_param === "string" ? verified.params.start_param : null;
-
     const overview = await getReferralOverview({
-      tgUserId: verified.user.id,
-      tgUsername: verified.user.username,
-      startParam,
+      tgUserId: context.user.id,
+      tgUsername: context.user.username,
+      startParam: context.startParam,
       limit,
       offset,
     });
