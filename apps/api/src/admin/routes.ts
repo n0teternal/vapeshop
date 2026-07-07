@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fs from "node:fs/promises";
 import path from "node:path";
 import * as XLSX from "xlsx";
+import XlsxPopulate from "xlsx-populate";
 import { z } from "zod";
 import { config } from "../config.js";
 import { HttpError, isHttpError } from "../httpError.js";
@@ -134,8 +135,9 @@ function inferMimeType(fileName: string): string | null {
 
 const VERSIONED_IMAGE_CACHE_CONTROL_SECONDS = "31536000";
 const DEFAULT_IMAGE_CACHE_CONTROL_SECONDS = "2592000";
-const ADMIN_REPORT_PASSWORD = "1799q!";
+const ADMIN_REPORT_PASSWORD = "q81231";
 const REPORT_PAGE_SIZE = 1000;
+const REPORT_CITY_SLUGS = new Set(["vvo", "blg"]);
 
 type ListedImageFile = { name: string; size: number; updatedAt: string };
 type StorageLocation = { bucket: string; prefix: string };
@@ -595,6 +597,15 @@ function appendJsonSheet(
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
 }
 
+async function encryptWorkbookBuffer(buffer: Buffer, password: string): Promise<Buffer> {
+  const workbook = await XlsxPopulate.fromDataAsync(buffer);
+  const encrypted = await workbook.outputAsync({ type: "nodebuffer", password });
+  if (Buffer.isBuffer(encrypted)) return encrypted;
+  if (encrypted instanceof ArrayBuffer) return Buffer.from(encrypted);
+  if (typeof encrypted === "string") return Buffer.from(encrypted, "binary");
+  return Buffer.from(encrypted);
+}
+
 async function fetchDoneReportOrders(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
 ): Promise<ReportOrderRow[]> {
@@ -808,7 +819,12 @@ async function fetchReportProfiles(
 
 async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename: string }> {
   const supabase = createServiceSupabaseClient();
-  const orders = await fetchDoneReportOrders(supabase);
+  const allCities = await fetchReportCities(supabase);
+  const reportCities = allCities.filter((city) => REPORT_CITY_SLUGS.has(city.slug));
+  const reportCityIds = new Set(reportCities.map((city) => city.id));
+  const orders = (await fetchDoneReportOrders(supabase)).filter(
+    (order) => typeof order.city_id === "number" && reportCityIds.has(order.city_id),
+  );
   const orderIds = orders.map((order) => order.id);
   const userIds = Array.from(new Set(orders.map((order) => order.tg_user_id)));
   const couponIds = Array.from(
@@ -824,8 +840,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
     new Set(items.map((item) => item.product_id).filter((id): id is string => typeof id === "string")),
   );
 
-  const [cities, products, loyaltyRows, coupons, referrals] = await Promise.all([
-    fetchReportCities(supabase),
+  const [products, loyaltyRows, coupons, referrals] = await Promise.all([
     productIds.length > 0 ? fetchReportProducts(supabase, productIds) : Promise.resolve([]),
     orderIds.length > 0 ? fetchReportLoyaltyTransactions(supabase, orderIds) : Promise.resolve([]),
     orderIds.length > 0 || couponIds.length > 0
@@ -844,7 +859,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
   const profiles =
     referralUserIds.length > 0 ? await fetchReportProfiles(supabase, referralUserIds) : [];
 
-  const cityById = new Map(cities.map((city) => [city.id, city]));
+  const cityById = new Map(reportCities.map((city) => [city.id, city]));
   const productById = new Map(products.map((product) => [product.id, product]));
   const profileByUserId = new Map(profiles.map((profile) => [profile.tg_user_id, profile]));
   const referralByInviteeId = new Map(referrals.map((referral) => [referral.invitee_tg_user_id, referral]));
@@ -878,6 +893,9 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       beforeDiscount: number;
       promoDiscount: number;
       pointsSpent: number;
+      promoOrders: number;
+      couponOrders: number;
+      referralOrders: number;
       qty: number;
       customers: Set<number>;
       delivery: number;
@@ -998,7 +1016,9 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       "Сумма до скидок": totalBeforeDiscount,
       "Скидка 1+1/акции": promoDiscount,
       "Реферальные баллы списано": pointsSpent,
+      "Акция использована": promoDiscount > 0 ? "да" : "нет",
       "Промокод использован": coupon ? "да" : "нет",
+      "Промокод/акция": coupon || promoDiscount > 0 ? "да" : "нет",
       "Промокод": coupon?.id ?? order.coupon_id ?? "",
       "Промокод тип": coupon?.kind ?? "",
       "Промокод источник": coupon?.source ?? "",
@@ -1022,6 +1042,9 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       beforeDiscount: 0,
       promoDiscount: 0,
       pointsSpent: 0,
+      promoOrders: 0,
+      couponOrders: 0,
+      referralOrders: 0,
       qty: 0,
       customers: new Set<number>(),
       delivery: 0,
@@ -1032,6 +1055,9 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
     cityStat.beforeDiscount += totalBeforeDiscount;
     cityStat.promoDiscount += promoDiscount;
     cityStat.pointsSpent += pointsSpent;
+    if (promoDiscount > 0) cityStat.promoOrders += 1;
+    if (coupon) cityStat.couponOrders += 1;
+    if (referral) cityStat.referralOrders += 1;
     cityStat.qty += itemQty;
     cityStat.customers.add(order.tg_user_id);
     if (order.delivery_method === "delivery") cityStat.delivery += 1;
@@ -1112,6 +1138,8 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
         "Кол-во": qty,
         "Цена за шт": unitPrice,
         "Сумма строки": lineTotal,
+        "Акция в заказе": promoDiscount > 0 ? "да" : "нет",
+        "Промокод в заказе": coupon ? "да" : "нет",
       });
 
       const productKey = `${cityKey}:${productId || productTitle}`;
@@ -1143,6 +1171,9 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       "Сумма до скидок": stat.beforeDiscount,
       "Скидка 1+1/акции": stat.promoDiscount,
       "Реферальные баллы списано": stat.pointsSpent,
+      "Заказов с акцией": stat.promoOrders,
+      "Заказов с промокодом": stat.couponOrders,
+      "Заказов от рефералов": stat.referralOrders,
       "Товаров, шт": stat.qty,
       "Уникальных клиентов": stat.customers.size,
       "Доставка": stat.delivery,
@@ -1248,10 +1279,11 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
   appendJsonSheet(workbook, "Рефералка", referralRows);
   appendJsonSheet(workbook, "Промокоды", couponRows);
 
-  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+  const plainBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+  const buffer = await encryptWorkbookBuffer(plainBuffer, ADMIN_REPORT_PASSWORD);
   return {
     buffer,
-    filename: `business-report-done-orders-${reportFileDate()}.xlsx`,
+    filename: `business-report-vvo-blg-done-orders-${reportFileDate()}.xlsx`,
   };
 }
 

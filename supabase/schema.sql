@@ -104,6 +104,7 @@ create table if not exists public.orders (
   notify_message_id bigint null,
   notify_sent_at timestamptz null,
   notify_targets jsonb not null default '[]'::jsonb,
+  coupon_id text null,
   edited_at timestamptz null,
   edit_session_expires_at timestamptz null,
   created_at timestamptz not null default now()
@@ -153,6 +154,10 @@ create index if not exists promotion_rules_active_window_idx
 
 create index if not exists orders_status_created_at_idx
   on public.orders (status, created_at desc);
+
+create index if not exists orders_coupon_id_idx
+  on public.orders (coupon_id)
+  where coupon_id is not null;
 
 create index if not exists order_items_order_id_idx
   on public.order_items (order_id);

@@ -159,6 +159,7 @@ type AdminPromotionDraft = {
 
 const PRODUCTS_PAGE_SIZE = 120;
 const ORDERS_PAGE_SIZE = 50;
+const ADMIN_REPORT_PASSWORD = "q81231";
 const PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE =
   "buy_2_get_3_cheapest_free" as const;
 const PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE =
@@ -1965,7 +1966,7 @@ function AdminBusinessReportsManager() {
     setError(null);
     setNotice(null);
 
-    if (password !== "1799q!") {
+    if (password !== ADMIN_REPORT_PASSWORD) {
       setError("Неверный пароль.");
       return;
     }
