@@ -1,7 +1,7 @@
 import { CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, apiGet } from "../api/client";
+import { ApiError, apiGet, apiPost } from "../api/client";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
@@ -47,6 +47,11 @@ type ReferralOverviewBalance = {
     pointsExpireAfterMonths?: number;
     pointsMaxSpendPercent?: number;
   };
+};
+
+type CouponPreviewResponse = {
+  code: string;
+  discountAmount: number;
 };
 
 const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
@@ -301,6 +306,10 @@ export function CartPage() {
     DEFAULT_POINTS_MAX_SPEND_PERCENT,
   );
   const [activePromotionRules, setActivePromotionRules] = useState<ActivePromotionRule[]>([]);
+  const [couponCode, setCouponCode] = useState("");
+  const [couponPreview, setCouponPreview] = useState<CouponPreviewResponse | null>(null);
+  const [couponApplying, setCouponApplying] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const cityToday = useMemo(() => getTodayIsoDateForCity(state.city, nowMs), [state.city, nowMs]);
   const minDeliveryDate = useMemo(
@@ -314,6 +323,7 @@ export function CartPage() {
     : false;
   const showBlgDeliverySchedule =
     state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
+  const promoCodesAvailable = state.city === "blg";
   const availableDeliveryTimeSlots = useMemo(
     () =>
       getBlgDeliveryTimeSlotsForDate(checkoutDraft.deliveryDate).filter((slot) =>
@@ -353,10 +363,17 @@ export function CartPage() {
   }, [activePromotionRules, nowMs, state.cart]);
   const promotionDiscountAmount = Math.min(total, promotionDiscount.discountAmount);
   const totalAfterPromotionDiscount = Math.max(0, total - promotionDiscountAmount);
+  const couponDiscountAmount = orderEditSession || !promoCodesAvailable
+    ? 0
+    : Math.min(totalAfterPromotionDiscount, couponPreview?.discountAmount ?? 0);
+  const totalAfterCouponDiscount = Math.max(
+    0,
+    totalAfterPromotionDiscount - couponDiscountAmount,
+  );
 
   const maxPointsByOrderTotal = useMemo(() => {
-    return Math.max(0, Math.floor((totalAfterPromotionDiscount * pointsMaxSpendPercent) / 100));
-  }, [pointsMaxSpendPercent, totalAfterPromotionDiscount]);
+    return Math.max(0, Math.floor((totalAfterCouponDiscount * pointsMaxSpendPercent) / 100));
+  }, [pointsMaxSpendPercent, totalAfterCouponDiscount]);
 
   const maxPointsToSpend = useMemo(() => {
     return Math.max(0, Math.min(pointsBalance, maxPointsByOrderTotal));
@@ -370,7 +387,7 @@ export function CartPage() {
     : pointsEnabled
       ? maxPointsToSpend
       : 0;
-  const totalToPay = Math.max(0, totalAfterPromotionDiscount - pointsToSpend);
+  const totalToPay = Math.max(0, totalAfterCouponDiscount - pointsToSpend);
   const checkoutHasDiscount = totalToPay < total;
   const checkoutButtonLabel = submitting
     ? orderEditSession
@@ -481,6 +498,13 @@ export function CartPage() {
   }, [maxPointsToSpend, orderEditSession]);
 
   useEffect(() => {
+    if (promoCodesAvailable) return;
+    setCouponCode("");
+    setCouponPreview(null);
+    setCouponError(null);
+  }, [promoCodesAvailable]);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => {
       setNowMs(Date.now());
     }, 30_000);
@@ -523,6 +547,7 @@ export function CartPage() {
     state.cart.length > 0 &&
     state.city !== null &&
     !submitting &&
+    !couponApplying &&
     !editSessionExpired &&
     hasRequiredBlgDeliverySchedule &&
     (checkoutDraft.deliveryMethod !== "delivery" ||
@@ -550,6 +575,44 @@ export function CartPage() {
     }>,
   ): void {
     dispatch({ type: "checkout/set", patch });
+  }
+
+  function updateCouponCode(value: string): void {
+    setCouponCode(value);
+    setCouponError(null);
+    setCouponPreview(null);
+  }
+
+  async function applyCouponCode(): Promise<void> {
+    if (!promoCodesAvailable) {
+      setCouponPreview(null);
+      setCouponError(null);
+      return;
+    }
+
+    const code = couponCode.trim();
+    if (!code) {
+      setCouponPreview(null);
+      setCouponError(null);
+      return;
+    }
+
+    setCouponApplying(true);
+    setCouponError(null);
+    try {
+      const data = await apiPost<CouponPreviewResponse>("/api/promocodes/preview", {
+        code,
+        citySlug: state.city,
+        total: totalAfterPromotionDiscount,
+      });
+      setCouponCode(data.code);
+      setCouponPreview(data);
+    } catch (e: unknown) {
+      setCouponPreview(null);
+      setCouponError(e instanceof Error ? e.message : "Не удалось применить промокод");
+    } finally {
+      setCouponApplying(false);
+    }
   }
 
   async function submitOrder(): Promise<void> {
@@ -620,6 +683,18 @@ export function CartPage() {
         return;
       }
 
+      const couponCodeForOrder =
+        orderEditSession || !promoCodesAvailable ? null : couponPreview?.code ?? null;
+      if (
+        !orderEditSession &&
+        promoCodesAvailable &&
+        couponCode.trim().length > 0 &&
+        !couponCodeForOrder
+      ) {
+        setSubmitError("Примените промокод или очистите поле промокода.");
+        return;
+      }
+
       const pointsToSpendForOrder = orderEditSession
         ? fixedEditPointsToSpend
         : pointsEnabled
@@ -650,6 +725,7 @@ export function CartPage() {
           deliveryTimeSlot: showBlgDeliverySchedule
             ? checkoutDraft.deliveryTimeSlot || null
             : null,
+          couponCode: couponCodeForOrder,
           pointsToSpend: pointsToSpendForOrder,
           items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
         }),
@@ -682,6 +758,9 @@ export function CartPage() {
         setPointsBalance((prev) => Math.max(0, prev - pointsToSpendForOrder));
       }
       setPointsEnabled(false);
+      setCouponCode("");
+      setCouponPreview(null);
+      setCouponError(null);
 
       await notify(
         orderEditSession
@@ -829,6 +908,23 @@ export function CartPage() {
             </CardContent>
           </Card>
         ) : null}
+
+        {promoCodesAvailable && couponDiscountAmount > 0 && couponPreview ? (
+          <Card className="border-sky-300/40 bg-sky-400/10">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">
+                    Промокод {couponPreview.code}
+                  </div>
+                </div>
+                <div className="shrink-0 text-sm font-semibold text-sky-500">
+                  -{formatPriceRub(couponDiscountAmount)}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <Card className="border-border/70 bg-card">
@@ -836,7 +932,7 @@ export function CartPage() {
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Оформление</CardTitle>
             <div className="text-right">
-              {promotionDiscountAmount > 0 || pointsToSpend > 0 ? (
+              {promotionDiscountAmount > 0 || couponDiscountAmount > 0 || pointsToSpend > 0 ? (
                 <div className="text-xs text-muted-foreground line-through">
                   {formatPriceRub(total)}
                 </div>
@@ -994,6 +1090,47 @@ export function CartPage() {
               placeholder="Опционально"
             />
           </label>
+
+          {!orderEditSession && promoCodesAvailable ? (
+            <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">Промокод</span>
+                <div className="flex gap-2">
+                  <Input
+                    value={couponCode}
+                    disabled={submitting || couponApplying}
+                    className="uppercase"
+                    placeholder="SALE500"
+                    onChange={(e) => updateCouponCode(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void applyCouponCode();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={submitting || couponApplying}
+                    onClick={() => void applyCouponCode()}
+                  >
+                    {couponApplying ? "..." : "Применить"}
+                  </Button>
+                </div>
+              </label>
+
+              {couponPreview && couponDiscountAmount > 0 ? (
+                <div className="text-xs text-emerald-500">
+                  {couponPreview.code}: -{formatPriceRub(couponDiscountAmount)}
+                </div>
+              ) : null}
+
+              {couponError ? (
+                <div className="text-xs text-destructive">{couponError}</div>
+              ) : null}
+            </div>
+          ) : null}
 
           {orderEditSession ? (
             orderEditSession.discountAmount > 0 ? (

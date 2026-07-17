@@ -11,6 +11,7 @@ import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import { parseOrderComment } from "../order/orderComment.js";
 import { importProductsCsv } from "../import/productsCsv.js";
 import { importPromoProductsCsv } from "../import/promoProductsCsv.js";
+import { normalizePromoCode } from "../promoCodes/service.js";
 import {
   brandMatches,
   extractPromotionBrandLabel,
@@ -155,6 +156,17 @@ type PromotionRuleAdminRow = {
   created_at: string;
 };
 
+type PromoCodeAdminRow = {
+  code: string;
+  discount_amount: unknown;
+  starts_at: string;
+  ends_at: string;
+  max_uses: number;
+  used_count: number;
+  is_active: boolean;
+  created_at: string;
+};
+
 const PROMOTION_RULE_ADMIN_SELECT_WITH_PRODUCT_IDS =
   "id,city_id,type,title,category_slug,brand,product_ids,starts_at,ends_at,is_active,created_at";
 const PROMOTION_RULE_ADMIN_SELECT_WITHOUT_PRODUCT_IDS =
@@ -173,6 +185,7 @@ type ReportOrderRow = {
   total_before_discount: unknown;
   promotion_discount_amount: unknown;
   discount_amount: unknown;
+  coupon_discount_amount?: unknown;
   total_after_discount: unknown;
   coupon_id?: string | null;
 };
@@ -449,6 +462,37 @@ function mapPromotionRuleForAdmin(
   };
 }
 
+function parsePromoCodeDate(value: string, fieldName: string, endOfDay: boolean): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new HttpError(400, "BAD_REQUEST", `${fieldName} is required`);
+  }
+
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  const isoValue = dateOnlyMatch
+    ? `${trimmed}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}+10:00`
+    : trimmed;
+  const date = new Date(isoValue);
+  if (!Number.isFinite(date.getTime())) {
+    throw new HttpError(400, "BAD_REQUEST", `${fieldName} must be a valid date`);
+  }
+
+  return date.toISOString();
+}
+
+function mapPromoCodeForAdmin(row: PromoCodeAdminRow) {
+  return {
+    code: row.code,
+    discountAmount: Math.max(0, Math.trunc(toNumber(row.discount_amount, "promo_codes.discount_amount"))),
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    maxUses: row.max_uses,
+    usedCount: row.used_count,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+  };
+}
+
 function getJoinedProduct(row: {
   products?: unknown;
 }): { title?: unknown; category_slug?: unknown; is_active?: unknown } | null {
@@ -609,12 +653,14 @@ async function encryptWorkbookBuffer(buffer: Buffer, password: string): Promise<
 async function fetchDoneReportOrders(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
 ): Promise<ReportOrderRow[]> {
-  const selectWithCoupon =
-    "id,created_at,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,total_before_discount,promotion_discount_amount,discount_amount,total_after_discount,coupon_id";
-  const selectWithoutCoupon =
+  const baseSelect =
     "id,created_at,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,total_before_discount,promotion_discount_amount,discount_amount,total_after_discount";
+  const selectWithCouponDiscount = `${baseSelect},coupon_id,coupon_discount_amount`;
+  const selectWithCoupon =
+    `${baseSelect},coupon_id`;
+  const selectWithoutCoupon = baseSelect;
 
-  let select = selectWithCoupon;
+  let select = selectWithCouponDiscount;
 
   for (;;) {
     const rows: ReportOrderRow[] = [];
@@ -629,7 +675,17 @@ async function fetchDoneReportOrders(
         .range(offset, offset + REPORT_PAGE_SIZE - 1);
 
       if (error) {
-        if (select === selectWithCoupon && isMissingColumnError(error, "coupon_id")) {
+        if (
+          select === selectWithCouponDiscount &&
+          isMissingColumnError(error, "coupon_discount_amount")
+        ) {
+          select = selectWithCoupon;
+          break;
+        }
+        if (
+          (select === selectWithCouponDiscount || select === selectWithCoupon) &&
+          isMissingColumnError(error, "coupon_id")
+        ) {
           select = selectWithoutCoupon;
           break;
         }
@@ -771,6 +827,23 @@ async function fetchReportCoupons(params: {
   return Array.from(byId.values());
 }
 
+async function fetchReportPromoCodes(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+): Promise<PromoCodeAdminRow[]> {
+  const { data, error } = await supabase
+    .from("promo_codes")
+    .select("code,discount_amount,starts_at,ends_at,max_uses,used_count,is_active,created_at")
+    .order("created_at", { ascending: false })
+    .limit(1000);
+
+  if (error) {
+    if (isMissingDbObjectError(error, "promo_codes")) return [];
+    throw new HttpError(500, "DB", `Failed to load report promo codes: ${error.message}`);
+  }
+
+  return (data ?? []) as PromoCodeAdminRow[];
+}
+
 async function fetchReportReferrals(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
   userIds: number[],
@@ -817,7 +890,9 @@ async function fetchReportProfiles(
   return rows;
 }
 
-async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename: string }> {
+export async function buildBusinessReportWorkbook(
+  options: { encrypt?: boolean } = {},
+): Promise<{ buffer: Buffer; filename: string }> {
   const supabase = createServiceSupabaseClient();
   const allCities = await fetchReportCities(supabase);
   const reportCities = allCities.filter((city) => REPORT_CITY_SLUGS.has(city.slug));
@@ -840,12 +915,13 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
     new Set(items.map((item) => item.product_id).filter((id): id is string => typeof id === "string")),
   );
 
-  const [products, loyaltyRows, coupons, referrals] = await Promise.all([
+  const [products, loyaltyRows, coupons, promoCodes, referrals] = await Promise.all([
     productIds.length > 0 ? fetchReportProducts(supabase, productIds) : Promise.resolve([]),
     orderIds.length > 0 ? fetchReportLoyaltyTransactions(supabase, orderIds) : Promise.resolve([]),
     orderIds.length > 0 || couponIds.length > 0
       ? fetchReportCoupons({ supabase, orderIds, couponIds })
       : Promise.resolve([]),
+    fetchReportPromoCodes(supabase),
     userIds.length > 0 ? fetchReportReferrals(supabase, userIds) : Promise.resolve([]),
   ]);
 
@@ -892,6 +968,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       revenue: number;
       beforeDiscount: number;
       promoDiscount: number;
+      couponDiscount: number;
       pointsSpent: number;
       promoOrders: number;
       couponOrders: number;
@@ -924,6 +1001,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       revenue: number;
       beforeDiscount: number;
       promoDiscount: number;
+      couponDiscount: number;
       pointsSpent: number;
       qty: number;
       cities: Set<string>;
@@ -964,6 +1042,10 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       order.promotion_discount_amount,
       "orders.promotion_discount_amount",
     );
+    const couponDiscount = moneyFromUnknown(
+      order.coupon_discount_amount ?? 0,
+      "orders.coupon_discount_amount",
+    );
     const pointsSpentFromOrder = moneyFromUnknown(order.discount_amount, "orders.discount_amount");
     const pointsSpentFromLedger = (loyaltyByOrderId.get(order.id) ?? [])
       .filter((row) => row.kind === "order_points_spend" && row.delta_points < 0)
@@ -972,6 +1054,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
     const coupon = order.coupon_id
       ? couponById.get(order.coupon_id) ?? couponsByOrderId.get(order.id) ?? null
       : couponsByOrderId.get(order.id) ?? null;
+    const hasCoupon = coupon !== null || Boolean(order.coupon_id) || couponDiscount > 0;
     const referral = referralByInviteeId.get(order.tg_user_id) ?? null;
     const profile = profileByUserId.get(order.tg_user_id);
     const inviterProfile =
@@ -1015,10 +1098,11 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       "Строк товаров": orderItems.length,
       "Сумма до скидок": totalBeforeDiscount,
       "Скидка 1+1/акции": promoDiscount,
+      "Скидка промокода": couponDiscount,
       "Реферальные баллы списано": pointsSpent,
       "Акция использована": promoDiscount > 0 ? "да" : "нет",
-      "Промокод использован": coupon ? "да" : "нет",
-      "Промокод/акция": coupon || promoDiscount > 0 ? "да" : "нет",
+      "Промокод использован": hasCoupon ? "да" : "нет",
+      "Промокод/акция": hasCoupon || promoDiscount > 0 ? "да" : "нет",
       "Промокод": coupon?.id ?? order.coupon_id ?? "",
       "Промокод тип": coupon?.kind ?? "",
       "Промокод источник": coupon?.source ?? "",
@@ -1041,6 +1125,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       revenue: 0,
       beforeDiscount: 0,
       promoDiscount: 0,
+      couponDiscount: 0,
       pointsSpent: 0,
       promoOrders: 0,
       couponOrders: 0,
@@ -1054,9 +1139,10 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
     cityStat.revenue += totalPaid;
     cityStat.beforeDiscount += totalBeforeDiscount;
     cityStat.promoDiscount += promoDiscount;
+    cityStat.couponDiscount += couponDiscount;
     cityStat.pointsSpent += pointsSpent;
     if (promoDiscount > 0) cityStat.promoOrders += 1;
-    if (coupon) cityStat.couponOrders += 1;
+    if (hasCoupon) cityStat.couponOrders += 1;
     if (referral) cityStat.referralOrders += 1;
     cityStat.qty += itemQty;
     cityStat.customers.add(order.tg_user_id);
@@ -1071,6 +1157,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       revenue: 0,
       beforeDiscount: 0,
       promoDiscount: 0,
+      couponDiscount: 0,
       pointsSpent: 0,
       qty: 0,
       cities: new Set<string>(),
@@ -1082,6 +1169,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
     customerStat.revenue += totalPaid;
     customerStat.beforeDiscount += totalBeforeDiscount;
     customerStat.promoDiscount += promoDiscount;
+    customerStat.couponDiscount += couponDiscount;
     customerStat.pointsSpent += pointsSpent;
     customerStat.qty += itemQty;
     customerStat.cities.add(cityName);
@@ -1139,7 +1227,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
         "Цена за шт": unitPrice,
         "Сумма строки": lineTotal,
         "Акция в заказе": promoDiscount > 0 ? "да" : "нет",
-        "Промокод в заказе": coupon ? "да" : "нет",
+        "Промокод в заказе": hasCoupon ? "да" : "нет",
       });
 
       const productKey = `${cityKey}:${productId || productTitle}`;
@@ -1170,6 +1258,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
       "Средний чек": stat.orders > 0 ? Math.round(stat.revenue / stat.orders) : 0,
       "Сумма до скидок": stat.beforeDiscount,
       "Скидка 1+1/акции": stat.promoDiscount,
+      "Скидка промокодов": stat.couponDiscount,
       "Реферальные баллы списано": stat.pointsSpent,
       "Заказов с акцией": stat.promoOrders,
       "Заказов с промокодом": stat.couponOrders,
@@ -1211,6 +1300,7 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
         "Средний чек": stat.orders > 0 ? Math.round(stat.revenue / stat.orders) : 0,
         "Сумма до скидок": stat.beforeDiscount,
         "Скидка 1+1/акции": stat.promoDiscount,
+        "Скидка промокодов": stat.couponDiscount,
         "Реферальные баллы списано": stat.pointsSpent,
         "Товаров, шт": stat.qty,
         "Города": Array.from(stat.cities).join(", "),
@@ -1269,6 +1359,18 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
     "Использован в дату": coupon.used_at ? formatReportDate(coupon.used_at) : "",
   }));
 
+  const createdPromoCodeRows = promoCodes.map((promoCode) => ({
+    "Промокод": promoCode.code,
+    "Скидка": Math.max(0, Math.trunc(toNumber(promoCode.discount_amount, "promo_codes.discount_amount"))),
+    "Начало": formatReportDate(promoCode.starts_at),
+    "Окончание": formatReportDate(promoCode.ends_at),
+    "Лимит использований": promoCode.max_uses,
+    "Использовано": promoCode.used_count,
+    "Осталось": Math.max(0, promoCode.max_uses - promoCode.used_count),
+    "Активен": promoCode.is_active ? "да" : "нет",
+    "Создан": formatReportDate(promoCode.created_at),
+  }));
+
   const workbook = XLSX.utils.book_new();
   appendJsonSheet(workbook, "Заказы", orderRows);
   appendJsonSheet(workbook, "Позиции", itemRows);
@@ -1278,9 +1380,13 @@ async function buildBusinessReportWorkbook(): Promise<{ buffer: Buffer; filename
   appendJsonSheet(workbook, "Адреса", addressRows);
   appendJsonSheet(workbook, "Рефералка", referralRows);
   appendJsonSheet(workbook, "Промокоды", couponRows);
+  appendJsonSheet(workbook, "Промокоды админ", createdPromoCodeRows);
 
   const plainBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
-  const buffer = await encryptWorkbookBuffer(plainBuffer, ADMIN_REPORT_PASSWORD);
+  const buffer =
+    options.encrypt === false
+      ? plainBuffer
+      : await encryptWorkbookBuffer(plainBuffer, ADMIN_REPORT_PASSWORD);
   return {
     buffer,
     filename: `business-report-vvo-blg-done-orders-${reportFileDate()}.xlsx`,
@@ -1641,6 +1747,118 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         return reply
           .code(200)
           .send(ok(mapPromotionRuleForAdmin(data, new Map([[city.id, { name: city.name, slug: city.slug }]]))));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.get<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/promo-codes",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const supabase = createServiceSupabaseClient();
+        const { data, error } = await supabase
+          .from("promo_codes")
+          .select(
+            "code,discount_amount,starts_at,ends_at,max_uses,used_count,is_active,created_at",
+          )
+          .order("created_at", { ascending: false })
+          .limit(100);
+
+        if (error) {
+          if (isMissingDbObjectError(error, "promo_codes")) {
+            throw new HttpError(
+              500,
+              "DB_SCHEMA_OUTDATED",
+              "Promo codes schema is missing. Run supabase/alter_promo_codes.sql in Supabase SQL Editor.",
+            );
+          }
+          throw new HttpError(500, "DB", `Failed to load promo codes: ${error.message}`);
+        }
+
+        return reply
+          .code(200)
+          .send(ok({ items: ((data ?? []) as PromoCodeAdminRow[]).map(mapPromoCodeForAdmin) }));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Body: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/promo-codes",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+
+        const schema = z.object({
+          code: z.string().trim().min(1).max(64),
+          discountAmount: z.coerce.number().int().min(1).max(1_000_000),
+          startsAt: z.string().trim().min(1).max(80),
+          endsAt: z.string().trim().min(1).max(80),
+          maxUses: z.coerce.number().int().min(1).max(100_000),
+        });
+        const parsed = schema.safeParse(request.body);
+        if (!parsed.success) {
+          throw new HttpError(400, "BAD_REQUEST", parsed.error.issues[0]?.message ?? "Invalid body");
+        }
+
+        const code = normalizePromoCode(parsed.data.code);
+        if (!code || !/^[A-Z0-9_-]+$/.test(code)) {
+          throw new HttpError(
+            400,
+            "BAD_REQUEST",
+            "Promo code may contain only latin letters, numbers, underscores and hyphens.",
+          );
+        }
+
+        const startsAt = parsePromoCodeDate(parsed.data.startsAt, "startsAt", false);
+        const endsAt = parsePromoCodeDate(parsed.data.endsAt, "endsAt", true);
+        if (new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
+          throw new HttpError(400, "BAD_REQUEST", "endsAt must be after startsAt");
+        }
+
+        const supabase = createServiceSupabaseClient();
+        const { data, error } = await supabase
+          .from("promo_codes")
+          .insert({
+            code,
+            discount_amount: parsed.data.discountAmount,
+            starts_at: startsAt,
+            ends_at: endsAt,
+            max_uses: parsed.data.maxUses,
+            used_count: 0,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .select(
+            "code,discount_amount,starts_at,ends_at,max_uses,used_count,is_active,created_at",
+          )
+          .single();
+
+        if (error) {
+          const codeText = typeof error.code === "string" ? error.code : "";
+          if (codeText === "23505") {
+            throw new HttpError(409, "PROMO_CODE_EXISTS", "Promo code already exists.");
+          }
+          if (isMissingDbObjectError(error, "promo_codes")) {
+            throw new HttpError(
+              500,
+              "DB_SCHEMA_OUTDATED",
+              "Promo codes schema is missing. Run supabase/alter_promo_codes.sql in Supabase SQL Editor.",
+            );
+          }
+          throw new HttpError(500, "DB", `Failed to create promo code: ${error.message}`);
+        }
+        if (!data) {
+          throw new HttpError(500, "DB", "Failed to create promo code (empty response)");
+        }
+
+        return reply.code(200).send(ok(mapPromoCodeForAdmin(data as PromoCodeAdminRow)));
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);

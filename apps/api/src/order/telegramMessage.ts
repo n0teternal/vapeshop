@@ -34,6 +34,8 @@ type OrderMessageBaseParams = {
   totalPrice: number;
   discountApplied?: boolean;
   promotionDiscountAmount?: number;
+  couponCode?: string | null;
+  couponDiscountAmount?: number;
   pointsDiscountAmount?: number;
   paymentMethod?: OrderPaymentMethod;
   orderId: string;
@@ -101,6 +103,11 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
   if (promotionDiscountAmount > 0) {
     discountLines.push(`\u0410\u043a\u0446\u0438\u044f: -${formatRub(promotionDiscountAmount)}`);
   }
+  const couponDiscountAmount = Math.max(0, Math.trunc(params.couponDiscountAmount ?? 0));
+  if (couponDiscountAmount > 0) {
+    const code = params.couponCode ? ` ${escapeHtml(params.couponCode)}` : "";
+    discountLines.push(`Промокод${code}: -${formatRub(couponDiscountAmount)}`);
+  }
   if (pointsDiscountAmount > 0) {
     discountLines.push(`\u0411\u0430\u043b\u043b\u044b: -${formatRub(pointsDiscountAmount)}`);
   }
@@ -110,7 +117,7 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
   const promotionBadgePart =
     promotionDiscountAmount > 0 ? `<b>\u0410\u041a\u0426\u0418\u042f!</b>\n` : "";
   const totalSuffix =
-    promotionDiscountAmount > 0
+    promotionDiscountAmount > 0 || couponDiscountAmount > 0
       ? " - \u0410\u041a\u0426\u0418\u042f!"
       : params.discountApplied
         ? " - \u0421\u041a\u0418\u0414\u041a\u0410!"

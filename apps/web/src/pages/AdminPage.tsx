@@ -134,6 +134,29 @@ type AdminPromotionsResponse = {
   items: AdminPromotionRule[];
 };
 
+type AdminPromoCode = {
+  code: string;
+  discountAmount: number;
+  startsAt: string;
+  endsAt: string;
+  maxUses: number;
+  usedCount: number;
+  isActive: boolean;
+  createdAt: string;
+};
+
+type AdminPromoCodesResponse = {
+  items: AdminPromoCode[];
+};
+
+type AdminPromoCodeDraft = {
+  code: string;
+  discountAmount: string;
+  startsAt: string;
+  endsAt: string;
+  maxUses: string;
+};
+
 type AdminPromotionBrandOption = {
   brand: string;
   count: number;
@@ -202,6 +225,15 @@ function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("ru-RU");
+}
+
+function getDateInputValue(daysFromToday = 0): string {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromToday);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function buildPublicFileUrl(baseUrl: string, name: string): string {
@@ -2095,6 +2127,228 @@ function AdminBusinessReportsManager() {
   );
 }
 
+function createDefaultPromoCodeDraft(): AdminPromoCodeDraft {
+  return {
+    code: "",
+    discountAmount: "",
+    startsAt: getDateInputValue(),
+    endsAt: getDateInputValue(7),
+    maxUses: "1",
+  };
+}
+
+function AdminPromoCodesManager() {
+  const [items, setItems] = useState<AdminPromoCode[]>([]);
+  const [draft, setDraft] = useState<AdminPromoCodeDraft>(() =>
+    createDefaultPromoCodeDraft(),
+  );
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiGet<AdminPromoCodesResponse>("/api/admin/promo-codes");
+      setItems(data.items);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось загрузить промокоды");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  function updateDraft(patch: Partial<AdminPromoCodeDraft>): void {
+    setDraft((prev) => ({ ...prev, ...patch }));
+  }
+
+  async function createPromoCode(): Promise<void> {
+    const code = draft.code.trim();
+    const discountAmount = Number(draft.discountAmount);
+    const maxUses = Number(draft.maxUses);
+    if (!code || !Number.isFinite(discountAmount) || !Number.isFinite(maxUses)) {
+      setError("Заполните код, скидку и лимит использований.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const created = await apiPost<AdminPromoCode>("/api/admin/promo-codes", {
+        code,
+        discountAmount,
+        startsAt: draft.startsAt,
+        endsAt: draft.endsAt,
+        maxUses,
+      });
+      setItems((prev) => [created, ...prev.filter((item) => item.code !== created.code)]);
+      setDraft((prev) => ({ ...createDefaultPromoCodeDraft(), startsAt: prev.startsAt }));
+      setNotice(`Промокод ${created.code} создан.`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось создать промокод");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const canCreate =
+    draft.code.trim().length > 0 &&
+    draft.discountAmount.trim().length > 0 &&
+    draft.startsAt.trim().length > 0 &&
+    draft.endsAt.trim().length > 0 &&
+    draft.maxUses.trim().length > 0 &&
+    !saving;
+
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Создание промокодов</div>
+          <div className="mt-1 text-xs text-muted-foreground/80">
+            Код, период, скидка и лимит использований.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={loading || saving}
+          onClick={() => void load()}
+        >
+          Обновить
+        </button>
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <label className="grid gap-1.5 text-sm lg:col-span-2">
+          <span className="text-xs font-semibold text-muted-foreground">Название / код</span>
+          <input
+            className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm uppercase"
+            value={draft.code}
+            disabled={saving}
+            placeholder="SALE500"
+            onChange={(e) => updateDraft({ code: e.target.value })}
+          />
+        </label>
+
+        <label className="grid gap-1.5 text-sm">
+          <span className="text-xs font-semibold text-muted-foreground">Скидка, ₽</span>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+            value={draft.discountAmount}
+            disabled={saving}
+            placeholder="500"
+            onChange={(e) => updateDraft({ discountAmount: e.target.value })}
+          />
+        </label>
+
+        <label className="grid gap-1.5 text-sm">
+          <span className="text-xs font-semibold text-muted-foreground">Использований</span>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+            value={draft.maxUses}
+            disabled={saving}
+            onChange={(e) => updateDraft({ maxUses: e.target.value })}
+          />
+        </label>
+
+        <div className="grid gap-2 sm:grid-cols-2 lg:col-span-5">
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-semibold text-muted-foreground">Начало</span>
+            <input
+              type="date"
+              className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+              value={draft.startsAt}
+              disabled={saving}
+              onChange={(e) => updateDraft({ startsAt: e.target.value })}
+            />
+          </label>
+
+          <label className="grid gap-1.5 text-sm">
+            <span className="text-xs font-semibold text-muted-foreground">Окончание</span>
+            <input
+              type="date"
+              className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+              value={draft.endsAt}
+              disabled={saving}
+              onChange={(e) => updateDraft({ endsAt: e.target.value })}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <button
+          type="button"
+          className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
+          disabled={!canCreate}
+          onClick={() => void createPromoCode()}
+        >
+          {saving ? "Создаём..." : "Создать промокод"}
+        </button>
+      </div>
+
+      {error ? (
+        <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className="mt-3 rounded-xl border border-emerald-400/35 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-500">
+          {notice}
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-2">
+        {loading ? (
+          <div className="h-16 animate-pulse rounded-2xl bg-muted/60" />
+        ) : items.length === 0 ? (
+          <div className="rounded-2xl border border-border/70 bg-card/90 p-3 text-sm text-muted-foreground">
+            Промокодов пока нет.
+          </div>
+        ) : (
+          items.slice(0, 8).map((item) => (
+            <div
+              key={item.code}
+              className="rounded-2xl border border-border/70 bg-card/90 p-3"
+            >
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">{item.code}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {formatDateTime(item.startsAt)} - {formatDateTime(item.endsAt)}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-sm font-semibold">
+                    -{formatRub(item.discountAmount)}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {item.usedCount}/{item.maxUses}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function AdminProductsManager() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<AdminProductsTab>("active");
@@ -2529,6 +2783,7 @@ export function AdminPage() {
           <AdminUploadImages />
           <AdminPromotionsManager />
           <AdminBusinessReportsManager />
+          <AdminPromoCodesManager />
           <AdminProductsManager />
           <AdminOrdersView />
         </>

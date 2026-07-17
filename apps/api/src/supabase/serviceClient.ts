@@ -153,6 +153,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      promo_codes: {
+        Row: {
+          code: string;
+          discount_amount: number;
+          starts_at: string;
+          ends_at: string;
+          max_uses: number;
+          used_count: number;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          code: string;
+          discount_amount: number;
+          starts_at: string;
+          ends_at: string;
+          max_uses: number;
+          used_count?: number;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          code?: string;
+          discount_amount?: number;
+          starts_at?: string;
+          ends_at?: string;
+          max_uses?: number;
+          used_count?: number;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       customer_profiles: {
         Row: {
           tg_user_id: number;
@@ -309,6 +345,7 @@ export type Database = {
           notify_sent_at: string | null;
           notify_targets: Json;
           coupon_id: string | null;
+          coupon_discount_amount: number;
           total_before_discount: number | null;
           promotion_discount_amount: number;
           discount_amount: number;
@@ -331,6 +368,7 @@ export type Database = {
           notify_sent_at?: string | null;
           notify_targets?: Json;
           coupon_id?: string | null;
+          coupon_discount_amount?: number;
           total_before_discount?: number | null;
           promotion_discount_amount?: number;
           discount_amount?: number;
@@ -353,6 +391,7 @@ export type Database = {
           notify_sent_at?: string | null;
           notify_targets?: Json;
           coupon_id?: string | null;
+          coupon_discount_amount?: number;
           total_before_discount?: number | null;
           promotion_discount_amount?: number;
           discount_amount?: number;

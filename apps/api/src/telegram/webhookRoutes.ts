@@ -417,6 +417,8 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       total_price: unknown;
       discount_amount: unknown;
       promotion_discount_amount: unknown;
+      coupon_id: string | null;
+      coupon_discount_amount: unknown;
       notify_chat_id: number | null;
       notify_message_id: number | null;
       notify_targets: unknown;
@@ -424,7 +426,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     };
 
     const selectCols =
-      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,promotion_discount_amount,notify_chat_id,notify_message_id,notify_targets,edited_at";
+      "id,status,city_id,tg_user_id,tg_username,delivery_method,comment,total_price,discount_amount,promotion_discount_amount,coupon_id,coupon_discount_amount,notify_chat_id,notify_message_id,notify_targets,edited_at";
 
     let order: OrderRow | null = null;
 
@@ -630,6 +632,10 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       order.promotion_discount_amount === null || order.promotion_discount_amount === undefined
         ? 0
         : numberFromUnknown(order.promotion_discount_amount);
+    const couponDiscountAmount =
+      order.coupon_discount_amount === null || order.coupon_discount_amount === undefined
+        ? 0
+        : numberFromUnknown(order.coupon_discount_amount);
     const orderStatus = parseOrderStatus(order.status);
     const isEdited = typeof order.edited_at === "string" && order.edited_at.trim().length > 0;
 
@@ -657,8 +663,10 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       lines,
       totalPrice,
       promotionDiscountAmount,
+      couponCode: order.coupon_id,
+      couponDiscountAmount,
       pointsDiscountAmount: discountAmount,
-      discountApplied: discountAmount > 0 || promotionDiscountAmount > 0,
+      discountApplied: discountAmount > 0 || promotionDiscountAmount > 0 || couponDiscountAmount > 0,
       orderId: order.id,
       isEdited,
     });

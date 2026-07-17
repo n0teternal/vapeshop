@@ -1,4 +1,5 @@
 import { HttpError } from "../httpError.js";
+import { releasePromoCodeUsage } from "../promoCodes/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
   isCancellationLockedByDeliveryWindow,
@@ -12,6 +13,7 @@ type OrderRow = {
   city_id: number | null;
   tg_user_id: number;
   comment: string | null;
+  coupon_id: string | null;
 };
 
 type OrderItemRow = {
@@ -179,7 +181,7 @@ export async function cancelOrderAndRestoreInventory(params: {
 
   const { data: order, error: orderError } = await supabase
     .from("orders")
-    .select("id,status,city_id,tg_user_id,comment")
+    .select("id,status,city_id,tg_user_id,comment,coupon_id")
     .eq("id", params.orderId)
     .maybeSingle();
 
@@ -281,6 +283,8 @@ export async function cancelOrderAndRestoreInventory(params: {
 
     throw new HttpError(409, "ORDER_CONFLICT", "Failed to mark order as cancelled");
   }
+
+  await releasePromoCodeUsage((order as OrderRow).coupon_id);
 
   return { changed: true, status: "cancelled" };
 }

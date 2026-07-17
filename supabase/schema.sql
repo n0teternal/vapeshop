@@ -87,6 +87,24 @@ create table if not exists public.promotion_rules (
   check (ends_at is null or starts_at is null or ends_at >= starts_at)
 );
 
+create table if not exists public.promo_codes (
+  code text primary key,
+  discount_amount numeric not null,
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  max_uses int not null,
+  used_count int not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (btrim(code) <> ''),
+  check (discount_amount > 0),
+  check (max_uses > 0),
+  check (used_count >= 0),
+  check (used_count <= max_uses),
+  check (ends_at >= starts_at)
+);
+
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
   tg_user_id bigint not null,
@@ -105,6 +123,7 @@ create table if not exists public.orders (
   notify_sent_at timestamptz null,
   notify_targets jsonb not null default '[]'::jsonb,
   coupon_id text null,
+  coupon_discount_amount numeric not null default 0,
   edited_at timestamptz null,
   edit_session_expires_at timestamptz null,
   created_at timestamptz not null default now()
@@ -152,6 +171,9 @@ create index if not exists promo_products_product_idx
 create index if not exists promotion_rules_active_window_idx
   on public.promotion_rules (city_id, is_active, starts_at, ends_at, id);
 
+create index if not exists promo_codes_active_window_idx
+  on public.promo_codes (is_active, starts_at, ends_at, code);
+
 create index if not exists orders_status_created_at_idx
   on public.orders (status, created_at desc);
 
@@ -171,6 +193,7 @@ grant select on public.products to anon, authenticated;
 grant select on public.inventory to anon, authenticated;
 revoke all on public.promo_products from anon, authenticated;
 revoke all on public.promotion_rules from anon, authenticated;
+revoke all on public.promo_codes from anon, authenticated;
 
 -- ===== RLS =====
 
@@ -179,6 +202,7 @@ alter table public.products enable row level security;
 alter table public.inventory enable row level security;
 alter table public.promo_products enable row level security;
 alter table public.promotion_rules enable row level security;
+alter table public.promo_codes enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.admins enable row level security;

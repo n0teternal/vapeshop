@@ -37,6 +37,7 @@ import {
 } from "./catalog/getCatalog.js";
 import { config } from "./config.js";
 import { loadActivePromotionRules } from "./promotions/rules.js";
+import { previewPromoCode } from "./promoCodes/service.js";
 import { bootstrapReferralProfile, getReferralOverview } from "./referral/service.js";
 import { createServiceSupabaseClient } from "./supabase/serviceClient.js";
 import { sendMessage } from "./telegram/api.js";
@@ -171,6 +172,7 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     value.deliveryTimeSlot,
     "deliveryTimeSlot",
   );
+  const couponCode = parseOptionalTrimmedString(value.couponCode, "couponCode");
 
   if (citySlug === "blg" && normalizedDeliveryMethod === "delivery" && deliveryDate === null) {
     throw new HttpError(400, "BAD_REQUEST", "Р’С‹Р±РµСЂРёС‚Рµ РґР°С‚Сѓ РґРѕСЃС‚Р°РІРєРё.");
@@ -301,6 +303,7 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     comment,
     deliveryDate,
     deliveryTimeSlot,
+    couponCode,
     pointsToSpend,
     items,
   };
@@ -558,6 +561,58 @@ app.get<{
 });
 
 app.post<{
+  Body: unknown;
+  Reply: ApiSuccess<{ code: string; discountAmount: number }> | ErrorResponse;
+}>("/api/promocodes/preview", async (request, reply) => {
+  try {
+    if (!isRecord(request.body)) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid JSON body");
+    }
+
+    const code = parseOptionalTrimmedString(request.body.code, "code");
+    if (!code) {
+      throw new HttpError(400, "BAD_REQUEST", "Введите промокод.");
+    }
+    const citySlug = request.body.citySlug;
+    if (citySlug === "vvo") {
+      throw new HttpError(
+        400,
+        "PROMO_CODES_CITY_DISABLED",
+        "Промокоды недоступны для Владивостока.",
+      );
+    }
+    if (citySlug !== undefined && citySlug !== null && citySlug !== "blg") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'blg' when provided");
+    }
+
+    const totalRaw = request.body.total;
+    const total =
+      typeof totalRaw === "number"
+        ? totalRaw
+        : typeof totalRaw === "string"
+          ? Number(totalRaw)
+          : Number.NaN;
+    if (!Number.isFinite(total) || total < 0) {
+      throw new HttpError(400, "BAD_REQUEST", "total must be a non-negative number");
+    }
+
+    const result = await previewPromoCode({ code, orderTotal: total });
+    return reply.code(200).send(ok(result));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Promo code preview failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.post<{
   Reply:
     | ApiSuccess<{ referralCode: string; referralLink: string; referralBound: boolean }>
     | ErrorResponse;
@@ -791,6 +846,7 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
           comment: body.comment,
           deliveryDate: body.deliveryDate,
           deliveryTimeSlot: body.deliveryTimeSlot,
+          couponCode: null,
           pointsToSpend: body.pointsToSpend,
           items: body.items,
         },
@@ -854,6 +910,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           comment: body.comment,
           deliveryDate: body.deliveryDate,
           deliveryTimeSlot: body.deliveryTimeSlot,
+          couponCode: body.couponCode,
           pointsToSpend: body.pointsToSpend,
           items: body.items,
         },
