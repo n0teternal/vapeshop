@@ -91,6 +91,7 @@ export type OrderEditCartItem = {
 };
 
 export type OrderEditCheckoutDraft = {
+  phone: string;
   deliveryMethod: "pickup" | "delivery";
   address: string;
   comment: string;
@@ -550,6 +551,7 @@ export async function startOrderEditSession(params: {
         : Math.max(0, Math.trunc(numberFromUnknown(order.discount_amount, "orders.discount_amount"))),
     cart,
     checkoutDraft: {
+      phone: parsedComment.phone ?? "",
       deliveryMethod: order.delivery_method === "delivery" ? "delivery" : "pickup",
       address: parsedComment.address ?? "",
       comment: parsedComment.comment ?? "",

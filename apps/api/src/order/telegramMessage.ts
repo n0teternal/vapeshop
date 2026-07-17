@@ -84,7 +84,9 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
   const normalizedUsername = normalizeTelegramUsername(params.tgUser.username);
   const userLine = normalizedUsername
     ? `@${escapeHtml(normalizedUsername)} (${params.tgUser.id})`
-    : `${params.tgUser.id}`;
+    : params.tgUser.id > 0
+      ? `${params.tgUser.id}`
+      : "Гость";
 
   const itemsLines = params.lines
     .map((line) => `• ${escapeHtml(line.title)} ×${line.qty} — ${formatRub(line.unitPrice)}`)

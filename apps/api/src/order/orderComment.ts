@@ -3,6 +3,7 @@ import { isValidIsoDate } from "./deliverySchedule.js";
 export type OrderCommentPayload = {
   citySlug: "vvo" | "blg";
   deliveryMethod: string;
+  phone: string | null;
   address: string | null;
   comment: string | null;
   deliveryDate: string | null;
@@ -10,6 +11,7 @@ export type OrderCommentPayload = {
 };
 
 export type ParsedOrderComment = {
+  phone: string | null;
   address: string | null;
   comment: string | null;
   deliveryDate: string | null;
@@ -28,13 +30,21 @@ function normalizeLineValue(value: string): string | null {
 }
 
 export function buildOrderComment(params: OrderCommentPayload): string | null {
+  const trimmedPhone = params.phone?.trim() ?? "";
   const trimmedComment = params.comment?.trim() ?? "";
+  const lines: string[] = [];
 
-  if (params.deliveryMethod !== "delivery") {
-    return trimmedComment.length > 0 ? trimmedComment : null;
+  if (trimmedPhone.length > 0) {
+    lines.push(`Телефон: ${trimmedPhone}`);
   }
 
-  const lines: string[] = [];
+  if (params.deliveryMethod !== "delivery") {
+    if (trimmedComment.length > 0) {
+      lines.push(trimmedComment);
+    }
+    return lines.length > 0 ? lines.join("\n") : null;
+  }
+
   const trimmedAddress = params.address?.trim() ?? "";
   if (trimmedAddress.length > 0) {
     lines.push(`Адрес: ${trimmedAddress}`);
@@ -58,6 +68,7 @@ export function buildOrderComment(params: OrderCommentPayload): string | null {
 export function parseOrderComment(comment: string | null): ParsedOrderComment {
   if (!comment) {
     return {
+      phone: null,
       address: null,
       comment: null,
       deliveryDate: null,
@@ -71,12 +82,18 @@ export function parseOrderComment(comment: string | null): ParsedOrderComment {
     .filter((line) => line.length > 0);
 
   let address: string | null = null;
+  let phone: string | null = null;
   let freeformComment: string | null = null;
   let deliveryDate: string | null = null;
   let deliveryTimeSlot: string | null = null;
   const remainingCommentLines: string[] = [];
 
   for (const line of lines) {
+    if (line.startsWith("Телефон:")) {
+      phone = normalizeLineValue(line.slice("Телефон:".length)) ?? phone;
+      continue;
+    }
+
     if (line.startsWith("Адрес:")) {
       address = normalizeLineValue(line.slice("Адрес:".length)) ?? address;
       continue;
@@ -116,6 +133,7 @@ export function parseOrderComment(comment: string | null): ParsedOrderComment {
   }
 
   return {
+    phone,
     address,
     comment: freeformComment,
     deliveryDate,

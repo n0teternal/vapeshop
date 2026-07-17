@@ -18,6 +18,7 @@ export type CitySlug = "vvo" | "blg";
 export type CreateOrderPayload = {
   citySlug: CitySlug;
   deliveryMethod: string;
+  phone: string | null;
   address: string | null;
   comment: string | null;
   deliveryDate: string | null;

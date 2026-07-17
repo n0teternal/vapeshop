@@ -212,6 +212,7 @@ export function OrdersPage() {
 
     const hasDraftToReplace =
       state.cart.length > 0 ||
+      state.checkoutDraft.phone.trim().length > 0 ||
       state.checkoutDraft.address.trim().length > 0 ||
       state.checkoutDraft.comment.trim().length > 0 ||
       state.checkoutDraft.deliveryDate.trim().length > 0 ||

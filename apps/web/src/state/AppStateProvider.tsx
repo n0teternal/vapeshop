@@ -31,6 +31,7 @@ export type FavoriteItem = {
 export type DeliveryMethod = "pickup" | "delivery";
 
 export type CheckoutDraft = {
+  phone: string;
   deliveryMethod: DeliveryMethod;
   address: string;
   comment: string;
@@ -39,6 +40,7 @@ export type CheckoutDraft = {
 };
 
 export const EMPTY_CHECKOUT_DRAFT: CheckoutDraft = {
+  phone: "",
   deliveryMethod: "delivery",
   address: "",
   comment: "",
@@ -165,6 +167,7 @@ function sanitizeCheckoutDraft(value: unknown): CheckoutDraft {
   }
 
   return {
+    phone: typeof value.phone === "string" ? value.phone : EMPTY_CHECKOUT_DRAFT.phone,
     deliveryMethod: isDeliveryMethod(value.deliveryMethod)
       ? value.deliveryMethod
       : EMPTY_CHECKOUT_DRAFT.deliveryMethod,

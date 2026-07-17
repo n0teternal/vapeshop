@@ -289,6 +289,11 @@ function getBlgDeliveryFeeRub(itemsSubtotalRub: number): number {
   return itemsSubtotalRub >= BLG_FREE_DELIVERY_THRESHOLD_RUB ? 0 : BLG_DELIVERY_FEE_RUB;
 }
 
+function isValidPhoneInput(value: string): boolean {
+  const digits = value.replace(/\D/g, "");
+  return digits.length >= 7 && digits.length <= 20 && value.trim().length <= 40;
+}
+
 export function CartPage() {
   const { state, dispatch } = useAppState();
   const { isTelegram, webApp } = useTelegram();
@@ -318,6 +323,9 @@ export function CartPage() {
   );
   const checkoutDraft = state.checkoutDraft;
   const orderEditSession = state.orderEditSession;
+  const requiresGuestPhone = !isTelegram && !orderEditSession;
+  const hasRequiredGuestPhone =
+    !requiresGuestPhone || isValidPhoneInput(checkoutDraft.phone);
   const editSessionExpired = orderEditSession
     ? getOrderEditRemainingMs(orderEditSession, nowMs) <= 0
     : false;
@@ -549,6 +557,7 @@ export function CartPage() {
     !submitting &&
     !couponApplying &&
     !editSessionExpired &&
+    hasRequiredGuestPhone &&
     hasRequiredBlgDeliverySchedule &&
     (checkoutDraft.deliveryMethod !== "delivery" ||
       checkoutDraft.address.trim().length > 0);
@@ -568,6 +577,7 @@ export function CartPage() {
   function updateCheckoutDraft(
     patch: Partial<{
       deliveryMethod: "pickup" | "delivery";
+      phone: string;
       address: string;
       comment: string;
       deliveryDate: string;
@@ -631,6 +641,12 @@ export function CartPage() {
       }
 
       const trimmedAddress = checkoutDraft.address.trim();
+      const trimmedPhone = checkoutDraft.phone.trim();
+      if (requiresGuestPhone && !isValidPhoneInput(trimmedPhone)) {
+        setSubmitError("Укажите номер телефона.");
+        return;
+      }
+
       if (showBlgDeliverySchedule && checkoutDraft.deliveryDate.trim().length === 0) {
         setSubmitError("Р’С‹Р±РµСЂРёС‚Рµ РґР°С‚Сѓ РґРѕСЃС‚Р°РІРєРё.");
         return;
@@ -719,6 +735,7 @@ export function CartPage() {
         body: JSON.stringify({
           citySlug: state.city,
           deliveryMethod: checkoutDraft.deliveryMethod,
+          phone: trimmedPhone || null,
           address: trimmedAddress || null,
           comment: checkoutDraft.comment.trim() || null,
           deliveryDate: showBlgDeliverySchedule ? checkoutDraft.deliveryDate || null : null,
@@ -943,6 +960,24 @@ export function CartPage() {
         </CardHeader>
 
         <CardContent className="space-y-3">
+          {requiresGuestPhone ? (
+            <label className="grid gap-1.5 text-sm">
+              <span className="text-xs font-semibold text-muted-foreground">
+                Номер телефона <span className="text-destructive">*</span>
+              </span>
+              <Input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                className={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
+                value={checkoutDraft.phone}
+                disabled={submitting}
+                onChange={(e) => updateCheckoutDraft({ phone: e.target.value })}
+                placeholder="+7 999 123-45-67"
+              />
+            </label>
+          ) : null}
+
           <label className="grid gap-1.5 text-sm">
             <span className="text-xs font-semibold text-muted-foreground">Способ получения</span>
             <select

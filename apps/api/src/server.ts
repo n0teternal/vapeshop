@@ -149,6 +149,14 @@ function parseOptionalTrimmedString(value: unknown, fieldName: string): string |
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function validatePhoneIfPresent(phone: string | null): void {
+  if (!phone) return;
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 20 || phone.length > 40) {
+    throw new HttpError(400, "BAD_REQUEST", "phone must be a valid phone number");
+  }
+}
+
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
   if (!isRecord(value)) {
     throw new HttpError(400, "BAD_REQUEST", "Invalid JSON body");
@@ -165,6 +173,8 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   }
   const normalizedDeliveryMethod = deliveryMethod.trim();
 
+  const phone = parseOptionalTrimmedString(value.phone, "phone");
+  validatePhoneIfPresent(phone);
   const comment = parseOptionalTrimmedString(value.comment, "comment");
   const address = parseOptionalTrimmedString(value.address, "address");
   const deliveryDate = parseOptionalTrimmedString(value.deliveryDate, "deliveryDate");
@@ -299,6 +309,7 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   const base: CreateOrderPayload = {
     citySlug: citySlug as CitySlug,
     deliveryMethod: normalizedDeliveryMethod,
+    phone,
     address,
     comment,
     deliveryDate,
@@ -842,6 +853,7 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
         payload: {
           citySlug: body.citySlug,
           deliveryMethod: body.deliveryMethod,
+          phone: body.phone,
           address: body.address,
           comment: body.comment,
           deliveryDate: body.deliveryDate,
@@ -885,27 +897,48 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
   async (request, reply) => {
     try {
       const body = parseOrderRequestBody(request.body);
-      const verified = requireVerifiedTelegramRequest({
-        headers: request.headers as Record<string, unknown>,
-        initDataFallback: body.initData,
-      });
+      const headers = request.headers as Record<string, unknown>;
+      const initData = (
+        getHeaderString(headers["x-telegram-init-data"]) ??
+        body.initData ??
+        ""
+      ).trim();
+      const devHeaderOn = getHeaderString(headers["x-dev-admin"]) === "1";
+      const useDevBypass = config.isDev && devHeaderOn && initData.length === 0;
+      const verified = initData
+        ? requireVerifiedTelegramRequest({ headers, initDataFallback: body.initData })
+        : null;
+      const isGuestOrder = !verified && !useDevBypass;
+      if (isGuestOrder && !body.phone) {
+        throw new HttpError(400, "PHONE_REQUIRED", "Укажите номер телефона.");
+      }
+      const orderUser = verified
+        ? verified.user
+        : useDevBypass && config.dev.adminTgUserId
+          ? { id: config.dev.adminTgUserId, username: null }
+          : useDevBypass
+            ? { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" }
+            : { id: 0, username: null };
 
-      try {
-        const startParam =
-          typeof verified.params.start_param === "string" ? verified.params.start_param : null;
-        await bootstrapReferralProfile({
-          tgUserId: verified.user.id,
-          tgUsername: verified.user.username,
-          startParam,
-        });
-      } catch (bootstrapError) {
-        request.log.error({ err: bootstrapError }, "Referral bootstrap failed during order flow");
+      if (verified) {
+        try {
+          const startParam =
+            typeof verified.params.start_param === "string" ? verified.params.start_param : null;
+          await bootstrapReferralProfile({
+            tgUserId: verified.user.id,
+            tgUsername: verified.user.username,
+            startParam,
+          });
+        } catch (bootstrapError) {
+          request.log.error({ err: bootstrapError }, "Referral bootstrap failed during order flow");
+        }
       }
 
       const order = await createOrder({
         payload: {
           citySlug: body.citySlug,
           deliveryMethod: body.deliveryMethod,
+          phone: body.phone,
           address: body.address,
           comment: body.comment,
           deliveryDate: body.deliveryDate,
@@ -915,15 +948,15 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           items: body.items,
         },
         tgUser: {
-          id: verified.user.id,
-          username: verified.user.username,
+          id: orderUser.id,
+          username: orderUser.username,
         },
         allowPromoPrices: true,
       });
 
       const chatIds = pickTelegramChatIdsForOrder({
         citySlug: body.citySlug,
-        tgUserId: verified.user.id,
+        tgUserId: orderUser.id,
       });
       const notificationResult = await sendOrderNotificationToChats({
         botToken: config.telegram.botToken,
