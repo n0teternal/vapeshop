@@ -18,9 +18,17 @@ import {
 import {
   getOrderEditRemainingMs,
   useAppState,
+  type CartItem,
   type City,
 } from "../state/AppStateProvider";
+import { fetchCatalog, type CatalogItem } from "../supabase/catalog";
 import { useTelegram } from "../telegram/TelegramProvider";
+import {
+  normalizeCatalogCategoryId,
+  normalizeManufacturerId,
+  resolveCatalogManufacturerLabel,
+  type CatalogFilterCategoryId,
+} from "./CatalogPage";
 
 function formatPriceRub(value: number): string {
   return new Intl.NumberFormat("ru-RU", {
@@ -107,6 +115,7 @@ const BLG_ORDER_CUTOFF_BY_TIME_SLOT: Record<
 };
 const BLG_DELIVERY_FEE_RUB = 150;
 const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
+const FREE_DELIVERY_RECOMMENDATION_LIMIT = 8;
 const DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME =
   "border-sky-300/70 focus:ring-sky-200/70 focus-visible:ring-sky-200/70";
 
@@ -289,6 +298,328 @@ function getBlgDeliveryFeeRub(itemsSubtotalRub: number): number {
   return itemsSubtotalRub >= BLG_FREE_DELIVERY_THRESHOLD_RUB ? 0 : BLG_DELIVERY_FEE_RUB;
 }
 
+type RecommendationCategoryId = CatalogFilterCategoryId | "other";
+
+type FreeDeliveryRecommendation = {
+  item: CatalogItem;
+  reason: string;
+};
+
+type CartRecommendationProfile = {
+  cartIds: Set<string>;
+  categoryWeights: Map<RecommendationCategoryId, number>;
+  brandWeights: Map<string, number>;
+  tokenWeights: Map<string, number>;
+  primaryCategory: RecommendationCategoryId | null;
+  primaryBrandId: string | null;
+  totalWeight: number;
+};
+
+const RECOMMENDATION_STOP_WORDS = new Set([
+  "для",
+  "или",
+  "the",
+  "and",
+  "pod",
+  "pods",
+  "vape",
+  "salt",
+  "nic",
+  "мг",
+  "мл",
+  "шт",
+  "руб",
+  "жидкость",
+  "жидкости",
+  "одноразка",
+  "одноразки",
+  "картридж",
+  "картриджи",
+  "испаритель",
+  "испарители",
+]);
+
+function normalizeRecommendationCategory(value: string | null | undefined): RecommendationCategoryId {
+  return normalizeCatalogCategoryId(value ?? "") ?? "other";
+}
+
+function formatRecommendationCategory(value: string | null | undefined): string {
+  const normalized = normalizeRecommendationCategory(value);
+  const labels: Record<RecommendationCategoryId, string> = {
+    liquid: "Жидкости",
+    disposable: "Одноразки",
+    pod: "Pod",
+    cartridge: "Картриджи",
+    tobacco: "Табак",
+    other: "Товары",
+  };
+  return labels[normalized];
+}
+
+function normalizeRecommendationText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replaceAll(/\p{M}+/gu, "")
+    .replaceAll("ё", "е")
+    .replaceAll(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+}
+
+function extractRecommendationTokens(value: string): string[] {
+  const words = normalizeRecommendationText(value)
+    .split(" ")
+    .filter((word) => {
+      if (word.length < 3 || word.length > 24) return false;
+      if (/^\d+$/.test(word)) return false;
+      return !RECOMMENDATION_STOP_WORDS.has(word);
+    });
+  const tokens = new Set(words);
+
+  for (let index = 0; index < words.length - 1; index += 1) {
+    const first = words[index];
+    const second = words[index + 1];
+    if (!first || !second) continue;
+    tokens.add(`${first} ${second}`);
+  }
+
+  return Array.from(tokens).slice(0, 18);
+}
+
+function incrementRecommendationWeight<TKey>(
+  weights: Map<TKey, number>,
+  key: TKey,
+  value: number,
+): void {
+  weights.set(key, (weights.get(key) ?? 0) + value);
+}
+
+function getTopWeightedKey<TKey>(weights: Map<TKey, number>): TKey | null {
+  let topKey: TKey | null = null;
+  let topWeight = 0;
+  for (const [key, weight] of weights.entries()) {
+    if (weight > topWeight) {
+      topKey = key;
+      topWeight = weight;
+    }
+  }
+  return topKey;
+}
+
+function getRecommendationBrandId(params: {
+  title: string;
+  category: RecommendationCategoryId;
+  citySlug: City | null;
+}): string {
+  const label = resolveCatalogManufacturerLabel({
+    title: params.title,
+    categoryId: params.category,
+    citySlug: params.citySlug,
+  });
+  return normalizeManufacturerId(label) || "other";
+}
+
+function buildCartRecommendationProfile(params: {
+  cart: CartItem[];
+  citySlug: City | null;
+}): CartRecommendationProfile {
+  const cartIds = new Set<string>();
+  const categoryWeights = new Map<RecommendationCategoryId, number>();
+  const brandWeights = new Map<string, number>();
+  const tokenWeights = new Map<string, number>();
+  let totalWeight = 0;
+
+  for (const item of params.cart) {
+    cartIds.add(item.productId);
+    const qty = Math.max(1, item.qty);
+    const lineWeight = Math.max(1, item.price) * qty;
+    const category = normalizeRecommendationCategory(item.categorySlug);
+    const brandId = getRecommendationBrandId({
+      title: item.title,
+      category,
+      citySlug: params.citySlug,
+    });
+
+    totalWeight += lineWeight;
+    incrementRecommendationWeight(categoryWeights, category, lineWeight + qty * 120);
+    incrementRecommendationWeight(brandWeights, brandId, lineWeight);
+
+    for (const token of extractRecommendationTokens(item.title)) {
+      incrementRecommendationWeight(tokenWeights, token, lineWeight);
+    }
+  }
+
+  return {
+    cartIds,
+    categoryWeights,
+    brandWeights,
+    tokenWeights,
+    primaryCategory: getTopWeightedKey(categoryWeights),
+    primaryBrandId: getTopWeightedKey(brandWeights),
+    totalWeight,
+  };
+}
+
+function getComplementaryCategoryScore(
+  candidateCategory: RecommendationCategoryId,
+  categoryWeights: Map<RecommendationCategoryId, number>,
+): number {
+  const hasLiquid = categoryWeights.has("liquid");
+  const hasDisposable = categoryWeights.has("disposable");
+  const hasPod = categoryWeights.has("pod");
+  const hasCartridge = categoryWeights.has("cartridge");
+
+  if (hasPod && candidateCategory === "cartridge") return 950;
+  if (hasCartridge && candidateCategory === "pod") return 850;
+  if ((hasPod || hasCartridge) && candidateCategory === "liquid") return 780;
+  if (hasLiquid && candidateCategory === "pod") return 560;
+  if (hasDisposable && candidateCategory === "liquid") return 420;
+  if (hasLiquid && candidateCategory === "disposable") return 360;
+  return 0;
+}
+
+function getRecommendationTokenScore(params: {
+  item: CatalogItem;
+  profile: CartRecommendationProfile;
+}): number {
+  const tokens = extractRecommendationTokens(
+    `${params.item.title} ${params.item.description ?? ""}`,
+  );
+  let weight = 0;
+  for (const token of tokens) {
+    weight += params.profile.tokenWeights.get(token) ?? 0;
+  }
+  if (weight <= 0 || params.profile.totalWeight <= 0) return 0;
+  return Math.min(720, (weight / params.profile.totalWeight) * 920);
+}
+
+function getRecommendationPriceScore(params: {
+  price: number;
+  amountToFreeDelivery: number;
+}): number {
+  const extraRub = Math.max(0, params.price - params.amountToFreeDelivery);
+  const fitBonus = extraRub <= 150 ? 360 : extraRub <= 350 ? 240 : extraRub <= 700 ? 110 : 0;
+  return fitBonus - Math.min(520, extraRub * 0.12);
+}
+
+function getRecommendationReason(params: {
+  isInCart: boolean;
+  samePrimaryCategory: boolean;
+  sameCategory: boolean;
+  samePrimaryBrand: boolean;
+  sameBrand: boolean;
+  tokenScore: number;
+  complementaryScore: number;
+  price: number;
+  amountToFreeDelivery: number;
+}): string {
+  if (params.isInCart) return "Еще один такой же";
+  if (params.samePrimaryCategory && params.samePrimaryBrand) return "Категория + бренд";
+  if (params.samePrimaryCategory || params.sameCategory) return "Та же категория";
+  if (params.sameBrand) return "Тот же бренд";
+  if (params.tokenScore > 0) return "Похожий вкус";
+  if (params.complementaryScore > 0) return "Подходит к набору";
+  if (params.price - params.amountToFreeDelivery <= 150) return "Ровно до бесплатной";
+  return "Добьет доставку";
+}
+
+function buildFreeDeliveryRecommendations(params: {
+  catalogItems: CatalogItem[];
+  cart: CartItem[];
+  amountToFreeDelivery: number;
+  citySlug: City | null;
+}): FreeDeliveryRecommendation[] {
+  const profile = buildCartRecommendationProfile({
+    cart: params.cart,
+    citySlug: params.citySlug,
+  });
+  if (profile.totalWeight <= 0) return [];
+
+  const uniqueEligibleItems = new Map<string, CatalogItem>();
+  for (const item of params.catalogItems) {
+    if (!item.inStock || item.price < params.amountToFreeDelivery) continue;
+    uniqueEligibleItems.set(item.id, item);
+  }
+
+  const eligibleItems = Array.from(uniqueEligibleItems.values());
+  const outsideCartItems = eligibleItems.filter((item) => !profile.cartIds.has(item.id));
+  const candidateItems =
+    outsideCartItems.length >= 4
+      ? outsideCartItems
+      : [
+          ...outsideCartItems,
+          ...eligibleItems.filter((item) => profile.cartIds.has(item.id)),
+        ];
+
+  return candidateItems
+    .map((item) => {
+      const category = normalizeRecommendationCategory(item.categorySlug);
+      const brandId = getRecommendationBrandId({
+        title: item.title,
+        category,
+        citySlug: params.citySlug,
+      });
+      const categoryWeight = profile.categoryWeights.get(category) ?? 0;
+      const brandWeight = profile.brandWeights.get(brandId) ?? 0;
+      const samePrimaryCategory =
+        profile.primaryCategory !== null && category === profile.primaryCategory;
+      const samePrimaryBrand =
+        profile.primaryBrandId !== null &&
+        brandId !== "other" &&
+        brandId === profile.primaryBrandId;
+      const sameCategory = categoryWeight > 0;
+      const sameBrand = brandId !== "other" && brandWeight > 0;
+      const complementaryScore = sameCategory
+        ? 0
+        : getComplementaryCategoryScore(category, profile.categoryWeights);
+      const tokenScore = getRecommendationTokenScore({ item, profile });
+      const categoryScore = samePrimaryCategory
+        ? 3200
+        : sameCategory
+          ? 2600
+          : complementaryScore;
+      const categoryShareScore =
+        profile.totalWeight > 0 ? Math.min(900, (categoryWeight / profile.totalWeight) * 900) : 0;
+      const brandScore = sameBrand
+        ? 760 +
+          Math.min(520, (brandWeight / profile.totalWeight) * 520) +
+          (samePrimaryBrand ? 260 : 0) +
+          (sameCategory ? 320 : 0)
+        : 0;
+      const existingCartItemPenalty = profile.cartIds.has(item.id) ? -850 : 0;
+      const score =
+        categoryScore +
+        categoryShareScore +
+        brandScore +
+        tokenScore +
+        getRecommendationPriceScore({
+          price: item.price,
+          amountToFreeDelivery: params.amountToFreeDelivery,
+        }) +
+        existingCartItemPenalty;
+
+      return {
+        item,
+        reason: getRecommendationReason({
+          isInCart: profile.cartIds.has(item.id),
+          samePrimaryCategory,
+          sameCategory,
+          samePrimaryBrand,
+          sameBrand,
+          tokenScore,
+          complementaryScore,
+          price: item.price,
+          amountToFreeDelivery: params.amountToFreeDelivery,
+        }),
+        score,
+      };
+    })
+    .sort((a, b) => b.score - a.score || a.item.price - b.item.price || a.item.title.localeCompare(b.item.title, "ru"))
+    .slice(0, FREE_DELIVERY_RECOMMENDATION_LIMIT)
+    .map(({ item, reason }) => ({ item, reason }));
+}
+
 function isValidPhoneInput(value: string): boolean {
   const digits = value.replace(/\D/g, "");
   return digits.length >= 7 && digits.length <= 20 && value.trim().length <= 40;
@@ -315,6 +646,8 @@ export function CartPage() {
   const [couponPreview, setCouponPreview] = useState<CouponPreviewResponse | null>(null);
   const [couponApplying, setCouponApplying] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
+  const [recommendationCatalogItems, setRecommendationCatalogItems] = useState<CatalogItem[]>([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const cityToday = useMemo(() => getTodayIsoDateForCity(state.city, nowMs), [state.city, nowMs]);
   const minDeliveryDate = useMemo(
@@ -361,6 +694,27 @@ export function CartPage() {
     showBlgDeliveryFeeCard
       ? getBlgDeliveryFeeRub(itemsTotal)
       : 0;
+  const amountToFreeDelivery = Math.max(0, BLG_FREE_DELIVERY_THRESHOLD_RUB - itemsTotal);
+  const shouldShowFreeDeliveryRecommendations =
+    showBlgDeliveryFeeCard &&
+    deliveryFee > 0 &&
+    amountToFreeDelivery > 0 &&
+    state.cart.length > 0;
+  const freeDeliveryRecommendations = useMemo(() => {
+    if (!shouldShowFreeDeliveryRecommendations) return [];
+    return buildFreeDeliveryRecommendations({
+      catalogItems: recommendationCatalogItems,
+      cart: state.cart,
+      amountToFreeDelivery,
+      citySlug: state.city,
+    });
+  }, [
+    amountToFreeDelivery,
+    recommendationCatalogItems,
+    shouldShowFreeDeliveryRecommendations,
+    state.cart,
+    state.city,
+  ]);
   const total = itemsTotal + deliveryFee;
   const promotionDiscount = useMemo(() => {
     return calculateCartPromotionDiscount({
@@ -495,6 +849,37 @@ export function CartPage() {
       cancelled = true;
     };
   }, [state.city]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!shouldShowFreeDeliveryRecommendations || !state.city) {
+      setRecommendationCatalogItems([]);
+      setRecommendationsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setRecommendationsLoading(true);
+    fetchCatalog(state.city, { includePromos: true })
+      .then((data) => {
+        if (cancelled) return;
+        setRecommendationCatalogItems(data.items);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRecommendationCatalogItems([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setRecommendationsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldShowFreeDeliveryRecommendations, state.city]);
 
   useEffect(() => {
     if (orderEditSession) {
@@ -902,6 +1287,89 @@ export function CartPage() {
                   {deliveryFee === 0 ? "Бесплатно" : formatPriceRub(deliveryFee)}
                 </div>
               </div>
+
+              {shouldShowFreeDeliveryRecommendations &&
+              (recommendationsLoading || freeDeliveryRecommendations.length > 0) ? (
+                <div className="mt-3 border-t border-border/70 pt-3">
+                  <div className="flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-foreground">
+                        До бесплатной доставки: {formatPriceRub(amountToFreeDelivery)}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                        Любой товар из ленты сделает доставку бесплатной.
+                      </div>
+                    </div>
+                  </div>
+
+                  {recommendationsLoading && freeDeliveryRecommendations.length === 0 ? (
+                    <div className="mt-3 flex gap-2 overflow-hidden">
+                      {Array.from({ length: 3 }).map((_, index) => (
+                        <div
+                          key={index}
+                          className="h-32 w-32 shrink-0 animate-pulse rounded-xl bg-muted/60"
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
+                      {freeDeliveryRecommendations.map((recommendation) => {
+                        const item = recommendation.item;
+
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex w-36 shrink-0 flex-col rounded-xl border border-border/70 bg-background/55 p-2"
+                          >
+                            <ProductImagePreview
+                              imageUrl={item.imageUrl}
+                              alt={item.title}
+                              loading="lazy"
+                              targetWidth={140}
+                              className="h-20 w-full rounded-lg object-cover"
+                              placeholderClassName="flex h-20 w-full items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
+                            />
+                            <div className="mt-2 min-h-9 text-xs font-semibold leading-snug line-clamp-2">
+                              {item.title}
+                            </div>
+                            <div className="mt-1 flex min-h-5 items-center">
+                              <span className="inline-flex max-w-full items-center rounded-full border border-sky-300/40 bg-sky-400/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-500">
+                                <span className="truncate">{recommendation.reason}</span>
+                              </span>
+                            </div>
+                            <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                              {formatRecommendationCategory(item.categorySlug)}
+                            </div>
+                            <div className="mt-1 text-sm font-bold">
+                              {formatPriceRub(item.price)}
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="mt-2 h-8 w-full rounded-lg text-xs"
+                              disabled={submitting}
+                              onClick={() =>
+                                dispatch({
+                                  type: "cart/add",
+                                  item: {
+                                    productId: item.id,
+                                    title: item.title,
+                                    price: item.price,
+                                    categorySlug: item.categorySlug,
+                                    imageUrl: item.imageUrl,
+                                  },
+                                })
+                              }
+                            >
+                              Добавить
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         ) : null}
