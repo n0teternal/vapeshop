@@ -15,6 +15,14 @@ import {
 
 export type CitySlug = "vvo" | "blg";
 
+export type DeliveryLocationPayload = {
+  address: string | null;
+  lat: number;
+  lon: number;
+  distanceKm: number;
+  zone: "near" | "middle" | "far" | "manual" | null;
+};
+
 export type CreateOrderPayload = {
   citySlug: CitySlug;
   deliveryMethod: string;
@@ -23,6 +31,7 @@ export type CreateOrderPayload = {
   comment: string | null;
   deliveryDate: string | null;
   deliveryTimeSlot: string | null;
+  deliveryLocation: DeliveryLocationPayload | null;
   couponCode: string | null;
   pointsToSpend: number;
   items: Array<{ productId: string; qty: number }>;

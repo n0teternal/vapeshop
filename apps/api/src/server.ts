@@ -157,6 +157,58 @@ function validatePhoneIfPresent(phone: string | null): void {
   }
 }
 
+function parseOptionalDeliveryLocation(value: unknown): CreateOrderPayload["deliveryLocation"] {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) {
+    throw new HttpError(400, "BAD_REQUEST", "deliveryLocation must be an object");
+  }
+
+  const address = parseOptionalTrimmedString(value.address, "deliveryLocation.address");
+  const lat = value.lat;
+  const lon = value.lon;
+  const distanceKm = value.distanceKm;
+  const zone = value.zone;
+
+  if (
+    typeof lat !== "number" ||
+    !Number.isFinite(lat) ||
+    Math.abs(lat) > 90 ||
+    typeof lon !== "number" ||
+    !Number.isFinite(lon) ||
+    Math.abs(lon) > 180
+  ) {
+    throw new HttpError(400, "BAD_REQUEST", "deliveryLocation coordinates are invalid");
+  }
+
+  if (
+    typeof distanceKm !== "number" ||
+    !Number.isFinite(distanceKm) ||
+    distanceKm < 0 ||
+    distanceKm > 500
+  ) {
+    throw new HttpError(400, "BAD_REQUEST", "deliveryLocation.distanceKm is invalid");
+  }
+
+  if (
+    zone !== undefined &&
+    zone !== null &&
+    zone !== "near" &&
+    zone !== "middle" &&
+    zone !== "far" &&
+    zone !== "manual"
+  ) {
+    throw new HttpError(400, "BAD_REQUEST", "deliveryLocation.zone is invalid");
+  }
+
+  return {
+    address,
+    lat,
+    lon,
+    distanceKm,
+    zone: zone ?? null,
+  };
+}
+
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
   if (!isRecord(value)) {
     throw new HttpError(400, "BAD_REQUEST", "Invalid JSON body");
@@ -182,6 +234,7 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     value.deliveryTimeSlot,
     "deliveryTimeSlot",
   );
+  const deliveryLocation = parseOptionalDeliveryLocation(value.deliveryLocation);
   const couponCode = parseOptionalTrimmedString(value.couponCode, "couponCode");
 
   if (citySlug === "blg" && normalizedDeliveryMethod === "delivery" && deliveryDate === null) {
@@ -314,6 +367,10 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     comment,
     deliveryDate,
     deliveryTimeSlot,
+    deliveryLocation:
+      normalizedDeliveryMethod === "delivery"
+        ? deliveryLocation
+        : null,
     couponCode,
     pointsToSpend,
     items,
@@ -858,6 +915,7 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
           comment: body.comment,
           deliveryDate: body.deliveryDate,
           deliveryTimeSlot: body.deliveryTimeSlot,
+          deliveryLocation: body.deliveryLocation,
           couponCode: null,
           pointsToSpend: body.pointsToSpend,
           items: body.items,
@@ -943,6 +1001,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           comment: body.comment,
           deliveryDate: body.deliveryDate,
           deliveryTimeSlot: body.deliveryTimeSlot,
+          deliveryLocation: body.deliveryLocation,
           couponCode: body.couponCode,
           pointsToSpend: body.pointsToSpend,
           items: body.items,

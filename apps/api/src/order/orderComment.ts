@@ -1,4 +1,5 @@
 import { isValidIsoDate } from "./deliverySchedule.js";
+import type { DeliveryLocationPayload } from "./createOrder.js";
 
 export type OrderCommentPayload = {
   citySlug: "vvo" | "blg";
@@ -8,6 +9,7 @@ export type OrderCommentPayload = {
   comment: string | null;
   deliveryDate: string | null;
   deliveryTimeSlot: string | null;
+  deliveryLocation?: DeliveryLocationPayload | null;
 };
 
 export type ParsedOrderComment = {
@@ -29,6 +31,14 @@ function normalizeLineValue(value: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function formatCoordinate(value: number): string {
+  return value.toFixed(6);
+}
+
+function formatDistance(value: number): string {
+  return value.toFixed(value < 10 ? 1 : 0);
+}
+
 export function buildOrderComment(params: OrderCommentPayload): string | null {
   const trimmedPhone = params.phone?.trim() ?? "";
   const trimmedComment = params.comment?.trim() ?? "";
@@ -48,6 +58,17 @@ export function buildOrderComment(params: OrderCommentPayload): string | null {
   const trimmedAddress = params.address?.trim() ?? "";
   if (trimmedAddress.length > 0) {
     lines.push(`Адрес: ${trimmedAddress}`);
+  }
+
+  if (params.deliveryLocation) {
+    const lat = formatCoordinate(params.deliveryLocation.lat);
+    const lon = formatCoordinate(params.deliveryLocation.lon);
+    const zone = params.deliveryLocation.zone ? ` (${params.deliveryLocation.zone})` : "";
+    lines.push(`Координаты: ${lat}, ${lon}`);
+    lines.push(
+      `Расстояние от точки: ${formatDistance(params.deliveryLocation.distanceKm)} км${zone}`,
+    );
+    lines.push(`Карта: https://yandex.ru/maps/?pt=${lon},${lat}&z=17&l=map`);
   }
 
   if (params.citySlug === "blg" && params.deliveryDate) {

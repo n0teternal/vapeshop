@@ -6,6 +6,17 @@ function readEnvString(key: string): string {
 
 const DEFAULT_API_BASE_URL = "http://localhost:8787";
 
+type DeliveryOrigin = {
+  lat: number;
+  lon: number;
+  label: string;
+};
+
+const DEFAULT_DELIVERY_ORIGINS: Record<"vvo" | "blg", DeliveryOrigin> = {
+  vvo: { lat: 43.1155, lon: 131.8855, label: "Точка VVO" },
+  blg: { lat: 50.2907, lon: 127.5272, label: "Точка BLG" },
+};
+
 function isLoopbackHost(hostname: string): boolean {
   const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
   return normalized === "localhost" || normalized === "::1" || normalized.startsWith("127.");
@@ -33,6 +44,35 @@ function resolveApiBaseUrl(): string {
 
 export const API_BASE_URL: string =
   resolveApiBaseUrl();
+
+export const ADMIN_DELIVERY_MAP_FEATURE_ENABLED =
+  readEnvString("VITE_ADMIN_DELIVERY_MAP_ENABLED") === "1";
+export const YANDEX_MAPS_API_KEY = readEnvString("VITE_YANDEX_MAPS_API_KEY");
+export const YANDEX_MAPS_SUGGEST_API_KEY = readEnvString(
+  "VITE_YANDEX_MAPS_SUGGEST_API_KEY",
+);
+
+function readEnvNumber(key: string): number | null {
+  const raw = readEnvString(key);
+  if (!raw) return null;
+  const parsed = Number(raw.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readDeliveryOrigin(city: "vvo" | "blg"): DeliveryOrigin {
+  const prefix = city.toUpperCase();
+  const fallback = DEFAULT_DELIVERY_ORIGINS[city];
+  return {
+    lat: readEnvNumber(`VITE_DELIVERY_ORIGIN_${prefix}_LAT`) ?? fallback.lat,
+    lon: readEnvNumber(`VITE_DELIVERY_ORIGIN_${prefix}_LON`) ?? fallback.lon,
+    label: readEnvString(`VITE_DELIVERY_ORIGIN_${prefix}_LABEL`) || fallback.label,
+  };
+}
+
+export const DELIVERY_ORIGINS: Record<"vvo" | "blg", DeliveryOrigin> = {
+  vvo: readDeliveryOrigin("vvo"),
+  blg: readDeliveryOrigin("blg"),
+};
 
 function normalizeBase(base: string): string {
   if (base === "/") return "";
