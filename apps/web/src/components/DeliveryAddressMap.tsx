@@ -775,7 +775,7 @@ export function DeliveryAddressMap({
         </div>
       ) : null}
 
-      {showDistanceStatus && (loading || selection || distancePreview || mapError) ? (
+      {showDistanceStatus && (loading || selection || distancePreview) ? (
         <div
           className={`flex min-h-11 items-start gap-2 rounded-md border px-3 py-2 text-xs ${
             selection
