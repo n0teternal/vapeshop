@@ -549,12 +549,13 @@ export function DeliveryAddressMap({
       return { found: true, errorMessage: null };
     } catch (error) {
       if (error instanceof ApiError) {
-        if (
-          error.code === "YANDEX_GEOSUGGEST_NOT_CONFIGURED" ||
-          error.code === "YANDEX_GEOSUGGEST_NETWORK" ||
-          error.code === "YANDEX_GEOSUGGEST_ERROR" ||
-          error.code === "ADDRESS_NOT_FOUND"
-        ) {
+        if (error.code === "YANDEX_GEOSUGGEST_NOT_CONFIGURED") {
+          return { found: false, errorMessage: null };
+        }
+        if (error.code === "YANDEX_GEOSUGGEST_NETWORK") {
+          return { found: false, errorMessage: null };
+        }
+        if (error.code === "YANDEX_GEOSUGGEST_ERROR" || error.code === "ADDRESS_NOT_FOUND") {
           return { found: false, errorMessage: showErrors ? error.message : null };
         }
       }

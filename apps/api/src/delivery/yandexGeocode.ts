@@ -1,5 +1,8 @@
+import dns from "node:dns";
 import { config } from "../config.js";
 import { HttpError } from "../httpError.js";
+
+dns.setDefaultResultOrder("ipv4first");
 
 type CitySlug = "vvo" | "blg";
 
