@@ -5,6 +5,7 @@ import {
   YANDEX_MAPS_API_KEY,
   YANDEX_MAPS_SUGGEST_API_KEY,
 } from "../config";
+import { ApiError, apiGet } from "../api/client";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -24,6 +25,21 @@ export type DeliveryDistanceZone = {
 };
 
 type CitySlug = "vvo" | "blg";
+
+type DeliveryGeocodeResponse = {
+  address: string;
+  lat: number;
+  lon: number;
+};
+
+type AddressSearchOptions = {
+  showErrors?: boolean;
+};
+
+type AddressSearchAttempt = {
+  found: boolean;
+  errorMessage: string | null;
+};
 
 type DeliveryAddressMapProps = {
   city: CitySlug;
@@ -207,17 +223,37 @@ function uniqueStrings(values: string[]): string[] {
   return out;
 }
 
+function buildStreetHouseQueryVariants(rawQuery: string): string[] {
+  const query = rawQuery.trim();
+  const streetHouseMatch = /^(.+?)\s+(\d+[0-9A-Za-zА-Яа-я/-]*)$/.exec(query);
+  if (!streetHouseMatch) return [query];
+
+  const street = streetHouseMatch[1]?.trim();
+  const house = streetHouseMatch[2]?.trim();
+  if (!street || !house || street.includes(",")) return [query];
+
+  return uniqueStrings([
+    query,
+    `${street}, ${house}`,
+    `улица ${street}, ${house}`,
+    `${street} улица, ${house}`,
+  ]);
+}
+
 function buildAddressSearchQueries(city: CitySlug, rawQuery: string): string[] {
   const query = rawQuery.trim();
   const config = CITY_SEARCH_CONFIGS[city];
   const normalized = normalizeSearchText(query);
   const hasCity = normalized.includes(normalizeSearchText(config.label));
 
-  return uniqueStrings([
-    hasCity ? query : `${config.queryPrefix}, ${query}`,
-    hasCity ? query : `${config.label}, ${query}`,
-    query,
+  const queryVariants = buildStreetHouseQueryVariants(query);
+  const scopedQueries = queryVariants.flatMap((value) => [
+    hasCity ? value : `${config.queryPrefix}, ${value}`,
+    hasCity ? value : `${config.label}, ${value}`,
+    value,
   ]);
+
+  return uniqueStrings(scopedQueries);
 }
 
 export function DeliveryAddressMap({
@@ -365,6 +401,24 @@ export function DeliveryAddressMap({
     mapRef.current.setCenter(coords, 15, { duration: 250 });
   }
 
+  function applyDeliverySelection(addressLine: string, coords: YMapsCoords): void {
+    const distanceKm = distanceKmBetween(originCoords, coords);
+    const nextSelection: DeliveryMapSelection = {
+      address: addressLine,
+      lat: coords[0],
+      lon: coords[1],
+      distanceKm,
+      zone: getDistanceZone(distanceKm),
+    };
+
+    setCustomerPlacemark(coords);
+    setLocalAddress(addressLine);
+    setSelection(nextSelection);
+    setSuggestions([]);
+    onAddressChange(addressLine);
+    onSelectionChange(nextSelection);
+  }
+
   async function selectCoords(coords: YMapsCoords, fallbackAddress = localAddress): Promise<void> {
     if (!ymapsApi || disabled) return;
 
@@ -374,21 +428,7 @@ export function DeliveryAddressMap({
       const result = await ymapsApi.geocode(coords, { results: 1 });
       const geoObject = result.geoObjects.get(0);
       const nextAddress = geoObject ? getGeoObjectAddress(geoObject, fallbackAddress) : fallbackAddress;
-      const distanceKm = distanceKmBetween(originCoords, coords);
-      const nextSelection: DeliveryMapSelection = {
-        address: nextAddress,
-        lat: coords[0],
-        lon: coords[1],
-        distanceKm,
-        zone: getDistanceZone(distanceKm),
-      };
-
-      setCustomerPlacemark(coords);
-      setLocalAddress(nextAddress);
-      setSelection(nextSelection);
-      setSuggestions([]);
-      onAddressChange(nextAddress);
-      onSelectionChange(nextSelection);
+      applyDeliverySelection(nextAddress, coords);
     } catch {
       setMapError("Не удалось получить адрес по точке.");
     } finally {
@@ -396,21 +436,77 @@ export function DeliveryAddressMap({
     }
   }
 
-  async function searchAddress(nextAddress = localAddress): Promise<void> {
+  async function searchAddressViaApi(
+    query: string,
+    options: AddressSearchOptions = {},
+  ): Promise<AddressSearchAttempt> {
+    const showErrors = options.showErrors ?? true;
+
+    try {
+      const search = new URLSearchParams({
+        citySlug: city,
+        address: query,
+      });
+      const result = await apiGet<DeliveryGeocodeResponse>(
+        `/api/delivery/geocode?${search.toString()}`,
+      );
+      const coords: YMapsCoords = [result.lat, result.lon];
+      if (!isValidCoords(coords)) {
+        return {
+          found: false,
+          errorMessage: "Геокодер вернул некорректные координаты.",
+        };
+      }
+
+      applyDeliverySelection(result.address || query, coords);
+      return { found: true, errorMessage: null };
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (
+          error.code === "YANDEX_GEOCODER_NOT_CONFIGURED" ||
+          error.code === "YANDEX_GEOCODER_ERROR" ||
+          error.code === "ADDRESS_NOT_FOUND"
+        ) {
+          return { found: false, errorMessage: showErrors ? error.message : null };
+        }
+      }
+      return { found: false, errorMessage: null };
+    }
+  }
+
+  async function searchAddress(
+    nextAddress = localAddress,
+    options: AddressSearchOptions = {},
+  ): Promise<void> {
+    const showErrors = options.showErrors ?? true;
     const query = nextAddress.trim();
-    if (!ymapsApi || !query || disabled) return;
+    if (!query || disabled) return;
 
     setLoading(true);
     setMapError(null);
     try {
+      const apiAttempt = await searchAddressViaApi(query, { showErrors });
+      if (apiAttempt.found) return;
+
+      if (!ymapsApi) {
+        if (showErrors) {
+          setMapError(
+            apiAttempt.errorMessage ?? "Карта еще загружается. Попробуй еще раз через пару секунд.",
+          );
+        }
+        return;
+      }
+
       const config = CITY_SEARCH_CONFIGS[city];
       const searchQueries = buildAddressSearchQueries(city, query);
 
       for (const searchQuery of searchQueries) {
         const result = await ymapsApi.geocode(searchQuery, {
           boundedBy: config.boundedBy,
+          kind: "house",
           results: 1,
-        });
+        }).catch(() => null);
+        if (!result) continue;
         const geoObject = result.geoObjects.get(0);
         if (!geoObject) continue;
 
@@ -421,9 +517,15 @@ export function DeliveryAddressMap({
         return;
       }
 
-      setMapError("Адрес не найден. Попробуй добавить улицу, дом и город.");
+      if (showErrors) {
+        setMapError(
+          apiAttempt.errorMessage ?? "Адрес не найден. Попробуй добавить улицу, дом и город.",
+        );
+      }
     } catch {
-      setMapError("Не удалось найти адрес.");
+      if (showErrors) {
+        setMapError("Не удалось найти адрес.");
+      }
     } finally {
       setLoading(false);
     }
@@ -461,7 +563,7 @@ export function DeliveryAddressMap({
             variant="outline"
             size="icon"
             className="h-10 w-10 shrink-0"
-            disabled={disabled || !ymapsApi || loading || localAddress.trim().length === 0}
+            disabled={disabled || loading || localAddress.trim().length === 0}
             onClick={() => void searchAddress()}
             aria-label="Найти адрес"
           >
@@ -493,8 +595,11 @@ export function DeliveryAddressMap({
               onClick={() => {
                 setLocalAddress(suggestion);
                 onAddressChange(suggestion);
+                setSelection(null);
+                onSelectionChange(null);
                 setSuggestions([]);
-                void searchAddress(suggestion);
+                setMapError(null);
+                void searchAddress(suggestion, { showErrors: false });
               }}
             >
               <span className="line-clamp-2">{suggestion}</span>

@@ -34,6 +34,9 @@ export type AppConfig = {
     pointsExpireAfterMonths: number;
     pointsMaxSpendPercent: number;
   };
+  yandex: {
+    geocoderApiKey: string | null;
+  };
   productImagesBaseUrl: string | null;
   dev: {
     adminTgUserId: number | null;
@@ -211,6 +214,9 @@ export const config: AppConfig = (() => {
       minFirstOrderTotalRub: parsePositiveIntEnv("REFERRAL_MIN_FIRST_ORDER_TOTAL", 1200),
       pointsExpireAfterMonths: parsePositiveIntEnv("REFERRAL_POINTS_EXPIRE_AFTER_MONTHS", 3),
       pointsMaxSpendPercent: parsePercentIntEnv("REFERRAL_POINTS_MAX_SPEND_PERCENT", 50),
+    },
+    yandex: {
+      geocoderApiKey: readEnv("YANDEX_GEOCODER_API_KEY"),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {
