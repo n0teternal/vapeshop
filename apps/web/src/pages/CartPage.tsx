@@ -1428,46 +1428,39 @@ export function CartPage() {
       {shouldShowFreeDeliveryRecommendations &&
       (recommendationsLoading || freeDeliveryRecommendations.length > 0) ? (
         <Card className="border-border/70 bg-card">
-          <CardContent className="p-4">
-            <div className="flex items-end justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-foreground">
-                  Любой товар до бесплатной доставки:
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Осталось {formatPriceRub(amountToFreeDelivery)}
-                </div>
-              </div>
+          <CardContent className="space-y-3 p-4">
+            <div className="text-xl font-semibold leading-tight text-foreground">
+              Любой товар до бесплатной доставки:
             </div>
 
             {recommendationsLoading && freeDeliveryRecommendations.length === 0 ? (
-              <div className="-mx-1 mt-3 flex gap-3 overflow-hidden px-1">
+              <div className="-mx-1 flex gap-3 overflow-hidden px-1">
                 {Array.from({ length: 3 }).map((_, index) => (
                   <div
                     key={index}
-                    className="h-64 w-44 shrink-0 animate-pulse rounded-xl bg-muted/60"
+                    className="h-32 w-32 shrink-0 animate-pulse rounded-xl bg-muted/60"
                   />
                 ))}
               </div>
             ) : (
-              <div className="-mx-1 mt-3 flex gap-3 overflow-x-auto px-1 pb-1">
+              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                 {freeDeliveryRecommendations.map((recommendation) => {
                   const item = recommendation.item;
 
                   return (
                     <div
                       key={item.id}
-                      className="flex w-44 shrink-0 flex-col rounded-xl border border-border/70 bg-background/55 p-2.5"
+                      className="flex w-36 shrink-0 flex-col rounded-xl border border-border/70 bg-background/55 p-2"
                     >
                       <ProductImagePreview
                         imageUrl={item.imageUrl}
                         alt={item.title}
                         loading="lazy"
-                        targetWidth={176}
-                        className="aspect-square w-full rounded-lg bg-muted/30 object-contain p-1"
-                        placeholderClassName="flex aspect-square w-full items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
+                        targetWidth={140}
+                        className="h-20 w-full rounded-lg object-cover"
+                        placeholderClassName="flex h-20 w-full items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
                       />
-                      <div className="mt-2 min-h-10 text-xs font-semibold leading-snug line-clamp-2">
+                      <div className="mt-2 min-h-9 text-xs font-semibold leading-snug line-clamp-2">
                         {item.title}
                       </div>
                       <div className="mt-1 truncate text-[11px] text-muted-foreground">
