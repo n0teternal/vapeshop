@@ -11,17 +11,20 @@ export type DeliveryGeocodeResult = {
 
 type CityGeocodeConfig = {
   queryPrefix: string;
-  bbox: string;
+  ll: string;
+  spn: string;
 };
 
 const CITY_GEOCODE_CONFIGS: Record<CitySlug, CityGeocodeConfig> = {
   vvo: {
     queryPrefix: "Россия, Приморский край, Владивосток",
-    bbox: "131.72,42.94~132.16,43.32",
+    ll: "131.90,43.12",
+    spn: "0.45,0.38",
   },
   blg: {
     queryPrefix: "Россия, Амурская область, Благовещенск",
-    bbox: "127.42,50.18~127.68,50.36",
+    ll: "127.55,50.27",
+    spn: "0.30,0.18",
   },
 };
 
@@ -149,7 +152,7 @@ async function requestYandexGeocode(params: {
   }
 
   const cityConfig = CITY_GEOCODE_CONFIGS[params.citySlug];
-  const url = new URL("https://geocode-maps.yandex.ru/1.x/");
+  const url = new URL("https://geocode-maps.yandex.ru/v1/");
   url.searchParams.set("apikey", config.yandex.geocoderApiKey);
   url.searchParams.set("format", "json");
   url.searchParams.set("lang", "ru_RU");
@@ -157,8 +160,8 @@ async function requestYandexGeocode(params: {
   url.searchParams.set("geocode", params.query);
 
   if (params.restrictToCity) {
-    url.searchParams.set("bbox", cityConfig.bbox);
-    url.searchParams.set("rspn", "1");
+    url.searchParams.set("ll", cityConfig.ll);
+    url.searchParams.set("spn", cityConfig.spn);
   }
 
   let response: Response;
