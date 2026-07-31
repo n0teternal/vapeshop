@@ -3,6 +3,7 @@ import {
   buildConversationRequestButton,
   buildConversationRequestConfirmButton,
 } from "./conversationRequest.js";
+import { parseOrderComment } from "./orderComment.js";
 
 export type OrderStatus = "new" | "processing" | "done" | "cancelled";
 export type OrderPaymentMethod = "cash" | "card";
@@ -79,6 +80,44 @@ function normalizeTelegramUsername(username: string | null): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function formatDeliveryDateLabel(value: string): string {
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}.${month}.${year}`;
+}
+
+function formatAdminAddress(value: string): string {
+  return value
+    .replace(/^Россия,\s*/i, "")
+    .replace(/^Амурская область,\s*/i, "")
+    .replace(/^Благовещенск,\s*/i, "")
+    .trim();
+}
+
+function buildCommentPart(comment: string | null): string {
+  if (!comment) return "";
+
+  const parsed = parseOrderComment(comment);
+  const lines: string[] = [];
+  if (parsed.phone) {
+    lines.push(`Телефон: ${escapeHtml(parsed.phone)}`);
+  }
+  if (parsed.address) {
+    lines.push(`Адрес: ${escapeHtml(formatAdminAddress(parsed.address))}`);
+  }
+  if (parsed.deliveryDate) {
+    lines.push(`Дата доставки: ${escapeHtml(formatDeliveryDateLabel(parsed.deliveryDate))}`);
+  }
+  if (parsed.deliveryTimeSlot) {
+    lines.push(`Время доставки: ${escapeHtml(parsed.deliveryTimeSlot)}`);
+  }
+  if (parsed.comment) {
+    lines.push(`Комментарий: ${escapeHtml(parsed.comment)}`);
+  }
+
+  return lines.length > 0 ? `\n${lines.join("\n")}` : "";
+}
+
 function buildOrderBody(params: OrderMessageBaseParams): string {
   const cityLine = `${escapeHtml(params.cityName)} (${params.citySlug.toUpperCase()})`;
   const normalizedUsername = normalizeTelegramUsername(params.tgUser.username);
@@ -115,7 +154,7 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
   }
   const discountsPart = discountLines.length > 0 ? `\n${discountLines.join("\n")}` : "";
 
-  const commentPart = params.comment ? `\nКомментарий: ${escapeHtml(params.comment)}` : "";
+  const commentPart = buildCommentPart(params.comment);
   const promotionBadgePart =
     promotionDiscountAmount > 0 ? `<b>\u0410\u041a\u0426\u0418\u042f!</b>\n` : "";
   const totalSuffix =
