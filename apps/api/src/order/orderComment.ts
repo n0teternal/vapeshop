@@ -10,6 +10,7 @@ export type OrderCommentPayload = {
   deliveryDate: string | null;
   deliveryTimeSlot: string | null;
   deliveryLocation?: DeliveryLocationPayload | null;
+  deliveryDistancePreview?: { distanceKm: number } | null;
 };
 
 export type ParsedOrderComment = {
@@ -69,6 +70,10 @@ export function buildOrderComment(params: OrderCommentPayload): string | null {
       `Расстояние от точки: ${formatDistance(params.deliveryLocation.distanceKm)} км${zone}`,
     );
     lines.push(`Карта: https://yandex.ru/maps/?pt=${lon},${lat}&z=17&l=map`);
+  } else if (params.deliveryDistancePreview) {
+    lines.push(
+      `Примерное расстояние от точки: ${formatDistance(params.deliveryDistancePreview.distanceKm)} км`,
+    );
   }
 
   if (params.citySlug === "blg" && params.deliveryDate) {
