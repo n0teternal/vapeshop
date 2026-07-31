@@ -46,9 +46,6 @@ const CITY_GEOCODE_CONFIGS: Record<CitySlug, CityGeocodeConfig> = {
   },
 };
 
-const YANDEX_SUGGEST_CACHE_MAX = 200;
-const yandexSuggestCache = new Map<string, YandexSuggestResult[]>();
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -71,49 +68,6 @@ function uniqueStrings(values: string[]): string[] {
   }
 
   return out;
-}
-
-function buildSuggestCacheKey(params: {
-  citySlug: CitySlug;
-  query: string;
-  origin?: {
-    lat: number;
-    lon: number;
-  };
-}): string {
-  const originKey = params.origin
-    ? `${params.origin.lat.toFixed(6)},${params.origin.lon.toFixed(6)}`
-    : "";
-  return `${params.citySlug}:${normalizeSearchText(params.query)}:${originKey}`;
-}
-
-function readCachedYandexSuggest(params: {
-  citySlug: CitySlug;
-  query: string;
-  origin?: {
-    lat: number;
-    lon: number;
-  };
-}): YandexSuggestResult[] | null {
-  return yandexSuggestCache.get(buildSuggestCacheKey(params)) ?? null;
-}
-
-function writeCachedYandexSuggest(
-  params: {
-    citySlug: CitySlug;
-    query: string;
-    origin?: {
-      lat: number;
-      lon: number;
-    };
-  },
-  suggestions: YandexSuggestResult[],
-): void {
-  yandexSuggestCache.set(buildSuggestCacheKey(params), suggestions);
-  if (yandexSuggestCache.size <= YANDEX_SUGGEST_CACHE_MAX) return;
-
-  const oldestKey = yandexSuggestCache.keys().next().value;
-  if (oldestKey) yandexSuggestCache.delete(oldestKey);
 }
 
 function buildStreetHouseQueryVariants(rawQuery: string): string[] {
@@ -375,9 +329,6 @@ async function requestYandexSuggest(params: {
     return [];
   }
 
-  const cached = readCachedYandexSuggest(params);
-  if (cached) return cached;
-
   const cityConfig = CITY_GEOCODE_CONFIGS[params.citySlug];
   const url = new URL("https://suggest-maps.yandex.ru/v1/suggest");
   url.searchParams.set("apikey", config.yandex.geosuggestApiKey);
@@ -433,9 +384,7 @@ async function requestYandexSuggest(params: {
     return [];
   }
 
-  const suggestions = parseYandexSuggestResults(payload);
-  writeCachedYandexSuggest(params, suggestions);
-  return suggestions;
+  return parseYandexSuggestResults(payload);
 }
 
 async function requestYandexGeocodeByUri(params: {
