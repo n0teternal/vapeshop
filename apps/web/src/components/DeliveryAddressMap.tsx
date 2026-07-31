@@ -35,9 +35,29 @@ type DeliveryAddressMapProps = {
   onSelectionChange: (selection: DeliveryMapSelection | null) => void;
 };
 
-const CITY_LABELS: Record<CitySlug, string> = {
-  vvo: "Владивосток",
-  blg: "Благовещенск",
+type CitySearchConfig = {
+  label: string;
+  queryPrefix: string;
+  boundedBy: [YMapsCoords, YMapsCoords];
+};
+
+const CITY_SEARCH_CONFIGS: Record<CitySlug, CitySearchConfig> = {
+  vvo: {
+    label: "Владивосток",
+    queryPrefix: "Россия, Приморский край, Владивосток",
+    boundedBy: [
+      [42.94, 131.72],
+      [43.32, 132.16],
+    ],
+  },
+  blg: {
+    label: "Благовещенск",
+    queryPrefix: "Россия, Амурская область, Благовещенск",
+    boundedBy: [
+      [50.18, 127.42],
+      [50.36, 127.68],
+    ],
+  },
 };
 
 let yandexMapsPromise: Promise<YMapsApi> | null = null;
@@ -167,6 +187,39 @@ function isValidCoords(coords: YMapsCoords): boolean {
   );
 }
 
+function normalizeSearchText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = normalizeSearchText(trimmed);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+
+  return out;
+}
+
+function buildAddressSearchQueries(city: CitySlug, rawQuery: string): string[] {
+  const query = rawQuery.trim();
+  const config = CITY_SEARCH_CONFIGS[city];
+  const normalized = normalizeSearchText(query);
+  const hasCity = normalized.includes(normalizeSearchText(config.label));
+
+  return uniqueStrings([
+    hasCity ? query : `${config.queryPrefix}, ${query}`,
+    hasCity ? query : `${config.label}, ${query}`,
+    query,
+  ]);
+}
+
 export function DeliveryAddressMap({
   city,
   address,
@@ -268,9 +321,14 @@ export function DeliveryAddressMap({
     }
 
     const timeoutId = window.setTimeout(() => {
-      const request = `${CITY_LABELS[city]}, ${localAddress.trim()}`;
+      const config = CITY_SEARCH_CONFIGS[city];
+      const request = `${config.queryPrefix}, ${localAddress.trim()}`;
       ymapsApi
-        .suggest?.(request)
+        .suggest?.(request, {
+          boundedBy: config.boundedBy,
+          provider: "yandex#map",
+          results: 5,
+        })
         .then((items) => {
           const nextSuggestions = items
             .map((item) => item.value ?? item.displayName ?? "")
@@ -345,21 +403,25 @@ export function DeliveryAddressMap({
     setLoading(true);
     setMapError(null);
     try {
-      const scopedQuery = query.toLowerCase().includes(CITY_LABELS[city].toLowerCase())
-        ? query
-        : `${CITY_LABELS[city]}, ${query}`;
-      const result = await ymapsApi.geocode(scopedQuery, { results: 1 });
-      const geoObject = result.geoObjects.get(0);
-      if (!geoObject) {
-        setMapError("Адрес не найден.");
+      const config = CITY_SEARCH_CONFIGS[city];
+      const searchQueries = buildAddressSearchQueries(city, query);
+
+      for (const searchQuery of searchQueries) {
+        const result = await ymapsApi.geocode(searchQuery, {
+          boundedBy: config.boundedBy,
+          results: 1,
+        });
+        const geoObject = result.geoObjects.get(0);
+        if (!geoObject) continue;
+
+        const coords = geoObject.geometry.getCoordinates();
+        if (!isValidCoords(coords)) continue;
+
+        await selectCoords(coords, getGeoObjectAddress(geoObject, query));
         return;
       }
-      const coords = geoObject.geometry.getCoordinates();
-      if (!isValidCoords(coords)) {
-        setMapError("Карта вернула некорректные координаты.");
-        return;
-      }
-      await selectCoords(coords, getGeoObjectAddress(geoObject, query));
+
+      setMapError("Адрес не найден. Попробуй добавить улицу, дом и город.");
     } catch {
       setMapError("Не удалось найти адрес.");
     } finally {
@@ -450,6 +512,13 @@ export function DeliveryAddressMap({
               <span>{mapError ?? "Карта загружается..."}</span>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {!mapOpen && mapError ? (
+        <div className="flex min-h-9 items-center gap-2 rounded-md border border-border/70 bg-background/55 px-3 py-2 text-xs text-muted-foreground">
+          <MapPin className="h-4 w-4 shrink-0" />
+          <span>{mapError}</span>
         </div>
       ) : null}
 
