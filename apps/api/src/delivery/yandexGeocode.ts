@@ -9,9 +9,16 @@ export type DeliveryGeocodeResult = {
   lon: number;
 };
 
+export type DeliveryDistancePreviewResult = {
+  address: string;
+  distanceKm: number;
+  source: "geosuggest";
+};
+
 type YandexSuggestResult = {
   uri: string;
   address: string | null;
+  distanceMeters: number | null;
 };
 
 type CityGeocodeConfig = {
@@ -145,6 +152,16 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function readNumber(value: unknown): number | null {
+  const numberValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
 function getYandexErrorMessage(payload: unknown): string | null {
   if (!isRecord(payload)) return null;
   const message = readString(payload.message) ?? readString(payload.error);
@@ -273,12 +290,16 @@ function parseYandexSuggestResults(payload: unknown): YandexSuggestResult[] {
     const address = isRecord(item.address)
       ? readString(item.address.formatted_address)
       : null;
+    const distanceMeters = isRecord(item.distance)
+      ? readNumber(item.distance.value)
+      : null;
     const fallbackAddress = [subtitle, title].filter(Boolean).join(", ");
 
     seen.add(uri);
     out.push({
       uri,
       address: address ?? (fallbackAddress || null),
+      distanceMeters,
     });
   }
 
@@ -288,8 +309,22 @@ function parseYandexSuggestResults(payload: unknown): YandexSuggestResult[] {
 async function requestYandexSuggest(params: {
   citySlug: CitySlug;
   query: string;
+  origin?: {
+    lat: number;
+    lon: number;
+  };
+  requireKey?: boolean;
 }): Promise<YandexSuggestResult[]> {
-  if (!config.yandex.geosuggestApiKey) return [];
+  if (!config.yandex.geosuggestApiKey) {
+    if (params.requireKey) {
+      throw new HttpError(
+        503,
+        "YANDEX_GEOSUGGEST_NOT_CONFIGURED",
+        "Добавь YANDEX_GEOSUGGEST_API_KEY в Railway.",
+      );
+    }
+    return [];
+  }
 
   const cityConfig = CITY_GEOCODE_CONFIGS[params.citySlug];
   const url = new URL("https://suggest-maps.yandex.ru/v1/suggest");
@@ -304,6 +339,9 @@ async function requestYandexSuggest(params: {
   url.searchParams.set("ll", cityConfig.ll);
   url.searchParams.set("spn", cityConfig.spn);
   url.searchParams.set("strict_bounds", "1");
+  if (params.origin) {
+    url.searchParams.set("ull", `${params.origin.lon},${params.origin.lat}`);
+  }
 
   let response: Response;
   try {
@@ -312,11 +350,16 @@ async function requestYandexSuggest(params: {
         Accept: "application/json",
       },
     });
-  } catch {
+  } catch (error) {
+    if (params.requireKey) {
+      throw new HttpError(
+        502,
+        "YANDEX_GEOSUGGEST_NETWORK",
+        error instanceof Error ? error.message : "Yandex Geosuggest network error",
+      );
+    }
     return [];
   }
-
-  if (!response.ok) return [];
 
   const text = await response.text();
   let payload: unknown = null;
@@ -324,6 +367,18 @@ async function requestYandexSuggest(params: {
     payload = text ? JSON.parse(text) : null;
   } catch {
     payload = null;
+  }
+
+  if (!response.ok) {
+    if (params.requireKey) {
+      const yandexMessage = getYandexErrorMessage(payload);
+      throw new HttpError(
+        response.status,
+        "YANDEX_GEOSUGGEST_ERROR",
+        yandexMessage ?? `Yandex Geosuggest returned HTTP ${response.status}`,
+      );
+    }
+    return [];
   }
 
   return parseYandexSuggestResults(payload);
@@ -442,5 +497,60 @@ export async function geocodeDeliveryAddress(params: {
     404,
     "ADDRESS_NOT_FOUND",
     "Адрес не найден. Попробуй добавить улицу, дом и город.",
+  );
+}
+
+export async function previewDeliveryAddressDistance(params: {
+  citySlug: CitySlug;
+  address: string;
+  originLat: number;
+  originLon: number;
+}): Promise<DeliveryDistancePreviewResult> {
+  const trimmedAddress = params.address.trim();
+  if (trimmedAddress.length < 3) {
+    throw new HttpError(400, "BAD_REQUEST", "address is too short");
+  }
+
+  if (
+    !Number.isFinite(params.originLat) ||
+    !Number.isFinite(params.originLon) ||
+    Math.abs(params.originLat) > 90 ||
+    Math.abs(params.originLon) > 180
+  ) {
+    throw new HttpError(400, "BAD_REQUEST", "origin coordinates are invalid");
+  }
+
+  const suggestQueries = buildSuggestQueries(params.citySlug, trimmedAddress);
+
+  for (const query of suggestQueries) {
+    const suggestions = await requestYandexSuggest({
+      citySlug: params.citySlug,
+      query,
+      origin: {
+        lat: params.originLat,
+        lon: params.originLon,
+      },
+      requireKey: true,
+    });
+
+    const withDistance = suggestions.find(
+      (suggestion) =>
+        suggestion.distanceMeters !== null &&
+        Number.isFinite(suggestion.distanceMeters) &&
+        suggestion.distanceMeters >= 0,
+    );
+    if (!withDistance || withDistance.distanceMeters === null) continue;
+
+    return {
+      address: withDistance.address ?? trimmedAddress,
+      distanceKm: withDistance.distanceMeters / 1000,
+      source: "geosuggest",
+    };
+  }
+
+  throw new HttpError(
+    404,
+    "ADDRESS_NOT_FOUND",
+    "Адрес не найден в подсказках Яндекса.",
   );
 }

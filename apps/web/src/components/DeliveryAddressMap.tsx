@@ -32,6 +32,17 @@ type DeliveryGeocodeResponse = {
   lon: number;
 };
 
+type DeliveryDistancePreviewResponse = {
+  address: string;
+  distanceKm: number;
+  source: "geosuggest";
+};
+
+type DeliveryDistancePreview = {
+  address: string;
+  distanceKm: number;
+};
+
 type AddressSearchOptions = {
   showErrors?: boolean;
 };
@@ -308,6 +319,7 @@ export function DeliveryAddressMap({
   const [localAddress, setLocalAddress] = useState(address);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selection, setSelection] = useState<DeliveryMapSelection | null>(null);
+  const [distancePreview, setDistancePreview] = useState<DeliveryDistancePreview | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -450,6 +462,7 @@ export function DeliveryAddressMap({
     setCustomerPlacemark(coords);
     setLocalAddress(addressLine);
     setSelection(nextSelection);
+    setDistancePreview(null);
     setSuggestions([]);
     setMapError(null);
     onAddressChange(addressLine);
@@ -511,6 +524,44 @@ export function DeliveryAddressMap({
     }
   }
 
+  async function previewDistanceViaApi(
+    query: string,
+    options: AddressSearchOptions = {},
+  ): Promise<AddressSearchAttempt> {
+    const showErrors = options.showErrors ?? true;
+
+    try {
+      const search = new URLSearchParams({
+        citySlug: city,
+        address: query,
+        originLat: String(origin.lat),
+        originLon: String(origin.lon),
+      });
+      const result = await apiGet<DeliveryDistancePreviewResponse>(
+        `/api/delivery/distance-preview?${search.toString()}`,
+      );
+
+      setDistancePreview({
+        address: result.address || query,
+        distanceKm: result.distanceKm,
+      });
+      setMapError(null);
+      return { found: true, errorMessage: null };
+    } catch (error) {
+      if (error instanceof ApiError) {
+        if (
+          error.code === "YANDEX_GEOSUGGEST_NOT_CONFIGURED" ||
+          error.code === "YANDEX_GEOSUGGEST_NETWORK" ||
+          error.code === "YANDEX_GEOSUGGEST_ERROR" ||
+          error.code === "ADDRESS_NOT_FOUND"
+        ) {
+          return { found: false, errorMessage: showErrors ? error.message : null };
+        }
+      }
+      return { found: false, errorMessage: null };
+    }
+  }
+
   async function searchAddressViaYmaps(query: string): Promise<AddressSearchAttempt> {
     if (!ymapsApi) return { found: false, errorMessage: null };
 
@@ -544,6 +595,7 @@ export function DeliveryAddressMap({
 
     setLoading(true);
     setMapError(null);
+    setDistancePreview(null);
     try {
       const ymapsAttempt = await searchAddressViaYmaps(query);
       if (ymapsAttempt.found) return;
@@ -552,9 +604,14 @@ export function DeliveryAddressMap({
         const apiAttempt = await searchAddressViaApi(query, { showErrors });
         if (apiAttempt.found) return;
 
+        const previewAttempt = await previewDistanceViaApi(query, { showErrors });
+        if (previewAttempt.found) return;
+
         if (showErrors) {
           setMapError(
-            apiAttempt.errorMessage ?? "Карта еще загружается. Попробуй еще раз через пару секунд.",
+            previewAttempt.errorMessage ??
+              apiAttempt.errorMessage ??
+              "Карта еще загружается. Попробуй еще раз через пару секунд.",
           );
         }
         return;
@@ -563,9 +620,14 @@ export function DeliveryAddressMap({
       const apiAttempt = await searchAddressViaApi(query, { showErrors });
       if (apiAttempt.found) return;
 
+      const previewAttempt = await previewDistanceViaApi(query, { showErrors });
+      if (previewAttempt.found) return;
+
       if (showErrors) {
         setMapError(
-          apiAttempt.errorMessage ?? "Адрес не найден. Попробуй добавить улицу, дом и город.",
+          previewAttempt.errorMessage ??
+            apiAttempt.errorMessage ??
+            "Адрес не найден. Попробуй добавить улицу, дом и город.",
         );
       }
     } catch {
@@ -580,6 +642,7 @@ export function DeliveryAddressMap({
   function handleAddressInput(value: string): void {
     setLocalAddress(value);
     setSelection(null);
+    setDistancePreview(null);
     setMapError(null);
     onAddressChange(value);
     onSelectionChange(null);
@@ -667,17 +730,21 @@ export function DeliveryAddressMap({
         </div>
       ) : null}
 
-      {loading || selection || mapError ? (
+      {loading || selection || distancePreview || mapError ? (
         <div
           className={`flex min-h-11 items-start gap-2 rounded-md border px-3 py-2 text-xs ${
             selection
               ? selection.zone.toneClassName
+              : distancePreview
+                ? "border-amber-300/40 bg-amber-400/10 text-amber-400"
               : loading
                 ? "border-sky-300/40 bg-sky-400/10 text-sky-400"
                 : "border-border/70 bg-background/55 text-muted-foreground"
           }`}
         >
           {selection ? (
+            <Navigation className="mt-0.5 h-4 w-4 shrink-0" />
+          ) : distancePreview ? (
             <Navigation className="mt-0.5 h-4 w-4 shrink-0" />
           ) : loading ? (
             <Search className="mt-0.5 h-4 w-4 shrink-0" />
@@ -688,6 +755,8 @@ export function DeliveryAddressMap({
             <span className="block font-semibold">
               {selection
                 ? `Расстояние от точки: ${formatDistanceKm(selection.distanceKm)}`
+                : distancePreview
+                  ? `Примерное расстояние от точки: ${formatDistanceKm(distancePreview.distanceKm)}`
                 : loading
                   ? "Считаю расстояние..."
                   : "Расстояние не посчитано"}
@@ -695,6 +764,8 @@ export function DeliveryAddressMap({
             <span className="mt-0.5 block text-[11px] opacity-80">
               {selection
                 ? `${origin.label} • ${selection.zone.title} • ${selection.zone.feeHint}`
+                : distancePreview
+                  ? `${origin.label} • через подсказки Яндекса • координаты пока не получены`
                 : loading
                   ? localAddress
                   : mapError}

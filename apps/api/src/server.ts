@@ -16,6 +16,8 @@ import { listCustomerOrders } from "./order/customerOrders.js";
 import { cancelOrderAndRestoreInventory } from "./order/cancelOrder.js";
 import {
   geocodeDeliveryAddress,
+  previewDeliveryAddressDistance,
+  type DeliveryDistancePreviewResult,
   type DeliveryGeocodeResult,
 } from "./delivery/yandexGeocode.js";
 import {
@@ -744,6 +746,62 @@ app.get<{
         : "Unexpected error";
 
     request.log.error({ err: e }, "Delivery geocode failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.get<{
+  Querystring: {
+    citySlug?: string;
+    address?: string;
+    originLat?: string;
+    originLon?: string;
+  };
+  Reply: ApiSuccess<DeliveryDistancePreviewResult> | ErrorResponse;
+}>("/api/delivery/distance-preview", async (request, reply) => {
+  try {
+    const context = requireReferralTelegramContext({
+      headers: request.headers as Record<string, unknown>,
+    });
+    if (context.user.id !== DELIVERY_MAP_ALLOWED_TG_USER_ID) {
+      throw new HttpError(
+        403,
+        "DELIVERY_MAP_USER_ONLY",
+        "Delivery map is only available for this user",
+      );
+    }
+
+    const citySlug = request.query.citySlug;
+    if (citySlug !== "vvo" && citySlug !== "blg") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
+    }
+
+    const address = request.query.address?.trim() ?? "";
+    if (address.length < 3) {
+      throw new HttpError(400, "BAD_REQUEST", "address is too short");
+    }
+
+    const originLat = Number(request.query.originLat);
+    const originLon = Number(request.query.originLon);
+
+    const result = await previewDeliveryAddressDistance({
+      citySlug,
+      address,
+      originLat,
+      originLon,
+    });
+
+    return reply.code(200).send(ok(result));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Delivery distance preview failed");
     return reply.code(statusCode).send({ ok: false, error: { code, message } });
   }
 });
