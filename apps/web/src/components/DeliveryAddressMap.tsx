@@ -92,12 +92,7 @@ const CITY_SEARCH_CONFIGS: Record<CitySlug, CitySearchConfig> = {
   },
 };
 
-const ADDRESS_SUGGEST_MIN_LENGTH = 5;
-const ADDRESS_SUGGEST_DEBOUNCE_MS = 650;
-const ADDRESS_SUGGEST_CACHE_MAX = 80;
-
 let yandexMapsPromise: Promise<YMapsApi> | null = null;
-const addressSuggestCache = new Map<string, AddressSuggestion[]>();
 
 function loadYandexMaps(): Promise<YMapsApi> {
   if (typeof window === "undefined" || typeof document === "undefined") {
@@ -271,27 +266,6 @@ function buildAddressSuggestion(city: CitySlug, value: string): AddressSuggestio
   };
 }
 
-function buildSuggestCacheKey(city: CitySlug, query: string): string {
-  return `${city}:${normalizeSearchText(query)}`;
-}
-
-function readCachedSuggestions(city: CitySlug, query: string): AddressSuggestion[] | null {
-  return addressSuggestCache.get(buildSuggestCacheKey(city, query)) ?? null;
-}
-
-function writeCachedSuggestions(
-  city: CitySlug,
-  query: string,
-  suggestions: AddressSuggestion[],
-): void {
-  const key = buildSuggestCacheKey(city, query);
-  addressSuggestCache.set(key, suggestions);
-  if (addressSuggestCache.size <= ADDRESS_SUGGEST_CACHE_MAX) return;
-
-  const oldestKey = addressSuggestCache.keys().next().value;
-  if (oldestKey) addressSuggestCache.delete(oldestKey);
-}
-
 function buildStreetHouseQueryVariants(rawQuery: string): string[] {
   const query = rawQuery.trim();
   const commaStreetHouseMatch = /^(.+?),\s*(\d+[0-9A-Za-zА-Яа-я/-]*)$/.exec(query);
@@ -373,7 +347,6 @@ export function DeliveryAddressMap({
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<YMapsMap | null>(null);
   const customerPlacemarkRef = useRef<YMapsPlacemark | null>(null);
-  const suppressSuggestForAddressRef = useRef<string | null>(null);
   const [ymapsApi, setYmapsApi] = useState<YMapsApi | null>(null);
   const [localAddress, setLocalAddress] = useState(address);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
@@ -458,30 +431,14 @@ export function DeliveryAddressMap({
   }, [mapOpen, origin.label, originCoords, ymapsApi]);
 
   useEffect(() => {
-    const trimmedAddress = localAddress.trim();
-    const suppressedAddress = suppressSuggestForAddressRef.current;
-    if (
-      suppressedAddress &&
-      normalizeSearchText(suppressedAddress) === normalizeSearchText(trimmedAddress)
-    ) {
-      setSuggestions([]);
-      return undefined;
-    }
-
-    if (!ymapsApi?.suggest || trimmedAddress.length < ADDRESS_SUGGEST_MIN_LENGTH || disabled) {
+    if (!ymapsApi?.suggest || localAddress.trim().length < 3 || disabled) {
       setSuggestions([]);
       return undefined;
     }
 
     const timeoutId = window.setTimeout(() => {
-      const cachedSuggestions = readCachedSuggestions(city, trimmedAddress);
-      if (cachedSuggestions) {
-        setSuggestions(cachedSuggestions);
-        return;
-      }
-
       const config = CITY_SEARCH_CONFIGS[city];
-      const request = `${config.queryPrefix}, ${trimmedAddress}`;
+      const request = `${config.queryPrefix}, ${localAddress.trim()}`;
       ymapsApi
         .suggest?.(request, {
           boundedBy: config.boundedBy,
@@ -497,19 +454,19 @@ export function DeliveryAddressMap({
             .filter((suggestion): suggestion is AddressSuggestion => suggestion !== null)
             .slice(0, 5);
           const seen = new Set<string>();
-          const uniqueSuggestions = nextSuggestions.filter((suggestion) => {
-            const key = normalizeSearchText(suggestion.value);
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-          setSuggestions(uniqueSuggestions);
-          writeCachedSuggestions(city, trimmedAddress, uniqueSuggestions);
+          setSuggestions(
+            nextSuggestions.filter((suggestion) => {
+              const key = normalizeSearchText(suggestion.value);
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            }),
+          );
         })
         .catch(() => {
           setSuggestions([]);
         });
-    }, ADDRESS_SUGGEST_DEBOUNCE_MS);
+    }, 300);
 
     return () => window.clearTimeout(timeoutId);
   }, [city, disabled, localAddress, ymapsApi]);
@@ -726,7 +683,6 @@ export function DeliveryAddressMap({
   }
 
   function handleAddressInput(value: string): void {
-    suppressSuggestForAddressRef.current = null;
     setLocalAddress(value);
     setSelection(null);
     setDistancePreview(null);
@@ -790,7 +746,6 @@ export function DeliveryAddressMap({
               className="min-w-0 rounded px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/70"
               disabled={disabled}
               onClick={() => {
-                suppressSuggestForAddressRef.current = suggestion.value;
                 setLocalAddress(suggestion.value);
                 onAddressChange(suggestion.value);
                 setSelection(null);
