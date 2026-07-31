@@ -9,6 +9,11 @@ export type DeliveryGeocodeResult = {
   lon: number;
 };
 
+type YandexSuggestResult = {
+  uri: string;
+  address: string | null;
+};
+
 type CityGeocodeConfig = {
   label: string;
   queryPrefix: string;
@@ -121,6 +126,19 @@ function buildGeocodeQueries(citySlug: CitySlug, address: string): string[] {
       value,
     ]),
   );
+}
+
+function buildSuggestQueries(citySlug: CitySlug, address: string): string[] {
+  const query = address.trim();
+  const cityConfig = CITY_GEOCODE_CONFIGS[citySlug];
+  const tail = getAddressTailAfterCity(citySlug, query);
+
+  return uniqueStrings([
+    tail ?? "",
+    query,
+    tail ? `${cityConfig.queryPrefix}, ${tail}` : "",
+    `${cityConfig.queryPrefix}, ${query}`,
+  ]);
 }
 
 function readString(value: unknown): string | null {
@@ -237,6 +255,140 @@ async function requestYandexGeocode(params: {
   return parseYandexGeocodeResult(payload);
 }
 
+function parseYandexSuggestResults(payload: unknown): YandexSuggestResult[] {
+  if (!isRecord(payload)) return [];
+  const results = payload.results;
+  if (!Array.isArray(results)) return [];
+
+  const out: YandexSuggestResult[] = [];
+  const seen = new Set<string>();
+
+  for (const item of results) {
+    if (!isRecord(item)) continue;
+    const uri = readString(item.uri);
+    if (!uri || seen.has(uri)) continue;
+
+    const title = isRecord(item.title) ? readString(item.title.text) : null;
+    const subtitle = isRecord(item.subtitle) ? readString(item.subtitle.text) : null;
+    const address = isRecord(item.address)
+      ? readString(item.address.formatted_address)
+      : null;
+    const fallbackAddress = [subtitle, title].filter(Boolean).join(", ");
+
+    seen.add(uri);
+    out.push({
+      uri,
+      address: address ?? (fallbackAddress || null),
+    });
+  }
+
+  return out;
+}
+
+async function requestYandexSuggest(params: {
+  citySlug: CitySlug;
+  query: string;
+}): Promise<YandexSuggestResult[]> {
+  if (!config.yandex.geosuggestApiKey) return [];
+
+  const cityConfig = CITY_GEOCODE_CONFIGS[params.citySlug];
+  const url = new URL("https://suggest-maps.yandex.ru/v1/suggest");
+  url.searchParams.set("apikey", config.yandex.geosuggestApiKey);
+  url.searchParams.set("text", params.query);
+  url.searchParams.set("lang", "ru_RU");
+  url.searchParams.set("results", "5");
+  url.searchParams.set("attrs", "uri");
+  url.searchParams.set("print_address", "1");
+  url.searchParams.set("types", "house");
+  url.searchParams.set("countries", "ru");
+  url.searchParams.set("ll", cityConfig.ll);
+  url.searchParams.set("spn", cityConfig.spn);
+  url.searchParams.set("strict_bounds", "1");
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+  } catch {
+    return [];
+  }
+
+  if (!response.ok) return [];
+
+  const text = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+
+  return parseYandexSuggestResults(payload);
+}
+
+async function requestYandexGeocodeByUri(params: {
+  uri: string;
+  fallbackAddress: string | null;
+}): Promise<DeliveryGeocodeResult | null> {
+  if (!config.yandex.geocoderApiKey) {
+    throw new HttpError(
+      503,
+      "YANDEX_GEOCODER_NOT_CONFIGURED",
+      "Добавь YANDEX_GEOCODER_API_KEY в Railway.",
+    );
+  }
+
+  const url = new URL("https://geocode-maps.yandex.ru/v1/");
+  url.searchParams.set("apikey", config.yandex.geocoderApiKey);
+  url.searchParams.set("format", "json");
+  url.searchParams.set("lang", "ru_RU");
+  url.searchParams.set("results", "1");
+  url.searchParams.set("uri", params.uri);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+  } catch (error) {
+    throw new HttpError(
+      502,
+      "YANDEX_GEOCODER_NETWORK",
+      error instanceof Error ? error.message : "Yandex Geocoder network error",
+    );
+  }
+
+  const text = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const yandexMessage = getYandexErrorMessage(payload);
+    throw new HttpError(
+      response.status,
+      "YANDEX_GEOCODER_ERROR",
+      yandexMessage ?? `Yandex Geocoder returned HTTP ${response.status}`,
+    );
+  }
+
+  const result = parseYandexGeocodeResult(payload);
+  if (!result) return null;
+
+  return {
+    ...result,
+    address: result.address || params.fallbackAddress || "",
+  };
+}
+
 export async function geocodeDeliveryAddress(params: {
   citySlug: CitySlug;
   address: string;
@@ -247,6 +399,26 @@ export async function geocodeDeliveryAddress(params: {
   }
 
   const queries = buildGeocodeQueries(params.citySlug, trimmedAddress);
+  const suggestQueries = buildSuggestQueries(params.citySlug, trimmedAddress);
+  const seenSuggestUris = new Set<string>();
+
+  for (const query of suggestQueries) {
+    const suggestions = await requestYandexSuggest({
+      citySlug: params.citySlug,
+      query,
+    });
+
+    for (const suggestion of suggestions) {
+      if (seenSuggestUris.has(suggestion.uri)) continue;
+      seenSuggestUris.add(suggestion.uri);
+
+      const byUri = await requestYandexGeocodeByUri({
+        uri: suggestion.uri,
+        fallbackAddress: suggestion.address ?? trimmedAddress,
+      });
+      if (byUri) return byUri;
+    }
+  }
 
   for (const query of queries) {
     const restricted = await requestYandexGeocode({

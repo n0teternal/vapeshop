@@ -36,6 +36,7 @@ export type AppConfig = {
   };
   yandex: {
     geocoderApiKey: string | null;
+    geosuggestApiKey: string | null;
   };
   productImagesBaseUrl: string | null;
   dev: {
@@ -217,6 +218,7 @@ export const config: AppConfig = (() => {
     },
     yandex: {
       geocoderApiKey: readEnv("YANDEX_GEOCODER_API_KEY"),
+      geosuggestApiKey: readEnv("YANDEX_GEOSUGGEST_API_KEY"),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {

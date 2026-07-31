@@ -511,6 +511,29 @@ export function DeliveryAddressMap({
     }
   }
 
+  async function searchAddressViaYmaps(query: string): Promise<AddressSearchAttempt> {
+    if (!ymapsApi) return { found: false, errorMessage: null };
+
+    const searchQueries = buildAddressSearchQueries(city, query);
+
+    for (const searchQuery of searchQueries) {
+      const result = await ymapsApi.geocode(searchQuery, {
+        results: 1,
+      }).catch(() => null);
+      if (!result) continue;
+      const geoObject = result.geoObjects.get(0);
+      if (!geoObject) continue;
+
+      const coords = geoObject.geometry.getCoordinates();
+      if (!isValidCoords(coords)) continue;
+
+      applyDeliverySelection(getGeoObjectAddress(geoObject, query), coords);
+      return { found: true, errorMessage: null };
+    }
+
+    return { found: false, errorMessage: null };
+  }
+
   async function searchAddress(
     nextAddress = localAddress,
     options: AddressSearchOptions = {},
@@ -522,10 +545,13 @@ export function DeliveryAddressMap({
     setLoading(true);
     setMapError(null);
     try {
-      const apiAttempt = await searchAddressViaApi(query, { showErrors });
-      if (apiAttempt.found) return;
+      const ymapsAttempt = await searchAddressViaYmaps(query);
+      if (ymapsAttempt.found) return;
 
       if (!ymapsApi) {
+        const apiAttempt = await searchAddressViaApi(query, { showErrors });
+        if (apiAttempt.found) return;
+
         if (showErrors) {
           setMapError(
             apiAttempt.errorMessage ?? "Карта еще загружается. Попробуй еще раз через пару секунд.",
@@ -534,22 +560,8 @@ export function DeliveryAddressMap({
         return;
       }
 
-      const searchQueries = buildAddressSearchQueries(city, query);
-
-      for (const searchQuery of searchQueries) {
-        const result = await ymapsApi.geocode(searchQuery, {
-          results: 1,
-        }).catch(() => null);
-        if (!result) continue;
-        const geoObject = result.geoObjects.get(0);
-        if (!geoObject) continue;
-
-        const coords = geoObject.geometry.getCoordinates();
-        if (!isValidCoords(coords)) continue;
-
-        await selectCoords(coords, getGeoObjectAddress(geoObject, query));
-        return;
-      }
+      const apiAttempt = await searchAddressViaApi(query, { showErrors });
+      if (apiAttempt.found) return;
 
       if (showErrors) {
         setMapError(
