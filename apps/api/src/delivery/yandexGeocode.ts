@@ -10,6 +10,7 @@ export type DeliveryGeocodeResult = {
 };
 
 type CityGeocodeConfig = {
+  label: string;
   queryPrefix: string;
   ll: string;
   spn: string;
@@ -17,11 +18,13 @@ type CityGeocodeConfig = {
 
 const CITY_GEOCODE_CONFIGS: Record<CitySlug, CityGeocodeConfig> = {
   vvo: {
+    label: "Владивосток",
     queryPrefix: "Россия, Приморский край, Владивосток",
     ll: "131.90,43.12",
     spn: "0.45,0.38",
   },
   blg: {
+    label: "Благовещенск",
     queryPrefix: "Россия, Амурская область, Благовещенск",
     ll: "127.55,50.27",
     spn: "0.30,0.18",
@@ -54,6 +57,29 @@ function uniqueStrings(values: string[]): string[] {
 
 function buildStreetHouseQueryVariants(rawQuery: string): string[] {
   const query = rawQuery.trim();
+  const commaStreetHouseMatch = /^(.+?),\s*(\d+[0-9A-Za-zА-Яа-я/-]*)$/.exec(query);
+  if (commaStreetHouseMatch) {
+    const street = commaStreetHouseMatch[1]?.trim();
+    const house = commaStreetHouseMatch[2]?.trim();
+    if (!street || !house) return [query];
+
+    const streetSuffixMatch =
+      /^(.+?)\s+(улица|проспект|переулок|проезд|бульвар|шоссе|тракт|набережная)$/i.exec(street);
+    const streetPrefixMatch =
+      /^(улица|проспект|переулок|проезд|бульвар|шоссе|тракт|набережная)\s+(.+?)$/i.exec(street);
+    const streetName =
+      streetSuffixMatch?.[1]?.trim() ?? streetPrefixMatch?.[2]?.trim() ?? street;
+    const streetType =
+      streetSuffixMatch?.[2]?.trim() ?? streetPrefixMatch?.[1]?.trim() ?? "улица";
+
+    return uniqueStrings([
+      query,
+      `${streetType} ${streetName}, ${house}`,
+      `${streetName} ${streetType}, ${house}`,
+      `${streetName}, ${house}`,
+    ]);
+  }
+
   const streetHouseMatch = /^(.+?)\s+(\d+[0-9A-Za-zА-Яа-я/-]*)$/.exec(query);
   if (!streetHouseMatch) return [query];
 
@@ -69,17 +95,29 @@ function buildStreetHouseQueryVariants(rawQuery: string): string[] {
   ]);
 }
 
+function getAddressTailAfterCity(citySlug: CitySlug, rawQuery: string): string | null {
+  const cityConfig = CITY_GEOCODE_CONFIGS[citySlug];
+  const cityLabel = normalizeSearchText(cityConfig.label);
+  const parts = rawQuery
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const cityIndex = parts.findIndex((part) => normalizeSearchText(part).includes(cityLabel));
+  if (cityIndex < 0 || cityIndex >= parts.length - 1) return null;
+
+  return parts.slice(cityIndex + 1).join(", ");
+}
+
 function buildGeocodeQueries(citySlug: CitySlug, address: string): string[] {
   const query = address.trim();
   const cityConfig = CITY_GEOCODE_CONFIGS[citySlug];
-  const hasCity = normalizeSearchText(query).includes(
-    normalizeSearchText(cityConfig.queryPrefix.split(",").at(-1) ?? ""),
-  );
-  const queryVariants = buildStreetHouseQueryVariants(query);
+  const baseQueries = uniqueStrings([query, getAddressTailAfterCity(citySlug, query) ?? ""]);
+  const queryVariants = baseQueries.flatMap((value) => buildStreetHouseQueryVariants(value));
 
   return uniqueStrings(
     queryVariants.flatMap((value) => [
-      hasCity ? value : `${cityConfig.queryPrefix}, ${value}`,
+      `${cityConfig.queryPrefix}, ${value}`,
+      `Россия, ${value}`,
       value,
     ]),
   );

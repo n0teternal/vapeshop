@@ -225,6 +225,29 @@ function uniqueStrings(values: string[]): string[] {
 
 function buildStreetHouseQueryVariants(rawQuery: string): string[] {
   const query = rawQuery.trim();
+  const commaStreetHouseMatch = /^(.+?),\s*(\d+[0-9A-Za-zА-Яа-я/-]*)$/.exec(query);
+  if (commaStreetHouseMatch) {
+    const street = commaStreetHouseMatch[1]?.trim();
+    const house = commaStreetHouseMatch[2]?.trim();
+    if (!street || !house) return [query];
+
+    const streetSuffixMatch =
+      /^(.+?)\s+(улица|проспект|переулок|проезд|бульвар|шоссе|тракт|набережная)$/i.exec(street);
+    const streetPrefixMatch =
+      /^(улица|проспект|переулок|проезд|бульвар|шоссе|тракт|набережная)\s+(.+?)$/i.exec(street);
+    const streetName =
+      streetSuffixMatch?.[1]?.trim() ?? streetPrefixMatch?.[2]?.trim() ?? street;
+    const streetType =
+      streetSuffixMatch?.[2]?.trim() ?? streetPrefixMatch?.[1]?.trim() ?? "улица";
+
+    return uniqueStrings([
+      query,
+      `${streetType} ${streetName}, ${house}`,
+      `${streetName} ${streetType}, ${house}`,
+      `${streetName}, ${house}`,
+    ]);
+  }
+
   const streetHouseMatch = /^(.+?)\s+(\d+[0-9A-Za-zА-Яа-я/-]*)$/.exec(query);
   if (!streetHouseMatch) return [query];
 
@@ -240,16 +263,29 @@ function buildStreetHouseQueryVariants(rawQuery: string): string[] {
   ]);
 }
 
+function getAddressTailAfterCity(city: CitySlug, rawQuery: string): string | null {
+  const config = CITY_SEARCH_CONFIGS[city];
+  const cityLabel = normalizeSearchText(config.label);
+  const parts = rawQuery
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const cityIndex = parts.findIndex((part) => normalizeSearchText(part).includes(cityLabel));
+  if (cityIndex < 0 || cityIndex >= parts.length - 1) return null;
+
+  return parts.slice(cityIndex + 1).join(", ");
+}
+
 function buildAddressSearchQueries(city: CitySlug, rawQuery: string): string[] {
   const query = rawQuery.trim();
   const config = CITY_SEARCH_CONFIGS[city];
-  const normalized = normalizeSearchText(query);
-  const hasCity = normalized.includes(normalizeSearchText(config.label));
+  const baseQueries = uniqueStrings([query, getAddressTailAfterCity(city, query) ?? ""]);
 
-  const queryVariants = buildStreetHouseQueryVariants(query);
+  const queryVariants = baseQueries.flatMap((value) => buildStreetHouseQueryVariants(value));
   const scopedQueries = queryVariants.flatMap((value) => [
-    hasCity ? value : `${config.queryPrefix}, ${value}`,
-    hasCity ? value : `${config.label}, ${value}`,
+    `${config.queryPrefix}, ${value}`,
+    `Россия, ${value}`,
+    `${config.label}, ${value}`,
     value,
   ]);
 
@@ -415,6 +451,7 @@ export function DeliveryAddressMap({
     setLocalAddress(addressLine);
     setSelection(nextSelection);
     setSuggestions([]);
+    setMapError(null);
     onAddressChange(addressLine);
     onSelectionChange(nextSelection);
   }
@@ -497,12 +534,10 @@ export function DeliveryAddressMap({
         return;
       }
 
-      const config = CITY_SEARCH_CONFIGS[city];
       const searchQueries = buildAddressSearchQueries(city, query);
 
       for (const searchQuery of searchQueries) {
         const result = await ymapsApi.geocode(searchQuery, {
-          boundedBy: config.boundedBy,
           results: 1,
         }).catch(() => null);
         if (!result) continue;
@@ -533,6 +568,7 @@ export function DeliveryAddressMap({
   function handleAddressInput(value: string): void {
     setLocalAddress(value);
     setSelection(null);
+    setMapError(null);
     onAddressChange(value);
     onSelectionChange(null);
   }
@@ -610,44 +646,48 @@ export function DeliveryAddressMap({
       {mapOpen ? (
         <div className="overflow-hidden rounded-md border border-border/70 bg-muted/25">
           <div ref={mapElementRef} className="h-44 w-full" />
-          {!ymapsApi || mapError ? (
+          {!ymapsApi ? (
             <div className="flex min-h-10 items-center gap-2 border-t border-border/70 px-3 py-2 text-xs text-muted-foreground">
               <MapPin className="h-4 w-4 shrink-0" />
-              <span>{mapError ?? "Карта загружается..."}</span>
+              <span>Карта загружается...</span>
             </div>
           ) : null}
         </div>
       ) : null}
 
-      {!mapOpen && mapError ? (
-        <div className="flex min-h-9 items-center gap-2 rounded-md border border-border/70 bg-background/55 px-3 py-2 text-xs text-muted-foreground">
-          <MapPin className="h-4 w-4 shrink-0" />
-          <span>{mapError}</span>
-        </div>
-      ) : null}
-
-      {selection ? (
+      {loading || selection || mapError ? (
         <div
-        className={`flex min-h-9 items-center gap-2 rounded-md border px-3 py-2 text-xs ${
-          selection
-            ? selection.zone.toneClassName
-            : "border-border/70 bg-background/55 text-muted-foreground"
-        }`}
-      >
-        <Navigation className="h-4 w-4 shrink-0" />
-        {selection ? (
+          className={`flex min-h-11 items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+            selection
+              ? selection.zone.toneClassName
+              : loading
+                ? "border-sky-300/40 bg-sky-400/10 text-sky-400"
+                : "border-border/70 bg-background/55 text-muted-foreground"
+          }`}
+        >
+          {selection ? (
+            <Navigation className="mt-0.5 h-4 w-4 shrink-0" />
+          ) : loading ? (
+            <Search className="mt-0.5 h-4 w-4 shrink-0" />
+          ) : (
+            <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
+          )}
           <span className="min-w-0">
-            <span className="font-semibold">{formatDistanceKm(selection.distanceKm)}</span>
-            {" от "}
-            <span>{origin.label}</span>
-            {" • "}
-            <span>{selection.zone.title}</span>
-            {" • "}
-            <span>{selection.zone.feeHint}</span>
+            <span className="block font-semibold">
+              {selection
+                ? `Расстояние от точки: ${formatDistanceKm(selection.distanceKm)}`
+                : loading
+                  ? "Считаю расстояние..."
+                  : "Расстояние не посчитано"}
+            </span>
+            <span className="mt-0.5 block text-[11px] opacity-80">
+              {selection
+                ? `${origin.label} • ${selection.zone.title} • ${selection.zone.feeHint}`
+                : loading
+                  ? localAddress
+                  : mapError}
+            </span>
           </span>
-        ) : (
-          <span>Точка доставки не выбрана.</span>
-        )}
         </div>
       ) : null}
     </div>
