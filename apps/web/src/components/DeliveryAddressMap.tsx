@@ -64,6 +64,7 @@ type DeliveryAddressMapProps = {
   required?: boolean;
   inputClassName?: string;
   showDistanceStatus?: boolean;
+  restoredSelection?: DeliveryMapSelection | null;
   onAddressChange: (address: string) => void;
   onSelectionChange: (selection: DeliveryMapSelection | null) => void;
 };
@@ -343,6 +344,7 @@ export function DeliveryAddressMap({
   required,
   inputClassName,
   showDistanceStatus = false,
+  restoredSelection = null,
   onAddressChange,
   onSelectionChange,
 }: DeliveryAddressMapProps) {
@@ -492,6 +494,18 @@ export function DeliveryAddressMap({
     mapRef.current.geoObjects.add(placemark);
     mapRef.current.setCenter(coords, 15, { duration: 250 });
   }
+
+  useEffect(() => {
+    if (!restoredSelection) return;
+
+    setSelection(restoredSelection);
+    setDistancePreview(null);
+    setMapError(null);
+    setLocalAddress(restoredSelection.address);
+    setCustomerPlacemark([restoredSelection.lat, restoredSelection.lon]);
+    // Restores a confirmed selection owned by the parent cart state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoredSelection]);
 
   function applyDeliverySelection(addressLine: string, coords: YMapsCoords): void {
     const distanceKm = distanceKmBetween(originCoords, coords);

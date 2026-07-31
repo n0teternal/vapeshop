@@ -146,6 +146,8 @@ const DEFAULT_BLG_DELIVERY_PRICING: DeliveryPricingSettings = {
 const FREE_DELIVERY_RECOMMENDATION_LIMIT = 8;
 const DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME =
   "border-sky-300/70 focus:ring-sky-200/70 focus-visible:ring-sky-200/70";
+const DELIVERY_MAP_SELECTION_STORAGE_KEY = "vapeshop:cart:delivery-map-selection:v1";
+const DELIVERY_MAP_SELECTION_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
 
 const CITY_UTC_OFFSET_MINUTES: Record<City, number> = {
   vvo: 10 * 60,
@@ -154,6 +156,105 @@ const CITY_UTC_OFFSET_MINUTES: Record<City, number> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+type StoredDeliveryMapSelection = {
+  city: City;
+  addressKey: string;
+  selection: DeliveryMapSelection;
+  updatedAt: number;
+};
+
+function normalizeDeliveryMapAddressKey(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isDeliveryMapZoneId(value: unknown): value is DeliveryMapSelection["zone"]["id"] {
+  return value === "near" || value === "middle" || value === "far" || value === "manual";
+}
+
+function isDeliveryMapSelection(value: unknown): value is DeliveryMapSelection {
+  if (!isRecord(value)) return false;
+  if (typeof value.address !== "string" || value.address.trim().length === 0) return false;
+  if (
+    typeof value.lat !== "number" ||
+    !Number.isFinite(value.lat) ||
+    Math.abs(value.lat) > 90 ||
+    typeof value.lon !== "number" ||
+    !Number.isFinite(value.lon) ||
+    Math.abs(value.lon) > 180 ||
+    typeof value.distanceKm !== "number" ||
+    !Number.isFinite(value.distanceKm) ||
+    value.distanceKm < 0
+  ) {
+    return false;
+  }
+
+  const zone = value.zone;
+  return (
+    isRecord(zone) &&
+    isDeliveryMapZoneId(zone.id) &&
+    typeof zone.title === "string" &&
+    typeof zone.feeHint === "string" &&
+    typeof zone.toneClassName === "string"
+  );
+}
+
+function readStoredDeliveryMapSelection(): StoredDeliveryMapSelection | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(DELIVERY_MAP_SELECTION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return null;
+
+    const city = parsed.city;
+    const addressKey = parsed.addressKey;
+    const updatedAt = parsed.updatedAt;
+    const selection = parsed.selection;
+    if (city !== "vvo" && city !== "blg") return null;
+    if (typeof addressKey !== "string" || addressKey.length === 0) return null;
+    if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt)) return null;
+    if (Date.now() - updatedAt > DELIVERY_MAP_SELECTION_STORAGE_TTL_MS) return null;
+    if (!isDeliveryMapSelection(selection)) return null;
+
+    return { city, addressKey, selection, updatedAt };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredDeliveryMapSelection(params: {
+  city: City;
+  selection: DeliveryMapSelection;
+}): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    const stored: StoredDeliveryMapSelection = {
+      city: params.city,
+      addressKey: normalizeDeliveryMapAddressKey(params.selection.address),
+      selection: params.selection,
+      updatedAt: Date.now(),
+    };
+    window.sessionStorage.setItem(
+      DELIVERY_MAP_SELECTION_STORAGE_KEY,
+      JSON.stringify(stored),
+    );
+  } catch {
+    // Storage is a convenience cache; checkout validation still protects pricing.
+  }
+}
+
+function clearStoredDeliveryMapSelection(): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.removeItem(DELIVERY_MAP_SELECTION_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 function parseOrderApiResponse(value: unknown): OrderApiSuccess | OrderApiError {
@@ -588,6 +689,19 @@ export function CartPage() {
   const showBlgDeliveryFeeCard =
     state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
   const deliveryIsFreeByThreshold = itemsTotal >= deliveryPricing.freeDeliveryThresholdRub;
+  const confirmedDeliveryMapSelection =
+    deliveryMapSelection &&
+    normalizeDeliveryMapAddressKey(deliveryMapSelection.address) ===
+      normalizeDeliveryMapAddressKey(checkoutDraft.address)
+      ? deliveryMapSelection
+      : null;
+  const deliveryMapSelectionRequired =
+    showAdminDeliveryMap &&
+    deliveryPricing.rules.length > 0 &&
+    !deliveryIsFreeByThreshold &&
+    checkoutDraft.address.trim().length > 0;
+  const hasRequiredDeliveryMapSelection =
+    !deliveryMapSelectionRequired || confirmedDeliveryMapSelection !== null;
   const matchedPeakSurchargeRule = deliveryIsFreeByThreshold
     ? null
     : getMatchedPeakSurchargeRule({
@@ -598,7 +712,7 @@ export function CartPage() {
     showBlgDeliveryFeeCard
       ? getBlgDeliveryFeeRub({
           itemsSubtotalRub: itemsTotal,
-          distanceKm: deliveryMapSelection?.distanceKm ?? null,
+          distanceKm: confirmedDeliveryMapSelection?.distanceKm ?? null,
           deliveryTimeSlot: checkoutDraft.deliveryTimeSlot || null,
           pricing: deliveryPricing,
         })
@@ -734,7 +848,38 @@ export function CartPage() {
 
   useEffect(() => {
     setDeliveryMapSelection(null);
+    if (checkoutDraft.deliveryMethod !== "delivery" || !state.city) {
+      clearStoredDeliveryMapSelection();
+    }
   }, [checkoutDraft.deliveryMethod, state.city]);
+
+  useEffect(() => {
+    if (!deliveryMapSelection) return;
+    if (
+      normalizeDeliveryMapAddressKey(deliveryMapSelection.address) ===
+      normalizeDeliveryMapAddressKey(checkoutDraft.address)
+    ) {
+      return;
+    }
+
+    setDeliveryMapSelection(null);
+    clearStoredDeliveryMapSelection();
+  }, [checkoutDraft.address, deliveryMapSelection]);
+
+  useEffect(() => {
+    if (!showAdminDeliveryMap || !state.city) return;
+    if (deliveryMapSelection) return;
+
+    const addressKey = normalizeDeliveryMapAddressKey(checkoutDraft.address);
+    if (!addressKey) return;
+
+    const stored = readStoredDeliveryMapSelection();
+    if (!stored) return;
+    if (stored.city !== state.city) return;
+    if (stored.addressKey !== addressKey) return;
+
+    setDeliveryMapSelection(stored.selection);
+  }, [checkoutDraft.address, deliveryMapSelection, showAdminDeliveryMap, state.city]);
 
   useEffect(() => {
     let cancelled = false;
@@ -884,6 +1029,7 @@ export function CartPage() {
     !editSessionExpired &&
     hasRequiredGuestPhone &&
     hasRequiredBlgDeliverySchedule &&
+    hasRequiredDeliveryMapSelection &&
     (checkoutDraft.deliveryMethod !== "delivery" ||
       checkoutDraft.address.trim().length > 0);
 
@@ -910,6 +1056,15 @@ export function CartPage() {
     }>,
   ): void {
     dispatch({ type: "checkout/set", patch });
+  }
+
+  function updateDeliveryMapSelection(selection: DeliveryMapSelection | null): void {
+    setDeliveryMapSelection(selection);
+    if (selection && state.city) {
+      writeStoredDeliveryMapSelection({ city: state.city, selection });
+      return;
+    }
+    clearStoredDeliveryMapSelection();
   }
 
   function updateCouponCode(value: string): void {
@@ -1002,6 +1157,13 @@ export function CartPage() {
         return;
       }
 
+      if (deliveryMapSelectionRequired && !confirmedDeliveryMapSelection) {
+        setSubmitError(
+          "Нажмите поиск рядом с адресом, чтобы посчитать расстояние и доставку.",
+        );
+        return;
+      }
+
       if (
         showBlgDeliverySchedule &&
         checkoutDraft.deliveryTimeSlot.trim().length > 0 &&
@@ -1068,13 +1230,13 @@ export function CartPage() {
             ? checkoutDraft.deliveryTimeSlot || null
             : null,
           deliveryLocation:
-            showAdminDeliveryMap && deliveryMapSelection
+            showAdminDeliveryMap && confirmedDeliveryMapSelection
               ? {
-                  address: deliveryMapSelection.address,
-                  lat: deliveryMapSelection.lat,
-                  lon: deliveryMapSelection.lon,
-                  distanceKm: deliveryMapSelection.distanceKm,
-                  zone: deliveryMapSelection.zone.id,
+                  address: confirmedDeliveryMapSelection.address,
+                  lat: confirmedDeliveryMapSelection.lat,
+                  lon: confirmedDeliveryMapSelection.lon,
+                  distanceKm: confirmedDeliveryMapSelection.distanceKm,
+                  zone: confirmedDeliveryMapSelection.zone.id,
                 }
               : null,
           couponCode: couponCodeForOrder,
@@ -1339,16 +1501,24 @@ export function CartPage() {
           {checkoutDraft.deliveryMethod === "delivery" ? (
             <div className="space-y-3">
               {showAdminDeliveryMap && state.city ? (
-                <DeliveryAddressMap
-                  city={state.city}
-                  address={checkoutDraft.address}
-                  disabled={submitting}
-                  required
-                  inputClassName={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
-                  showDistanceStatus={deliveryMapAllowedForUser}
-                  onAddressChange={(address) => updateCheckoutDraft({ address })}
-                  onSelectionChange={setDeliveryMapSelection}
-                />
+                <>
+                  <DeliveryAddressMap
+                    city={state.city}
+                    address={checkoutDraft.address}
+                    disabled={submitting}
+                    required
+                    inputClassName={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
+                    showDistanceStatus={deliveryMapAllowedForUser}
+                    restoredSelection={confirmedDeliveryMapSelection}
+                    onAddressChange={(address) => updateCheckoutDraft({ address })}
+                    onSelectionChange={updateDeliveryMapSelection}
+                  />
+                  {deliveryMapSelectionRequired && !confirmedDeliveryMapSelection ? (
+                    <p className="text-xs font-medium text-destructive">
+                      Нажмите поиск рядом с адресом, чтобы посчитать расстояние и доставку.
+                    </p>
+                  ) : null}
+                </>
               ) : (
                 <label className="grid gap-1.5 text-sm">
                   <span className="text-xs font-semibold text-muted-foreground">
@@ -1359,7 +1529,7 @@ export function CartPage() {
                     value={checkoutDraft.address}
                     disabled={submitting}
                     onChange={(e) => {
-                      setDeliveryMapSelection(null);
+                      updateDeliveryMapSelection(null);
                       updateCheckoutDraft({ address: e.target.value });
                     }}
                     placeholder="Улица, дом"

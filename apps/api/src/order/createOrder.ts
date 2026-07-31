@@ -57,6 +57,8 @@ type CreateOrderResult = {
   telegramMessage: TelegramOrderMessage;
 };
 
+const DELIVERY_DISTANCE_REQUIRED_TG_USER_ID = 1208488286;
+
 type InventoryRow = {
   product_id: string;
   in_stock: boolean;
@@ -379,6 +381,21 @@ export async function createOrder(params: {
     supabase,
     citySlug: params.payload.citySlug,
   });
+  if (
+    params.payload.citySlug === "blg" &&
+    params.payload.deliveryMethod === "delivery" &&
+    params.tgUser.id === DELIVERY_DISTANCE_REQUIRED_TG_USER_ID &&
+    itemsSubtotal < deliveryPricingSettings.freeDeliveryThresholdRub &&
+    deliveryPricingSettings.rules.length > 0 &&
+    !params.payload.deliveryLocation
+  ) {
+    throw new HttpError(
+      400,
+      "DELIVERY_DISTANCE_REQUIRED",
+      "Нажмите поиск рядом с адресом, чтобы посчитать расстояние и доставку.",
+    );
+  }
+
   const deliveryFee = calculateDeliveryFeeRub({
     citySlug: params.payload.citySlug,
     deliveryMethod: params.payload.deliveryMethod,
