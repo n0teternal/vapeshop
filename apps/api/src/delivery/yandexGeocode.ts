@@ -1,4 +1,5 @@
 import dns from "node:dns";
+import https from "node:https";
 import { config } from "../config.js";
 import { HttpError } from "../httpError.js";
 
@@ -29,6 +30,12 @@ type CityGeocodeConfig = {
   queryPrefix: string;
   ll: string;
   spn: string;
+};
+
+type YandexTextResponse = {
+  ok: boolean;
+  status: number;
+  text: string;
 };
 
 const CITY_GEOCODE_CONFIGS: Record<CitySlug, CityGeocodeConfig> = {
@@ -175,6 +182,54 @@ function getYandexErrorMessage(payload: unknown): string | null {
   return readString(response.message) ?? readString(response.error);
 }
 
+function lookupYandexIpv4(
+  hostname: string,
+  options: dns.LookupOptions,
+  callback: (
+    err: NodeJS.ErrnoException | null,
+    address: string | dns.LookupAddress[],
+    family?: number,
+  ) => void,
+): void {
+  dns.lookup(hostname, { ...options, family: 4 }, callback);
+}
+
+async function requestYandexText(url: URL): Promise<YandexTextResponse> {
+  return new Promise((resolve, reject) => {
+    const request = https.request(
+      url,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+        lookup: lookupYandexIpv4,
+        timeout: 10_000,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer | string) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        response.on("end", () => {
+          const status = response.statusCode ?? 0;
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            text: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+
+    request.on("timeout", () => {
+      request.destroy(new Error("Yandex request timed out"));
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 function parseYandexGeocodeResult(payload: unknown): DeliveryGeocodeResult | null {
   if (!isRecord(payload)) return null;
   const response = payload.response;
@@ -240,13 +295,9 @@ async function requestYandexGeocode(params: {
     url.searchParams.set("spn", cityConfig.spn);
   }
 
-  let response: Response;
+  let response: YandexTextResponse;
   try {
-    response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
+    response = await requestYandexText(url);
   } catch (error) {
     throw new HttpError(
       502,
@@ -255,7 +306,7 @@ async function requestYandexGeocode(params: {
     );
   }
 
-  const text = await response.text();
+  const text = response.text;
   let payload: unknown = null;
   try {
     payload = text ? JSON.parse(text) : null;
@@ -346,13 +397,9 @@ async function requestYandexSuggest(params: {
     url.searchParams.set("ull", `${params.origin.lon},${params.origin.lat}`);
   }
 
-  let response: Response;
+  let response: YandexTextResponse;
   try {
-    response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
+    response = await requestYandexText(url);
   } catch (error) {
     if (params.requireKey) {
       throw new HttpError(
@@ -364,7 +411,7 @@ async function requestYandexSuggest(params: {
     return [];
   }
 
-  const text = await response.text();
+  const text = response.text;
   let payload: unknown = null;
   try {
     payload = text ? JSON.parse(text) : null;
@@ -406,13 +453,9 @@ async function requestYandexGeocodeByUri(params: {
   url.searchParams.set("results", "1");
   url.searchParams.set("uri", params.uri);
 
-  let response: Response;
+  let response: YandexTextResponse;
   try {
-    response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
+    response = await requestYandexText(url);
   } catch (error) {
     throw new HttpError(
       502,
@@ -421,7 +464,7 @@ async function requestYandexGeocodeByUri(params: {
     );
   }
 
-  const text = await response.text();
+  const text = response.text;
   let payload: unknown = null;
   try {
     payload = text ? JSON.parse(text) : null;
