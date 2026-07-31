@@ -6,7 +6,10 @@ import {
 } from "../promotions/rules.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
-  getBlgDeliveryFeeRub,
+  calculateDeliveryFeeRub,
+  loadDeliveryPricingSettings,
+} from "../delivery/pricing.js";
+import {
   isCancellationLockedByDeliveryWindow,
   type DeliveryCitySlug,
 } from "./deliverySchedule.js";
@@ -107,16 +110,6 @@ export type StartOrderEditSessionResult = {
   cart: OrderEditCartItem[];
   checkoutDraft: OrderEditCheckoutDraft;
 };
-
-function getDeliveryFeeRub(params: {
-  citySlug: CreateOrderPayload["citySlug"];
-  deliveryMethod: CreateOrderPayload["deliveryMethod"];
-  itemsSubtotalRub: number;
-}): number {
-  return params.citySlug === "blg" && params.deliveryMethod === "delivery"
-    ? getBlgDeliveryFeeRub(params.itemsSubtotalRub)
-    : 0;
-}
 
 function parseOrderStatus(value: unknown): OrderStatus {
   if (value === "new" || value === "processing" || value === "done" || value === "cancelled") {
@@ -697,10 +690,17 @@ export async function applyOrderEdit(params: {
     lines,
   });
   const promotionDiscountAmount = promotionDiscount.discountAmount;
-  const deliveryFee = getDeliveryFeeRub({
+  const deliveryPricingSettings = await loadDeliveryPricingSettings({
+    supabase,
+    citySlug: params.payload.citySlug,
+  });
+  const deliveryFee = calculateDeliveryFeeRub({
     citySlug: params.payload.citySlug,
     deliveryMethod: params.payload.deliveryMethod,
     itemsSubtotalRub: itemsSubtotal,
+    distanceKm: params.payload.deliveryLocation?.distanceKm ?? null,
+    deliveryTimeSlot: params.payload.deliveryTimeSlot,
+    settings: deliveryPricingSettings,
   });
   const totalBeforeDiscount = itemsSubtotal + deliveryFee;
   const totalAfterPromotionDiscount = Math.max(

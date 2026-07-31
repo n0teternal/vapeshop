@@ -21,6 +21,12 @@ import {
   type DeliveryGeocodeResult,
 } from "./delivery/yandexGeocode.js";
 import {
+  loadDeliveryPricingSettings,
+  parseDeliveryPricingSettingsUpdate,
+  saveDeliveryPricingSettings,
+  type DeliveryPricingSettings,
+} from "./delivery/pricing.js";
+import {
   BLG_DELIVERY_TIME_SLOTS,
   getBlgDeliveryTimeSlotsForDate,
   getMinDeliveryDateForCity,
@@ -746,6 +752,73 @@ app.get<{
         : "Unexpected error";
 
     request.log.error({ err: e }, "Delivery geocode failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.get<{
+  Querystring: { citySlug?: string };
+  Reply: ApiSuccess<DeliveryPricingSettings> | ErrorResponse;
+}>("/api/delivery/pricing", async (request, reply) => {
+  try {
+    const citySlug = request.query.citySlug;
+    if (citySlug !== "vvo" && citySlug !== "blg") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
+    }
+
+    const result = await loadDeliveryPricingSettings({
+      supabase: createServiceSupabaseClient(),
+      citySlug,
+    });
+
+    return reply.code(200).send(ok(result));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Delivery pricing load failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.put<{
+  Body: unknown;
+  Reply: ApiSuccess<DeliveryPricingSettings> | ErrorResponse;
+}>("/api/delivery/pricing", async (request, reply) => {
+  try {
+    const context = requireReferralTelegramContext({
+      headers: request.headers as Record<string, unknown>,
+    });
+    if (context.user.id !== DELIVERY_MAP_ALLOWED_TG_USER_ID) {
+      throw new HttpError(
+        403,
+        "DELIVERY_PRICING_USER_ONLY",
+        "Delivery pricing is only available for this user",
+      );
+    }
+
+    const update = parseDeliveryPricingSettingsUpdate(request.body);
+    const result = await saveDeliveryPricingSettings({
+      supabase: createServiceSupabaseClient(),
+      update,
+    });
+
+    return reply.code(200).send(ok(result));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Delivery pricing save failed");
     return reply.code(statusCode).send({ ok: false, error: { code, message } });
   }
 });

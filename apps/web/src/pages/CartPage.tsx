@@ -63,6 +63,25 @@ type CouponPreviewResponse = {
   discountAmount: number;
 };
 
+type DeliveryPricingRule = {
+  minDistanceKm: number;
+  feeRub: number;
+};
+
+type DeliveryPeakSurchargeRule = {
+  startTime: string;
+  endTime: string;
+  surchargeRub: number;
+};
+
+type DeliveryPricingSettings = {
+  citySlug: City;
+  freeDeliveryThresholdRub: number;
+  baseFeeRub: number;
+  rules: DeliveryPricingRule[];
+  peakSurchargeRules: DeliveryPeakSurchargeRule[];
+};
+
 const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
 const DEFAULT_POINTS_MAX_SPEND_PERCENT = 50;
 const DELIVERY_MAP_ALLOWED_TG_USER_ID = 1208488286;
@@ -117,6 +136,13 @@ const BLG_ORDER_CUTOFF_BY_TIME_SLOT: Record<
 };
 const BLG_DELIVERY_FEE_RUB = 150;
 const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
+const DEFAULT_BLG_DELIVERY_PRICING: DeliveryPricingSettings = {
+  citySlug: "blg",
+  freeDeliveryThresholdRub: BLG_FREE_DELIVERY_THRESHOLD_RUB,
+  baseFeeRub: BLG_DELIVERY_FEE_RUB,
+  rules: [],
+  peakSurchargeRules: [],
+};
 const FREE_DELIVERY_RECOMMENDATION_LIMIT = 8;
 const DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME =
   "border-sky-300/70 focus:ring-sky-200/70 focus-visible:ring-sky-200/70";
@@ -296,8 +322,116 @@ function isDeliveryTimeSlotAvailable(params: {
   return params.nowMs < cutoffMs;
 }
 
-function getBlgDeliveryFeeRub(itemsSubtotalRub: number): number {
-  return itemsSubtotalRub >= BLG_FREE_DELIVERY_THRESHOLD_RUB ? 0 : BLG_DELIVERY_FEE_RUB;
+function getMatchedDeliveryPricingRule(params: {
+  distanceKm?: number | null;
+  pricing: DeliveryPricingSettings;
+}): DeliveryPricingRule | null {
+  const distanceKm = params.distanceKm;
+  if (typeof distanceKm !== "number" || !Number.isFinite(distanceKm)) return null;
+
+  let matchedRule: DeliveryPricingRule | null = null;
+  for (const rule of [...params.pricing.rules].sort((a, b) => a.minDistanceKm - b.minDistanceKm)) {
+    if (distanceKm > rule.minDistanceKm) {
+      matchedRule = rule;
+    }
+  }
+
+  return matchedRule;
+}
+
+function minutesFromTimeOfDay(value: string): number | null {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
+  if (!match?.[1] || !match[2]) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function splitTimeInterval(startMinutes: number, endMinutes: number): Array<[number, number]> {
+  if (startMinutes < endMinutes) return [[startMinutes, endMinutes]];
+  return [
+    [startMinutes, 24 * 60],
+    [0, endMinutes],
+  ];
+}
+
+function timeIntervalsOverlap(
+  firstStartMinutes: number,
+  firstEndMinutes: number,
+  secondStartMinutes: number,
+  secondEndMinutes: number,
+): boolean {
+  const firstParts = splitTimeInterval(firstStartMinutes, firstEndMinutes);
+  const secondParts = splitTimeInterval(secondStartMinutes, secondEndMinutes);
+
+  return firstParts.some(([firstStart, firstEnd]) =>
+    secondParts.some(
+      ([secondStart, secondEnd]) =>
+        Math.max(firstStart, secondStart) < Math.min(firstEnd, secondEnd),
+    ),
+  );
+}
+
+function parseDeliveryTimeSlotMinutes(value: string | null | undefined): {
+  startMinutes: number;
+  endMinutes: number;
+} | null {
+  if (!value) return null;
+  const [startTime, endTime] = value.split("-");
+  if (!startTime || !endTime) return null;
+  const startMinutes = minutesFromTimeOfDay(startTime);
+  const endMinutes = minutesFromTimeOfDay(endTime);
+  if (startMinutes === null || endMinutes === null || startMinutes === endMinutes) return null;
+  return { startMinutes, endMinutes };
+}
+
+function getMatchedPeakSurchargeRule(params: {
+  deliveryTimeSlot: string | null | undefined;
+  pricing: DeliveryPricingSettings;
+}): DeliveryPeakSurchargeRule | null {
+  const parsedSlot = parseDeliveryTimeSlotMinutes(params.deliveryTimeSlot);
+  if (!parsedSlot) return null;
+
+  let matchedRule: DeliveryPeakSurchargeRule | null = null;
+  for (const rule of params.pricing.peakSurchargeRules) {
+    const ruleStartMinutes = minutesFromTimeOfDay(rule.startTime);
+    const ruleEndMinutes = minutesFromTimeOfDay(rule.endTime);
+    if (ruleStartMinutes === null || ruleEndMinutes === null) continue;
+    if (ruleStartMinutes === ruleEndMinutes) continue;
+    if (
+      timeIntervalsOverlap(
+        parsedSlot.startMinutes,
+        parsedSlot.endMinutes,
+        ruleStartMinutes,
+        ruleEndMinutes,
+      ) &&
+      (!matchedRule || rule.surchargeRub > matchedRule.surchargeRub)
+    ) {
+      matchedRule = rule;
+    }
+  }
+
+  return matchedRule;
+}
+
+function getBlgDeliveryFeeRub(params: {
+  itemsSubtotalRub: number;
+  distanceKm?: number | null;
+  deliveryTimeSlot: string | null | undefined;
+  pricing: DeliveryPricingSettings;
+}): number {
+  if (params.itemsSubtotalRub >= params.pricing.freeDeliveryThresholdRub) return 0;
+
+  const matchedPeakSurchargeRule = getMatchedPeakSurchargeRule({
+    deliveryTimeSlot: params.deliveryTimeSlot,
+    pricing: params.pricing,
+  });
+  const peakSurchargeRub = matchedPeakSurchargeRule?.surchargeRub ?? 0;
+  const matchedDistanceRule = getMatchedDeliveryPricingRule({
+    distanceKm: params.distanceKm,
+    pricing: params.pricing,
+  });
+  if (matchedDistanceRule) return matchedDistanceRule.feeRub + peakSurchargeRub;
+
+  return params.pricing.baseFeeRub + peakSurchargeRub;
 }
 
 type RecommendationCategoryId = CatalogFilterCategoryId | "other";
@@ -400,6 +534,8 @@ export function CartPage() {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [recommendationCatalogItems, setRecommendationCatalogItems] = useState<CatalogItem[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+  const [deliveryPricing, setDeliveryPricing] =
+    useState<DeliveryPricingSettings>(DEFAULT_BLG_DELIVERY_PRICING);
   const [deliveryMapSelection, setDeliveryMapSelection] =
     useState<DeliveryMapSelection | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -451,11 +587,26 @@ export function CartPage() {
   }, [state.cart]);
   const showBlgDeliveryFeeCard =
     state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
+  const deliveryIsFreeByThreshold = itemsTotal >= deliveryPricing.freeDeliveryThresholdRub;
+  const matchedPeakSurchargeRule = deliveryIsFreeByThreshold
+    ? null
+    : getMatchedPeakSurchargeRule({
+        deliveryTimeSlot: checkoutDraft.deliveryTimeSlot || null,
+        pricing: deliveryPricing,
+      });
   const deliveryFee =
     showBlgDeliveryFeeCard
-      ? getBlgDeliveryFeeRub(itemsTotal)
+      ? getBlgDeliveryFeeRub({
+          itemsSubtotalRub: itemsTotal,
+          distanceKm: deliveryMapSelection?.distanceKm ?? null,
+          deliveryTimeSlot: checkoutDraft.deliveryTimeSlot || null,
+          pricing: deliveryPricing,
+        })
       : 0;
-  const amountToFreeDelivery = Math.max(0, BLG_FREE_DELIVERY_THRESHOLD_RUB - itemsTotal);
+  const amountToFreeDelivery = Math.max(
+    0,
+    deliveryPricing.freeDeliveryThresholdRub - itemsTotal,
+  );
   const shouldShowFreeDeliveryRecommendations =
     showBlgDeliveryFeeCard &&
     deliveryFee > 0 &&
@@ -604,6 +755,34 @@ export function CartPage() {
       .catch(() => {
         if (cancelled) return;
         setActivePromotionRules([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.city]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (state.city !== "blg") {
+      setDeliveryPricing(DEFAULT_BLG_DELIVERY_PRICING);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const query = new URLSearchParams({ citySlug: state.city }).toString();
+    apiGet<DeliveryPricingSettings>(`/api/delivery/pricing?${query}`, {
+      withTelegramAuth: false,
+    })
+      .then((settings) => {
+        if (cancelled) return;
+        setDeliveryPricing(settings);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDeliveryPricing(DEFAULT_BLG_DELIVERY_PRICING);
       });
 
     return () => {
@@ -1051,8 +1230,14 @@ export function CartPage() {
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold">Доставка</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    Бесплатно от 1 500 ₽, иначе 150 ₽
+                    Бесплатно от {formatPriceRub(deliveryPricing.freeDeliveryThresholdRub)}, иначе от{" "}
+                    {formatPriceRub(deliveryPricing.baseFeeRub)}
                   </div>
+                  {matchedPeakSurchargeRule ? (
+                    <div className="mt-1 text-xs font-medium text-amber-500">
+                      Час пик: +{formatPriceRub(matchedPeakSurchargeRule.surchargeRub)}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="text-sm font-semibold">
                   {deliveryFee === 0 ? "Бесплатно" : formatPriceRub(deliveryFee)}

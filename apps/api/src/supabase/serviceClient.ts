@@ -189,6 +189,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      delivery_pricing_settings: {
+        Row: {
+          city_slug: string;
+          base_fee_rub: number;
+          rules: Json;
+          peak_surcharge_rules: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          city_slug: string;
+          base_fee_rub?: number;
+          rules?: Json;
+          peak_surcharge_rules?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          city_slug?: string;
+          base_fee_rub?: number;
+          rules?: Json;
+          peak_surcharge_rules?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       customer_profiles: {
         Row: {
           tg_user_id: number;

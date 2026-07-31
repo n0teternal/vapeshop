@@ -105,6 +105,23 @@ create table if not exists public.promo_codes (
   check (ends_at >= starts_at)
 );
 
+create table if not exists public.delivery_pricing_settings (
+  city_slug text primary key,
+  base_fee_rub numeric not null default 150,
+  rules jsonb not null default '[]'::jsonb,
+  peak_surcharge_rules jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (city_slug in ('vvo', 'blg')),
+  check (base_fee_rub >= 0 and base_fee_rub <= 10000),
+  check (jsonb_typeof(rules) = 'array'),
+  check (jsonb_typeof(peak_surcharge_rules) = 'array')
+);
+
+insert into public.delivery_pricing_settings (city_slug, base_fee_rub, rules)
+values ('blg', 150, '[]'::jsonb)
+on conflict (city_slug) do nothing;
+
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
   tg_user_id bigint not null,
@@ -194,6 +211,7 @@ grant select on public.inventory to anon, authenticated;
 revoke all on public.promo_products from anon, authenticated;
 revoke all on public.promotion_rules from anon, authenticated;
 revoke all on public.promo_codes from anon, authenticated;
+revoke all on public.delivery_pricing_settings from anon, authenticated;
 
 -- ===== RLS =====
 
@@ -203,6 +221,7 @@ alter table public.inventory enable row level security;
 alter table public.promo_products enable row level security;
 alter table public.promotion_rules enable row level security;
 alter table public.promo_codes enable row level security;
+alter table public.delivery_pricing_settings enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.admins enable row level security;
