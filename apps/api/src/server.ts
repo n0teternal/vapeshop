@@ -61,6 +61,7 @@ type SuccessResponse = {
 };
 
 type CitySlug = "vvo" | "blg";
+const DELIVERY_MAP_ALLOWED_TG_USER_ID = 1208488286;
 const DEV_FALLBACK_TG_USER_ID = 42;
 
 type OrderRequestBody = CreateOrderPayload & {
@@ -137,6 +138,23 @@ function requireReferralTelegramContext(params: {
     typeof verified.params.start_param === "string" ? verified.params.start_param : null;
 
   return { user: verified.user, startParam };
+}
+
+function getAllowedDeliveryLocation(
+  tgUserId: number | null,
+  deliveryLocation: CreateOrderPayload["deliveryLocation"],
+): CreateOrderPayload["deliveryLocation"] {
+  if (!deliveryLocation) return null;
+
+  if (tgUserId !== DELIVERY_MAP_ALLOWED_TG_USER_ID) {
+    throw new HttpError(
+      403,
+      "DELIVERY_MAP_USER_ONLY",
+      "Delivery map is only available for this user",
+    );
+  }
+
+  return deliveryLocation;
 }
 
 function parseOptionalTrimmedString(value: unknown, fieldName: string): string | null {
@@ -902,6 +920,10 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
         headers: request.headers as Record<string, unknown>,
         initDataFallback: body.initData,
       });
+      const deliveryLocation = getAllowedDeliveryLocation(
+        verified.user.id,
+        body.deliveryLocation,
+      );
 
       const result = await applyOrderEdit({
         orderId,
@@ -915,7 +937,7 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
           comment: body.comment,
           deliveryDate: body.deliveryDate,
           deliveryTimeSlot: body.deliveryTimeSlot,
-          deliveryLocation: body.deliveryLocation,
+          deliveryLocation,
           couponCode: null,
           pointsToSpend: body.pointsToSpend,
           items: body.items,
@@ -977,6 +999,10 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           : useDevBypass
             ? { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" }
             : { id: 0, username: null };
+      const deliveryLocation = getAllowedDeliveryLocation(
+        orderUser.id,
+        body.deliveryLocation,
+      );
 
       if (verified) {
         try {
@@ -1001,7 +1027,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           comment: body.comment,
           deliveryDate: body.deliveryDate,
           deliveryTimeSlot: body.deliveryTimeSlot,
-          deliveryLocation: body.deliveryLocation,
+          deliveryLocation,
           couponCode: body.couponCode,
           pointsToSpend: body.pointsToSpend,
           items: body.items,

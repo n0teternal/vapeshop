@@ -45,8 +45,6 @@ function resolveApiBaseUrl(): string {
 export const API_BASE_URL: string =
   resolveApiBaseUrl();
 
-export const ADMIN_DELIVERY_MAP_FEATURE_ENABLED =
-  readEnvString("VITE_ADMIN_DELIVERY_MAP_ENABLED") === "1";
 export const YANDEX_MAPS_API_KEY = readEnvString("VITE_YANDEX_MAPS_API_KEY");
 export const YANDEX_MAPS_SUGGEST_API_KEY = readEnvString(
   "VITE_YANDEX_MAPS_SUGGEST_API_KEY",

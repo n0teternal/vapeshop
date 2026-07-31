@@ -13,7 +13,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
-import { ADMIN_DELIVERY_MAP_FEATURE_ENABLED, buildApiUrl } from "../config";
+import { buildApiUrl } from "../config";
 import {
   calculateCartPromotionDiscount,
   type ActivePromotionRule,
@@ -63,14 +63,9 @@ type CouponPreviewResponse = {
   discountAmount: number;
 };
 
-type AdminMe = {
-  tgUserId: number;
-  username: string | null;
-  role: string;
-};
-
 const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
 const DEFAULT_POINTS_MAX_SPEND_PERCENT = 50;
+const DELIVERY_MAP_ALLOWED_TG_USER_ID = 1208488286;
 const BLG_JUNE_2026_DELIVERY_TIME_SLOTS = [
   "11:00-13:00",
   "13:00-15:00",
@@ -405,7 +400,6 @@ export function CartPage() {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [recommendationCatalogItems, setRecommendationCatalogItems] = useState<CatalogItem[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
-  const [adminDeliveryMapEnabled, setAdminDeliveryMapEnabled] = useState(false);
   const [deliveryMapSelection, setDeliveryMapSelection] =
     useState<DeliveryMapSelection | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -416,9 +410,10 @@ export function CartPage() {
   );
   const checkoutDraft = state.checkoutDraft;
   const orderEditSession = state.orderEditSession;
+  const deliveryMapAllowedForUser =
+    isTelegram && webApp.initDataUnsafe.user?.id === DELIVERY_MAP_ALLOWED_TG_USER_ID;
   const showAdminDeliveryMap =
-    ADMIN_DELIVERY_MAP_FEATURE_ENABLED &&
-    adminDeliveryMapEnabled &&
+    deliveryMapAllowedForUser &&
     state.city !== null &&
     checkoutDraft.deliveryMethod === "delivery" &&
     !orderEditSession;
@@ -584,31 +579,6 @@ export function CartPage() {
 
   useEffect(() => {
     void loadPointsBalance();
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!ADMIN_DELIVERY_MAP_FEATURE_ENABLED) {
-      setAdminDeliveryMapEnabled(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    apiGet<AdminMe>("/api/admin/me")
-      .then(() => {
-        if (cancelled) return;
-        setAdminDeliveryMapEnabled(true);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setAdminDeliveryMapEnabled(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   useEffect(() => {
