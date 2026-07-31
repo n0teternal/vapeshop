@@ -52,6 +52,11 @@ type AddressSearchAttempt = {
   errorMessage: string | null;
 };
 
+type AddressSuggestion = {
+  value: string;
+  label: string;
+};
+
 type DeliveryAddressMapProps = {
   city: CitySlug;
   address: string;
@@ -234,6 +239,33 @@ function uniqueStrings(values: string[]): string[] {
   return out;
 }
 
+function formatAddressSuggestionLabel(city: CitySlug, value: string): string {
+  const config = CITY_SEARCH_CONFIGS[city];
+  const blockedParts = new Set(
+    [
+      "Россия",
+      config.label,
+      ...config.queryPrefix.split(","),
+    ].map((part) => normalizeSearchText(part)),
+  );
+  const parts = value
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .filter((part) => !blockedParts.has(normalizeSearchText(part)));
+
+  return parts.length > 0 ? parts.join(", ") : value;
+}
+
+function buildAddressSuggestion(city: CitySlug, value: string): AddressSuggestion | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return {
+    value: trimmed,
+    label: formatAddressSuggestionLabel(city, trimmed),
+  };
+}
+
 function buildStreetHouseQueryVariants(rawQuery: string): string[] {
   const query = rawQuery.trim();
   const commaStreetHouseMatch = /^(.+?),\s*(\d+[0-9A-Za-zА-Яа-я/-]*)$/.exec(query);
@@ -317,7 +349,7 @@ export function DeliveryAddressMap({
   const customerPlacemarkRef = useRef<YMapsPlacemark | null>(null);
   const [ymapsApi, setYmapsApi] = useState<YMapsApi | null>(null);
   const [localAddress, setLocalAddress] = useState(address);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [selection, setSelection] = useState<DeliveryMapSelection | null>(null);
   const [distancePreview, setDistancePreview] = useState<DeliveryDistancePreview | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
@@ -418,8 +450,18 @@ export function DeliveryAddressMap({
             .map((item) => item.value ?? item.displayName ?? "")
             .map((value) => value.trim())
             .filter((value) => value.length > 0)
+            .map((value) => buildAddressSuggestion(city, value))
+            .filter((suggestion): suggestion is AddressSuggestion => suggestion !== null)
             .slice(0, 5);
-          setSuggestions(Array.from(new Set(nextSuggestions)));
+          const seen = new Set<string>();
+          setSuggestions(
+            nextSuggestions.filter((suggestion) => {
+              const key = normalizeSearchText(suggestion.value);
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            }),
+          );
         })
         .catch(() => {
           setSuggestions([]);
@@ -699,21 +741,21 @@ export function DeliveryAddressMap({
         <div className="grid gap-1 rounded-md border border-border/70 bg-background/95 p-1">
           {suggestions.map((suggestion) => (
             <button
-              key={suggestion}
+              key={suggestion.value}
               type="button"
-              className="min-w-0 rounded px-2 py-1.5 text-left text-xs text-foreground hover:bg-muted/70"
+              className="min-w-0 rounded px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/70"
               disabled={disabled}
               onClick={() => {
-                setLocalAddress(suggestion);
-                onAddressChange(suggestion);
+                setLocalAddress(suggestion.value);
+                onAddressChange(suggestion.value);
                 setSelection(null);
                 onSelectionChange(null);
                 setSuggestions([]);
                 setMapError(null);
-                void searchAddress(suggestion, { showErrors: false });
+                void searchAddress(suggestion.value, { showErrors: false });
               }}
             >
-              <span className="line-clamp-2">{suggestion}</span>
+              <span className="line-clamp-2">{suggestion.label}</span>
             </button>
           ))}
         </div>
