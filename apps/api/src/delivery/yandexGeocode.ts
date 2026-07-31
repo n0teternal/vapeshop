@@ -154,7 +154,6 @@ async function requestYandexGeocode(params: {
   url.searchParams.set("format", "json");
   url.searchParams.set("lang", "ru_RU");
   url.searchParams.set("results", "1");
-  url.searchParams.set("kind", "house");
   url.searchParams.set("geocode", params.query);
 
   if (params.restrictToCity) {

@@ -503,7 +503,6 @@ export function DeliveryAddressMap({
       for (const searchQuery of searchQueries) {
         const result = await ymapsApi.geocode(searchQuery, {
           boundedBy: config.boundedBy,
-          kind: "house",
           results: 1,
         }).catch(() => null);
         if (!result) continue;
