@@ -1058,89 +1058,6 @@ export function CartPage() {
                   {deliveryFee === 0 ? "Бесплатно" : formatPriceRub(deliveryFee)}
                 </div>
               </div>
-
-              {shouldShowFreeDeliveryRecommendations &&
-              (recommendationsLoading || freeDeliveryRecommendations.length > 0) ? (
-                <div className="mt-3 border-t border-border/70 pt-3">
-                  <div className="flex items-end justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-foreground">
-                        До бесплатной доставки: {formatPriceRub(amountToFreeDelivery)}
-                      </div>
-                      <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        Любой товар из ленты сделает доставку бесплатной.
-                      </div>
-                    </div>
-                  </div>
-
-                  {recommendationsLoading && freeDeliveryRecommendations.length === 0 ? (
-                    <div className="mt-3 flex gap-2 overflow-hidden">
-                      {Array.from({ length: 3 }).map((_, index) => (
-                        <div
-                          key={index}
-                          className="h-32 w-32 shrink-0 animate-pulse rounded-xl bg-muted/60"
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
-                      {freeDeliveryRecommendations.map((recommendation) => {
-                        const item = recommendation.item;
-
-                        return (
-                          <div
-                            key={item.id}
-                            className="flex w-36 shrink-0 flex-col rounded-xl border border-border/70 bg-background/55 p-2"
-                          >
-                            <ProductImagePreview
-                              imageUrl={item.imageUrl}
-                              alt={item.title}
-                              loading="lazy"
-                              targetWidth={140}
-                              className="h-20 w-full rounded-lg object-cover"
-                              placeholderClassName="flex h-20 w-full items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
-                            />
-                            <div className="mt-2 min-h-9 text-xs font-semibold leading-snug line-clamp-2">
-                              {item.title}
-                            </div>
-                            <div className="mt-1 flex min-h-5 items-center">
-                              <span className="inline-flex max-w-full items-center rounded-full border border-sky-300/40 bg-sky-400/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-500">
-                                <span className="truncate">{recommendation.reason}</span>
-                              </span>
-                            </div>
-                            <div className="mt-1 truncate text-[11px] text-muted-foreground">
-                              {formatRecommendationCategory(item.categorySlug)}
-                            </div>
-                            <div className="mt-1 text-sm font-bold">
-                              {formatPriceRub(item.price)}
-                            </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="mt-2 h-8 w-full rounded-lg text-xs"
-                              disabled={submitting}
-                              onClick={() =>
-                                dispatch({
-                                  type: "cart/add",
-                                  item: {
-                                    productId: item.id,
-                                    title: item.title,
-                                    price: item.price,
-                                    categorySlug: item.categorySlug,
-                                    imageUrl: item.imageUrl,
-                                  },
-                                })
-                              }
-                            >
-                              Добавить
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ) : null}
             </CardContent>
           </Card>
         ) : null}
@@ -1507,6 +1424,86 @@ export function CartPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      {shouldShowFreeDeliveryRecommendations &&
+      (recommendationsLoading || freeDeliveryRecommendations.length > 0) ? (
+        <Card className="border-border/70 bg-card">
+          <CardContent className="p-4">
+            <div className="flex items-end justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-foreground">
+                  Любой товар до бесплатной доставки:
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Осталось {formatPriceRub(amountToFreeDelivery)}
+                </div>
+              </div>
+            </div>
+
+            {recommendationsLoading && freeDeliveryRecommendations.length === 0 ? (
+              <div className="-mx-1 mt-3 flex gap-3 overflow-hidden px-1">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="h-64 w-44 shrink-0 animate-pulse rounded-xl bg-muted/60"
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="-mx-1 mt-3 flex gap-3 overflow-x-auto px-1 pb-1">
+                {freeDeliveryRecommendations.map((recommendation) => {
+                  const item = recommendation.item;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex w-44 shrink-0 flex-col rounded-xl border border-border/70 bg-background/55 p-2.5"
+                    >
+                      <ProductImagePreview
+                        imageUrl={item.imageUrl}
+                        alt={item.title}
+                        loading="lazy"
+                        targetWidth={176}
+                        className="aspect-square w-full rounded-lg bg-muted/30 object-contain p-1"
+                        placeholderClassName="flex aspect-square w-full items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
+                      />
+                      <div className="mt-2 min-h-10 text-xs font-semibold leading-snug line-clamp-2">
+                        {item.title}
+                      </div>
+                      <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                        {formatRecommendationCategory(item.categorySlug)}
+                      </div>
+                      <div className="mt-1 text-sm font-bold">
+                        {formatPriceRub(item.price)}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="mt-2 h-8 w-full rounded-lg text-xs"
+                        disabled={submitting}
+                        onClick={() =>
+                          dispatch({
+                            type: "cart/add",
+                            item: {
+                              productId: item.id,
+                              title: item.title,
+                              price: item.price,
+                              categorySlug: item.categorySlug,
+                              imageUrl: item.imageUrl,
+                            },
+                          })
+                        }
+                      >
+                        Добавить
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

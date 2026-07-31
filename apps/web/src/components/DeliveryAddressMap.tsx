@@ -1,4 +1,4 @@
-import { MapPin, Navigation, Search } from "lucide-react";
+import { Map as MapIcon, MapPin, Navigation, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DELIVERY_ORIGINS,
@@ -183,6 +183,7 @@ export function DeliveryAddressMap({
   const [localAddress, setLocalAddress] = useState(address);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selection, setSelection] = useState<DeliveryMapSelection | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
 
@@ -223,14 +224,14 @@ export function DeliveryAddressMap({
   }, [mapConfigured]);
 
   useEffect(() => {
-    if (!ymapsApi || !mapElementRef.current) return undefined;
+    if (!mapOpen || !ymapsApi || !mapElementRef.current) return undefined;
 
     const map = new ymapsApi.Map(
       mapElementRef.current,
       {
         center: originCoords,
         zoom: 12,
-        controls: ["zoomControl", "geolocationControl"],
+        controls: [],
       },
       {
         suppressMapOpenBlock: true,
@@ -258,7 +259,7 @@ export function DeliveryAddressMap({
     };
     // selectCoords intentionally uses current ymaps/map refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin.label, originCoords, ymapsApi]);
+  }, [mapOpen, origin.label, originCoords, ymapsApi]);
 
   useEffect(() => {
     if (!ymapsApi?.suggest || localAddress.trim().length < 3 || disabled) {
@@ -404,6 +405,18 @@ export function DeliveryAddressMap({
           >
             <Search className="h-4 w-4" />
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-10 w-10 shrink-0"
+            disabled={disabled || !mapConfigured}
+            onClick={() => setMapOpen((value) => !value)}
+            aria-label={mapOpen ? "Скрыть карту" : "Открыть карту"}
+            title={mapOpen ? "Скрыть карту" : "Открыть карту"}
+          >
+            <MapIcon className="h-4 w-4" />
+          </Button>
         </div>
       </label>
 
@@ -428,18 +441,21 @@ export function DeliveryAddressMap({
         </div>
       ) : null}
 
-      <div className="overflow-hidden rounded-md border border-border/70 bg-muted/25">
-        <div ref={mapElementRef} className="h-56 w-full" />
-        {!ymapsApi || mapError ? (
-          <div className="flex min-h-16 items-center gap-2 border-t border-border/70 px-3 py-2 text-xs text-muted-foreground">
-            <MapPin className="h-4 w-4 shrink-0" />
-            <span>{mapError ?? "Карта загружается..."}</span>
-          </div>
-        ) : null}
-      </div>
+      {mapOpen ? (
+        <div className="overflow-hidden rounded-md border border-border/70 bg-muted/25">
+          <div ref={mapElementRef} className="h-44 w-full" />
+          {!ymapsApi || mapError ? (
+            <div className="flex min-h-10 items-center gap-2 border-t border-border/70 px-3 py-2 text-xs text-muted-foreground">
+              <MapPin className="h-4 w-4 shrink-0" />
+              <span>{mapError ?? "Карта загружается..."}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
-      <div
-        className={`flex min-h-10 items-center gap-2 rounded-md border px-3 py-2 text-xs ${
+      {selection ? (
+        <div
+        className={`flex min-h-9 items-center gap-2 rounded-md border px-3 py-2 text-xs ${
           selection
             ? selection.zone.toneClassName
             : "border-border/70 bg-background/55 text-muted-foreground"
@@ -459,7 +475,8 @@ export function DeliveryAddressMap({
         ) : (
           <span>Точка доставки не выбрана.</span>
         )}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
