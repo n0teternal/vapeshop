@@ -1160,6 +1160,7 @@ export function CartPage() {
                   disabled={submitting}
                   required
                   inputClassName={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
+                  showDistanceStatus={deliveryMapAllowedForUser}
                   onAddressChange={(address) => updateCheckoutDraft({ address })}
                   onSelectionChange={setDeliveryMapSelection}
                 />

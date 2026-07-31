@@ -63,6 +63,7 @@ type DeliveryAddressMapProps = {
   disabled: boolean;
   required?: boolean;
   inputClassName?: string;
+  showDistanceStatus?: boolean;
   onAddressChange: (address: string) => void;
   onSelectionChange: (selection: DeliveryMapSelection | null) => void;
 };
@@ -341,6 +342,7 @@ export function DeliveryAddressMap({
   disabled,
   required,
   inputClassName,
+  showDistanceStatus = false,
   onAddressChange,
   onSelectionChange,
 }: DeliveryAddressMapProps) {
@@ -773,7 +775,7 @@ export function DeliveryAddressMap({
         </div>
       ) : null}
 
-      {loading || selection || distancePreview || mapError ? (
+      {showDistanceStatus && (loading || selection || distancePreview || mapError) ? (
         <div
           className={`flex min-h-11 items-start gap-2 rounded-md border px-3 py-2 text-xs ${
             selection
