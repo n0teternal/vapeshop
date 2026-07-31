@@ -20,6 +20,13 @@ import {
   type ActivePromotionsResponse,
 } from "../promotions/cartPromotions";
 import {
+  readCachedDeliveryPricingSettings,
+  writeCachedDeliveryPricingSettings,
+  type DeliveryPeakSurchargeRule,
+  type DeliveryPricingSettings,
+  type DeliveryPricingRule,
+} from "../lib/deliveryPricingCache";
+import {
   getOrderEditRemainingMs,
   useAppState,
   type City,
@@ -61,25 +68,6 @@ type ReferralOverviewBalance = {
 type CouponPreviewResponse = {
   code: string;
   discountAmount: number;
-};
-
-type DeliveryPricingRule = {
-  minDistanceKm: number;
-  feeRub: number;
-};
-
-type DeliveryPeakSurchargeRule = {
-  startTime: string;
-  endTime: string;
-  surchargeRub: number;
-};
-
-type DeliveryPricingSettings = {
-  citySlug: City;
-  freeDeliveryThresholdRub: number;
-  baseFeeRub: number;
-  rules: DeliveryPricingRule[];
-  peakSurchargeRules: DeliveryPeakSurchargeRule[];
 };
 
 const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
@@ -635,8 +623,11 @@ export function CartPage() {
   const [couponError, setCouponError] = useState<string | null>(null);
   const [recommendationCatalogItems, setRecommendationCatalogItems] = useState<CatalogItem[]>([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
-  const [deliveryPricing, setDeliveryPricing] =
-    useState<DeliveryPricingSettings>(DEFAULT_BLG_DELIVERY_PRICING);
+  const [deliveryPricing, setDeliveryPricing] = useState<DeliveryPricingSettings>(() =>
+    state.city === "blg"
+      ? readCachedDeliveryPricingSettings("blg") ?? DEFAULT_BLG_DELIVERY_PRICING
+      : DEFAULT_BLG_DELIVERY_PRICING,
+  );
   const [deliveryMapSelection, setDeliveryMapSelection] =
     useState<DeliveryMapSelection | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -917,6 +908,9 @@ export function CartPage() {
       };
     }
 
+    const cachedSettings = readCachedDeliveryPricingSettings("blg");
+    setDeliveryPricing(cachedSettings ?? DEFAULT_BLG_DELIVERY_PRICING);
+
     const query = new URLSearchParams({ citySlug: state.city }).toString();
     apiGet<DeliveryPricingSettings>(`/api/delivery/pricing?${query}`, {
       withTelegramAuth: false,
@@ -924,10 +918,13 @@ export function CartPage() {
       .then((settings) => {
         if (cancelled) return;
         setDeliveryPricing(settings);
+        writeCachedDeliveryPricingSettings(settings);
       })
       .catch(() => {
         if (cancelled) return;
-        setDeliveryPricing(DEFAULT_BLG_DELIVERY_PRICING);
+        if (!cachedSettings) {
+          setDeliveryPricing(DEFAULT_BLG_DELIVERY_PRICING);
+        }
       });
 
     return () => {

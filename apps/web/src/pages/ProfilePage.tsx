@@ -6,31 +6,18 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
+import {
+  writeCachedDeliveryPricingSettings,
+  type DeliveryPeakSurchargeRule,
+  type DeliveryPricingSettings,
+  type DeliveryPricingRule,
+} from "../lib/deliveryPricingCache";
 import { useTelegram } from "../telegram/TelegramProvider";
 
 type AdminMe = {
   tgUserId: number;
   username: string | null;
   role: string;
-};
-
-type DeliveryPricingRule = {
-  minDistanceKm: number;
-  feeRub: number;
-};
-
-type DeliveryPeakSurchargeRule = {
-  startTime: string;
-  endTime: string;
-  surchargeRub: number;
-};
-
-type DeliveryPricingSettings = {
-  citySlug: "vvo" | "blg";
-  freeDeliveryThresholdRub: number;
-  baseFeeRub: number;
-  rules: DeliveryPricingRule[];
-  peakSurchargeRules: DeliveryPeakSurchargeRule[];
 };
 
 const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
@@ -105,6 +92,7 @@ export function ProfilePage() {
       .then((settings) => {
         if (cancelled) return;
         setDeliveryPricing(settings);
+        writeCachedDeliveryPricingSettings(settings);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -245,6 +233,7 @@ export function ProfilePage() {
         peakSurchargeRules: deliveryPricing.peakSurchargeRules,
       });
       setDeliveryPricing(saved);
+      writeCachedDeliveryPricingSettings(saved);
       setDeliveryPricingSaved(true);
     } catch (e: unknown) {
       setDeliveryPricingError(e instanceof Error ? e.message : "Не удалось сохранить доставку");
