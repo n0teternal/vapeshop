@@ -5,7 +5,6 @@ import { ApiError, apiGet, apiPost } from "../api/client";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import {
   DeliveryAddressMap,
-  type DeliveryDistancePreview,
   type DeliveryMapSelection,
 } from "../components/DeliveryAddressMap";
 import { Alert, AlertDescription } from "../components/ui/alert";
@@ -403,8 +402,6 @@ export function CartPage() {
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [deliveryMapSelection, setDeliveryMapSelection] =
     useState<DeliveryMapSelection | null>(null);
-  const [deliveryDistancePreview, setDeliveryDistancePreview] =
-    useState<DeliveryDistancePreview | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const cityToday = useMemo(() => getTodayIsoDateForCity(state.city, nowMs), [state.city, nowMs]);
   const minDeliveryDate = useMemo(
@@ -586,7 +583,6 @@ export function CartPage() {
 
   useEffect(() => {
     setDeliveryMapSelection(null);
-    setDeliveryDistancePreview(null);
   }, [checkoutDraft.deliveryMethod, state.city]);
 
   useEffect(() => {
@@ -902,12 +898,6 @@ export function CartPage() {
                   zone: deliveryMapSelection.zone.id,
                 }
               : null,
-          deliveryDistancePreview:
-            showAdminDeliveryMap && !deliveryMapSelection && deliveryDistancePreview
-              ? {
-                  distanceKm: deliveryDistancePreview.distanceKm,
-                }
-              : null,
           couponCode: couponCodeForOrder,
           pointsToSpend: pointsToSpendForOrder,
           items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
@@ -1172,7 +1162,6 @@ export function CartPage() {
                   inputClassName={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
                   onAddressChange={(address) => updateCheckoutDraft({ address })}
                   onSelectionChange={setDeliveryMapSelection}
-                  onDistancePreviewChange={setDeliveryDistancePreview}
                 />
               ) : (
                 <label className="grid gap-1.5 text-sm">
@@ -1185,7 +1174,6 @@ export function CartPage() {
                     disabled={submitting}
                     onChange={(e) => {
                       setDeliveryMapSelection(null);
-                      setDeliveryDistancePreview(null);
                       updateCheckoutDraft({ address: e.target.value });
                     }}
                     placeholder="Улица, дом"

@@ -23,10 +23,6 @@ export type DeliveryLocationPayload = {
   zone: "near" | "middle" | "far" | "manual" | null;
 };
 
-export type DeliveryDistancePreviewPayload = {
-  distanceKm: number;
-};
-
 export type CreateOrderPayload = {
   citySlug: CitySlug;
   deliveryMethod: string;
@@ -36,7 +32,6 @@ export type CreateOrderPayload = {
   deliveryDate: string | null;
   deliveryTimeSlot: string | null;
   deliveryLocation: DeliveryLocationPayload | null;
-  deliveryDistancePreview: DeliveryDistancePreviewPayload | null;
   couponCode: string | null;
   pointsToSpend: number;
   items: Array<{ productId: string; qty: number }>;

@@ -17,11 +17,6 @@ export type DeliveryMapSelection = {
   zone: DeliveryDistanceZone;
 };
 
-export type DeliveryDistancePreview = {
-  address: string;
-  distanceKm: number;
-};
-
 export type DeliveryDistanceZone = {
   id: "near" | "middle" | "far" | "manual";
   title: string;
@@ -41,6 +36,11 @@ type DeliveryDistancePreviewResponse = {
   address: string;
   distanceKm: number;
   source: "geosuggest";
+};
+
+type DeliveryDistancePreview = {
+  address: string;
+  distanceKm: number;
 };
 
 type AddressSearchOptions = {
@@ -65,7 +65,6 @@ type DeliveryAddressMapProps = {
   inputClassName?: string;
   onAddressChange: (address: string) => void;
   onSelectionChange: (selection: DeliveryMapSelection | null) => void;
-  onDistancePreviewChange?: (preview: DeliveryDistancePreview | null) => void;
 };
 
 type CitySearchConfig = {
@@ -344,7 +343,6 @@ export function DeliveryAddressMap({
   inputClassName,
   onAddressChange,
   onSelectionChange,
-  onDistancePreviewChange,
 }: DeliveryAddressMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<YMapsMap | null>(null);
@@ -511,7 +509,6 @@ export function DeliveryAddressMap({
     setMapError(null);
     onAddressChange(addressLine);
     onSelectionChange(nextSelection);
-    onDistancePreviewChange?.(null);
   }
 
   async function selectCoords(coords: YMapsCoords, fallbackAddress = localAddress): Promise<void> {
@@ -586,12 +583,10 @@ export function DeliveryAddressMap({
         `/api/delivery/distance-preview?${search.toString()}`,
       );
 
-      const nextPreview: DeliveryDistancePreview = {
+      setDistancePreview({
         address: result.address || query,
         distanceKm: result.distanceKm,
-      };
-      setDistancePreview(nextPreview);
-      onDistancePreviewChange?.(nextPreview);
+      });
       setMapError(null);
       return { found: true, errorMessage: null };
     } catch (error) {
@@ -644,7 +639,6 @@ export function DeliveryAddressMap({
     setLoading(true);
     setMapError(null);
     setDistancePreview(null);
-    onDistancePreviewChange?.(null);
     try {
       const ymapsAttempt = await searchAddressViaYmaps(query);
       if (ymapsAttempt.found) return;
@@ -695,7 +689,6 @@ export function DeliveryAddressMap({
     setMapError(null);
     onAddressChange(value);
     onSelectionChange(null);
-    onDistancePreviewChange?.(null);
   }
 
   return (

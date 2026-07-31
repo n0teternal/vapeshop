@@ -34,7 +34,6 @@ import {
   syncEditedOrderTelegramState,
   syncFinalOrderTelegramState,
 } from "./order/telegramFinalStatus.js";
-import { pickPrivateTestOrderChatIds } from "./order/privateOrderRouting.js";
 import { HttpError, isHttpError } from "./httpError.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import {
@@ -164,23 +163,6 @@ function getAllowedDeliveryLocation(
   return deliveryLocation;
 }
 
-function getAllowedDeliveryDistancePreview(
-  tgUserId: number | null,
-  deliveryDistancePreview: CreateOrderPayload["deliveryDistancePreview"],
-): CreateOrderPayload["deliveryDistancePreview"] {
-  if (!deliveryDistancePreview) return null;
-
-  if (tgUserId !== DELIVERY_MAP_ALLOWED_TG_USER_ID) {
-    throw new HttpError(
-      403,
-      "DELIVERY_MAP_USER_ONLY",
-      "Delivery map is only available for this user",
-    );
-  }
-
-  return deliveryDistancePreview;
-}
-
 function parseOptionalTrimmedString(value: unknown, fieldName: string): string | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== "string") {
@@ -251,27 +233,6 @@ function parseOptionalDeliveryLocation(value: unknown): CreateOrderPayload["deli
   };
 }
 
-function parseOptionalDeliveryDistancePreview(
-  value: unknown,
-): CreateOrderPayload["deliveryDistancePreview"] {
-  if (value === undefined || value === null) return null;
-  if (!isRecord(value)) {
-    throw new HttpError(400, "BAD_REQUEST", "deliveryDistancePreview must be an object");
-  }
-
-  const distanceKm = value.distanceKm;
-  if (
-    typeof distanceKm !== "number" ||
-    !Number.isFinite(distanceKm) ||
-    distanceKm < 0 ||
-    distanceKm > 500
-  ) {
-    throw new HttpError(400, "BAD_REQUEST", "deliveryDistancePreview.distanceKm is invalid");
-  }
-
-  return { distanceKm };
-}
-
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
   if (!isRecord(value)) {
     throw new HttpError(400, "BAD_REQUEST", "Invalid JSON body");
@@ -298,9 +259,6 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     "deliveryTimeSlot",
   );
   const deliveryLocation = parseOptionalDeliveryLocation(value.deliveryLocation);
-  const deliveryDistancePreview = parseOptionalDeliveryDistancePreview(
-    value.deliveryDistancePreview,
-  );
   const couponCode = parseOptionalTrimmedString(value.couponCode, "couponCode");
 
   if (citySlug === "blg" && normalizedDeliveryMethod === "delivery" && deliveryDate === null) {
@@ -437,10 +395,6 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
       normalizedDeliveryMethod === "delivery"
         ? deliveryLocation
         : null,
-    deliveryDistancePreview:
-      normalizedDeliveryMethod === "delivery" && !deliveryLocation
-        ? deliveryDistancePreview
-        : null,
     couponCode,
     pointsToSpend,
     items,
@@ -467,9 +421,6 @@ function pickTelegramChatIdsForOrder(params: {
   citySlug: CitySlug;
   tgUserId: number;
 }): string[] {
-  const privateChatIds = pickPrivateTestOrderChatIds(params.tgUserId);
-  if (privateChatIds) return privateChatIds;
-
   return pickTelegramChatIds(params.citySlug);
 }
 
@@ -1081,10 +1032,6 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
         verified.user.id,
         body.deliveryLocation,
       );
-      const deliveryDistancePreview = getAllowedDeliveryDistancePreview(
-        verified.user.id,
-        body.deliveryDistancePreview,
-      );
 
       const result = await applyOrderEdit({
         orderId,
@@ -1099,7 +1046,6 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
           deliveryDate: body.deliveryDate,
           deliveryTimeSlot: body.deliveryTimeSlot,
           deliveryLocation,
-          deliveryDistancePreview: deliveryLocation ? null : deliveryDistancePreview,
           couponCode: null,
           pointsToSpend: body.pointsToSpend,
           items: body.items,
@@ -1165,10 +1111,6 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
         orderUser.id,
         body.deliveryLocation,
       );
-      const deliveryDistancePreview = getAllowedDeliveryDistancePreview(
-        orderUser.id,
-        body.deliveryDistancePreview,
-      );
 
       if (verified) {
         try {
@@ -1194,7 +1136,6 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           deliveryDate: body.deliveryDate,
           deliveryTimeSlot: body.deliveryTimeSlot,
           deliveryLocation,
-          deliveryDistancePreview: deliveryLocation ? null : deliveryDistancePreview,
           couponCode: body.couponCode,
           pointsToSpend: body.pointsToSpend,
           items: body.items,
