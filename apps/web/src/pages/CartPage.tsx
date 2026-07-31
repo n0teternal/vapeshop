@@ -72,7 +72,6 @@ type CouponPreviewResponse = {
 
 const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
 const DEFAULT_POINTS_MAX_SPEND_PERCENT = 50;
-const DELIVERY_MAP_ALLOWED_TG_USER_ID = 1208488286;
 const BLG_JUNE_2026_DELIVERY_TIME_SLOTS = [
   "11:00-13:00",
   "13:00-15:00",
@@ -638,11 +637,8 @@ export function CartPage() {
   );
   const checkoutDraft = state.checkoutDraft;
   const orderEditSession = state.orderEditSession;
-  const deliveryMapAllowedForUser =
-    isTelegram && webApp.initDataUnsafe.user?.id === DELIVERY_MAP_ALLOWED_TG_USER_ID;
-  const showAdminDeliveryMap =
-    deliveryMapAllowedForUser &&
-    state.city !== null &&
+  const showDeliveryMap =
+    state.city === "blg" &&
     checkoutDraft.deliveryMethod === "delivery" &&
     !orderEditSession;
   const requiresGuestPhone = !isTelegram && !orderEditSession;
@@ -687,7 +683,7 @@ export function CartPage() {
       ? deliveryMapSelection
       : null;
   const deliveryMapSelectionRequired =
-    showAdminDeliveryMap &&
+    showDeliveryMap &&
     deliveryPricing.rules.length > 0 &&
     !deliveryIsFreeByThreshold &&
     checkoutDraft.address.trim().length > 0;
@@ -858,7 +854,7 @@ export function CartPage() {
   }, [checkoutDraft.address, deliveryMapSelection]);
 
   useEffect(() => {
-    if (!showAdminDeliveryMap || !state.city) return;
+    if (!showDeliveryMap || !state.city) return;
     if (deliveryMapSelection) return;
 
     const addressKey = normalizeDeliveryMapAddressKey(checkoutDraft.address);
@@ -870,7 +866,7 @@ export function CartPage() {
     if (stored.addressKey !== addressKey) return;
 
     setDeliveryMapSelection(stored.selection);
-  }, [checkoutDraft.address, deliveryMapSelection, showAdminDeliveryMap, state.city]);
+  }, [checkoutDraft.address, deliveryMapSelection, showDeliveryMap, state.city]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1227,7 +1223,7 @@ export function CartPage() {
             ? checkoutDraft.deliveryTimeSlot || null
             : null,
           deliveryLocation:
-            showAdminDeliveryMap && confirmedDeliveryMapSelection
+            showDeliveryMap && confirmedDeliveryMapSelection
               ? {
                   address: confirmedDeliveryMapSelection.address,
                   lat: confirmedDeliveryMapSelection.lat,
@@ -1497,7 +1493,7 @@ export function CartPage() {
 
           {checkoutDraft.deliveryMethod === "delivery" ? (
             <div className="space-y-3">
-              {showAdminDeliveryMap && state.city ? (
+              {showDeliveryMap && state.city ? (
                 <>
                   <DeliveryAddressMap
                     city={state.city}
@@ -1505,7 +1501,7 @@ export function CartPage() {
                     disabled={submitting}
                     required
                     inputClassName={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
-                    showDistanceStatus={deliveryMapAllowedForUser}
+                    showDistanceStatus
                     restoredSelection={confirmedDeliveryMapSelection}
                     onAddressChange={(address) => updateCheckoutDraft({ address })}
                     onSelectionChange={updateDeliveryMapSelection}

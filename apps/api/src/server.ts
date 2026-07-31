@@ -73,7 +73,7 @@ type SuccessResponse = {
 };
 
 type CitySlug = "vvo" | "blg";
-const DELIVERY_MAP_ALLOWED_TG_USER_ID = 1208488286;
+const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
 const DEV_FALLBACK_TG_USER_ID = 42;
 
 type OrderRequestBody = CreateOrderPayload & {
@@ -153,16 +153,16 @@ function requireReferralTelegramContext(params: {
 }
 
 function getAllowedDeliveryLocation(
-  tgUserId: number | null,
+  citySlug: CitySlug,
   deliveryLocation: CreateOrderPayload["deliveryLocation"],
 ): CreateOrderPayload["deliveryLocation"] {
   if (!deliveryLocation) return null;
 
-  if (tgUserId !== DELIVERY_MAP_ALLOWED_TG_USER_ID) {
+  if (citySlug !== "blg") {
     throw new HttpError(
-      403,
-      "DELIVERY_MAP_USER_ONLY",
-      "Delivery map is only available for this user",
+      400,
+      "DELIVERY_LOCATION_CITY_ONLY",
+      "Delivery location is only available for Blagoveshchensk",
     );
   }
 
@@ -715,20 +715,9 @@ app.get<{
   Reply: ApiSuccess<DeliveryGeocodeResult> | ErrorResponse;
 }>("/api/delivery/geocode", async (request, reply) => {
   try {
-    const context = requireReferralTelegramContext({
-      headers: request.headers as Record<string, unknown>,
-    });
-    if (context.user.id !== DELIVERY_MAP_ALLOWED_TG_USER_ID) {
-      throw new HttpError(
-        403,
-        "DELIVERY_MAP_USER_ONLY",
-        "Delivery map is only available for this user",
-      );
-    }
-
     const citySlug = request.query.citySlug;
-    if (citySlug !== "vvo" && citySlug !== "blg") {
-      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
+    if (citySlug !== "blg") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'blg'");
     }
 
     const address = request.query.address?.trim() ?? "";
@@ -794,7 +783,7 @@ app.put<{
     const context = requireReferralTelegramContext({
       headers: request.headers as Record<string, unknown>,
     });
-    if (context.user.id !== DELIVERY_MAP_ALLOWED_TG_USER_ID) {
+    if (context.user.id !== DELIVERY_PRICING_ALLOWED_TG_USER_ID) {
       throw new HttpError(
         403,
         "DELIVERY_PRICING_USER_ONLY",
@@ -833,20 +822,9 @@ app.get<{
   Reply: ApiSuccess<DeliveryDistancePreviewResult> | ErrorResponse;
 }>("/api/delivery/distance-preview", async (request, reply) => {
   try {
-    const context = requireReferralTelegramContext({
-      headers: request.headers as Record<string, unknown>,
-    });
-    if (context.user.id !== DELIVERY_MAP_ALLOWED_TG_USER_ID) {
-      throw new HttpError(
-        403,
-        "DELIVERY_MAP_USER_ONLY",
-        "Delivery map is only available for this user",
-      );
-    }
-
     const citySlug = request.query.citySlug;
-    if (citySlug !== "vvo" && citySlug !== "blg") {
-      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
+    if (citySlug !== "blg") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'blg'");
     }
 
     const address = request.query.address?.trim() ?? "";
@@ -1102,7 +1080,7 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
         initDataFallback: body.initData,
       });
       const deliveryLocation = getAllowedDeliveryLocation(
-        verified.user.id,
+        body.citySlug,
         body.deliveryLocation,
       );
 
@@ -1181,7 +1159,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
             ? { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" }
             : { id: 0, username: null };
       const deliveryLocation = getAllowedDeliveryLocation(
-        orderUser.id,
+        body.citySlug,
         body.deliveryLocation,
       );
 

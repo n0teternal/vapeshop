@@ -57,8 +57,6 @@ type CreateOrderResult = {
   telegramMessage: TelegramOrderMessage;
 };
 
-const DELIVERY_DISTANCE_REQUIRED_TG_USER_ID = 1208488286;
-
 type InventoryRow = {
   product_id: string;
   in_stock: boolean;
@@ -384,7 +382,6 @@ export async function createOrder(params: {
   if (
     params.payload.citySlug === "blg" &&
     params.payload.deliveryMethod === "delivery" &&
-    params.tgUser.id === DELIVERY_DISTANCE_REQUIRED_TG_USER_ID &&
     itemsSubtotal < deliveryPricingSettings.freeDeliveryThresholdRub &&
     deliveryPricingSettings.rules.length > 0 &&
     !params.payload.deliveryLocation
