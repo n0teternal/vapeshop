@@ -13,7 +13,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
-import { buildApiUrl } from "../config";
+import { buildApiUrl, DELIVERY_UPGRADES_ENABLED } from "../config";
 import {
   calculateCartPromotionDiscount,
   type ActivePromotionRule,
@@ -662,14 +662,18 @@ export function CartPage() {
   );
   const checkoutDraft = state.checkoutDraft;
   const orderEditSession = state.orderEditSession;
-  const isExpressDelivery = checkoutDraft.deliveryMethod === "express";
+  const effectiveDeliveryMethod =
+    DELIVERY_UPGRADES_ENABLED || checkoutDraft.deliveryMethod !== "express"
+      ? checkoutDraft.deliveryMethod
+      : "delivery";
+  const isExpressDelivery = effectiveDeliveryMethod === "express";
   const isAddressDeliveryMethod =
-    checkoutDraft.deliveryMethod === "delivery" || isExpressDelivery;
+    effectiveDeliveryMethod === "delivery" || isExpressDelivery;
   const isRegularBlgDelivery =
-    state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
+    state.city === "blg" && effectiveDeliveryMethod === "delivery";
   const discountsAllowed = !isExpressDelivery;
   const showDeliveryMap =
-    state.city === "blg" && isAddressDeliveryMethod;
+    DELIVERY_UPGRADES_ENABLED && state.city === "blg" && isAddressDeliveryMethod;
   const showDeliveryDistanceDebug =
     isTelegram && webApp.initDataUnsafe?.user?.id === DELIVERY_DISTANCE_DEBUG_TG_USER_ID;
   const requiresGuestPhone = !isTelegram && !orderEditSession;
@@ -711,7 +715,7 @@ export function CartPage() {
     );
   }, [state.cart]);
   const itemsTotal = isExpressDelivery ? expressItemsTotal : regularItemsTotal;
-  const showDeliveryTypeOptions = isAddressDeliveryMethod;
+  const showDeliveryTypeOptions = DELIVERY_UPGRADES_ENABLED && isAddressDeliveryMethod;
   const confirmedDeliveryMapSelection =
     deliveryMapSelection &&
     normalizeDeliveryMapAddressKey(deliveryMapSelection.address) ===
@@ -1285,7 +1289,7 @@ export function CartPage() {
         headers,
         body: JSON.stringify({
           citySlug: state.city,
-          deliveryMethod: checkoutDraft.deliveryMethod,
+          deliveryMethod: effectiveDeliveryMethod,
           phone: trimmedPhone || null,
           address: trimmedAddress || null,
           comment: checkoutDraft.comment.trim() || null,

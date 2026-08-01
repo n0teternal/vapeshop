@@ -38,6 +38,9 @@ export type AppConfig = {
     geocoderApiKey: string | null;
     geosuggestApiKey: string | null;
   };
+  features: {
+    deliveryUpgradesEnabled: boolean;
+  };
   productImagesBaseUrl: string | null;
   dev: {
     adminTgUserId: number | null;
@@ -126,6 +129,24 @@ function parsePercentIntEnv(key: string, defaultValue: number): number {
     throw new Error(`Invalid env ${key}: expected integer in range 1..100`);
   }
   return n;
+}
+
+function parseBooleanEnv(key: string, defaultValue: boolean): boolean {
+  const raw = readEnv(key);
+  if (!raw) return defaultValue;
+  const normalized = raw.toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (
+    normalized === "0" ||
+    normalized === "false" ||
+    normalized === "no" ||
+    normalized === "off"
+  ) {
+    return false;
+  }
+  throw new Error(`Invalid env ${key}: expected boolean`);
 }
 
 function parseTelegramChatIds(raw: string, envName: string): string[] {
@@ -219,6 +240,9 @@ export const config: AppConfig = (() => {
     yandex: {
       geocoderApiKey: readEnv("YANDEX_GEOCODER_API_KEY"),
       geosuggestApiKey: readEnv("YANDEX_GEOSUGGEST_API_KEY"),
+    },
+    features: {
+      deliveryUpgradesEnabled: parseBooleanEnv("DELIVERY_UPGRADES_ENABLED", false),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {

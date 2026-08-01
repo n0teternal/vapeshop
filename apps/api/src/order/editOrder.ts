@@ -1,4 +1,5 @@
 import { HttpError } from "../httpError.js";
+import { config } from "../config.js";
 import { getMaxPointsDiscountForTotal } from "../referral/service.js";
 import {
   calculatePromotionDiscount,
@@ -712,6 +713,7 @@ export async function applyOrderEdit(params: {
     citySlug: params.payload.citySlug,
   });
   if (
+    config.features.deliveryUpgradesEnabled &&
     params.payload.citySlug === "blg" &&
     isDeliveryAddressMethod(params.payload.deliveryMethod) &&
     deliveryPricingSettings.rules.length > 0 &&

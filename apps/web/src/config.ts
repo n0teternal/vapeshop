@@ -50,6 +50,17 @@ export const YANDEX_MAPS_SUGGEST_API_KEY = readEnvString(
   "VITE_YANDEX_MAPS_SUGGEST_API_KEY",
 );
 
+function readEnvBoolean(key: string, defaultValue: boolean): boolean {
+  const raw = readEnvString(key).toLowerCase();
+  if (!raw) return defaultValue;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+export const DELIVERY_UPGRADES_ENABLED = readEnvBoolean(
+  "VITE_DELIVERY_UPGRADES_ENABLED",
+  false,
+);
+
 function readEnvNumber(key: string): number | null {
   const raw = readEnvString(key);
   if (!raw) return null;

@@ -35,6 +35,7 @@ import {
   isValidIsoDate,
 } from "./order/deliverySchedule.js";
 import {
+  DELIVERY_METHOD_EXPRESS,
   isDeliveryAddressMethod,
   isOrderDeliveryMethod,
 } from "./order/deliveryMethod.js";
@@ -259,6 +260,12 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   }
   const normalizedDeliveryMethod = deliveryMethod.trim();
   if (!isOrderDeliveryMethod(normalizedDeliveryMethod)) {
+    throw new HttpError(400, "BAD_REQUEST", "deliveryMethod is invalid");
+  }
+  if (
+    !config.features.deliveryUpgradesEnabled &&
+    normalizedDeliveryMethod === DELIVERY_METHOD_EXPRESS
+  ) {
     throw new HttpError(400, "BAD_REQUEST", "deliveryMethod is invalid");
   }
 

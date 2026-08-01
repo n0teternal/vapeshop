@@ -1,4 +1,5 @@
 import { HttpError } from "../httpError.js";
+import { config } from "../config.js";
 import { getMaxPointsDiscountForTotal, spendPointsForOrder } from "../referral/service.js";
 import { releasePromoCodeUsage, reservePromoCode } from "../promoCodes/service.js";
 import {
@@ -387,6 +388,7 @@ export async function createOrder(params: {
     citySlug: params.payload.citySlug,
   });
   if (
+    config.features.deliveryUpgradesEnabled &&
     params.payload.citySlug === "blg" &&
     isDeliveryAddressMethod(params.payload.deliveryMethod) &&
     deliveryPricingSettings.rules.length > 0 &&
