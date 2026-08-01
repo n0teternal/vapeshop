@@ -14,7 +14,7 @@ type DeliveryOrigin = {
 
 const DEFAULT_DELIVERY_ORIGINS: Record<"vvo" | "blg", DeliveryOrigin> = {
   vvo: { lat: 43.1155, lon: 131.8855, label: "Точка VVO" },
-  blg: { lat: 50.2907, lon: 127.5272, label: "Точка BLG" },
+  blg: { lat: 50.258119, lon: 127.534845, label: "Точка отсчета" },
 };
 
 function isLoopbackHost(hostname: string): boolean {
