@@ -662,8 +662,9 @@ export function CartPage() {
   );
   const checkoutDraft = state.checkoutDraft;
   const orderEditSession = state.orderEditSession;
+  const deliveryUpgradesAvailable = DELIVERY_UPGRADES_ENABLED && state.city === "blg";
   const effectiveDeliveryMethod =
-    DELIVERY_UPGRADES_ENABLED || checkoutDraft.deliveryMethod !== "express"
+    deliveryUpgradesAvailable || checkoutDraft.deliveryMethod !== "express"
       ? checkoutDraft.deliveryMethod
       : "delivery";
   const isExpressDelivery = effectiveDeliveryMethod === "express";
@@ -672,8 +673,7 @@ export function CartPage() {
   const isRegularBlgDelivery =
     state.city === "blg" && effectiveDeliveryMethod === "delivery";
   const discountsAllowed = !isExpressDelivery;
-  const showDeliveryMap =
-    DELIVERY_UPGRADES_ENABLED && state.city === "blg" && isAddressDeliveryMethod;
+  const showDeliveryMap = deliveryUpgradesAvailable && isAddressDeliveryMethod;
   const showDeliveryDistanceDebug =
     isTelegram && webApp.initDataUnsafe?.user?.id === DELIVERY_DISTANCE_DEBUG_TG_USER_ID;
   const requiresGuestPhone = !isTelegram && !orderEditSession;
@@ -715,7 +715,7 @@ export function CartPage() {
     );
   }, [state.cart]);
   const itemsTotal = isExpressDelivery ? expressItemsTotal : regularItemsTotal;
-  const showDeliveryTypeOptions = DELIVERY_UPGRADES_ENABLED && isAddressDeliveryMethod;
+  const showDeliveryTypeOptions = state.city === "blg" && isAddressDeliveryMethod;
   const confirmedDeliveryMapSelection =
     deliveryMapSelection &&
     normalizeDeliveryMapAddressKey(deliveryMapSelection.address) ===
@@ -1384,7 +1384,7 @@ export function CartPage() {
         {state.cart.map((item) => {
           const itemUnitPrice = getCartItemUnitPriceForDeliveryMethod(
             item,
-            checkoutDraft.deliveryMethod,
+            effectiveDeliveryMethod,
           );
 
           return (
@@ -1500,29 +1500,31 @@ export function CartPage() {
               </div>
             </button>
 
-            <button
-              type="button"
-              disabled={submitting}
-              aria-pressed={isExpressDelivery}
-              className={`w-full rounded-lg border p-4 text-left transition-colors ${
-                isExpressDelivery
-                  ? "border-sky-300/70 bg-sky-400/10"
-                  : "border-border/70 bg-card"
-              } ${submitting ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
-              onClick={() => selectDeliveryMethod("express")}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">Экспресс доставка</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Основная доставка + {formatPriceRub(EXPRESS_DELIVERY_SURCHARGE_RUB)}, от 30 минут
+            {deliveryUpgradesAvailable ? (
+              <button
+                type="button"
+                disabled={submitting}
+                aria-pressed={isExpressDelivery}
+                className={`w-full rounded-lg border p-4 text-left transition-colors ${
+                  isExpressDelivery
+                    ? "border-sky-300/70 bg-sky-400/10"
+                    : "border-border/70 bg-card"
+                } ${submitting ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
+                onClick={() => selectDeliveryMethod("express")}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">Экспресс доставка</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Основная доставка + {formatPriceRub(EXPRESS_DELIVERY_SURCHARGE_RUB)}, от 30 минут
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-sm font-semibold">
+                    {formatPriceRub(expressDeliveryFee)}
                   </div>
                 </div>
-                <div className="shrink-0 text-sm font-semibold">
-                  {formatPriceRub(expressDeliveryFee)}
-                </div>
-              </div>
-            </button>
+              </button>
+            ) : null}
           </div>
         ) : null}
 
