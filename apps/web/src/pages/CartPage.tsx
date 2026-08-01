@@ -95,6 +95,8 @@ const BLG_WEEKDAY_DELIVERY_TIME_SLOTS = [
 ] as const;
 
 const BLG_WEEKEND_DELIVERY_TIME_SLOTS = [
+  "11:00-13:00",
+  "13:00-15:00",
   "14:00-16:00",
   "16:00-18:00",
   "18:00-20:00",
