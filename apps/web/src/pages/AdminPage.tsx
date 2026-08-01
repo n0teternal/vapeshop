@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ApiError,
   apiDelete,
@@ -9,6 +10,12 @@ import {
   apiUpload,
 } from "../api/client";
 import { buildApiUrl } from "../config";
+import {
+  useAppState,
+  type CartItem,
+  type CheckoutDraft,
+  type City,
+} from "../state/AppStateProvider";
 import { fetchCatalog, type CatalogItem, type CitySlug } from "../supabase/catalog";
 import {
   CATALOG_FILTER_CATEGORIES_UI,
@@ -215,6 +222,15 @@ type Order = {
   comment: string | null;
   total_price: number;
   items: OrderItem[];
+};
+
+type StartAdminOrderEditResponse = {
+  orderId: string;
+  city: City;
+  expiresAt: string;
+  discountAmount: number;
+  cart: CartItem[];
+  checkoutDraft: CheckoutDraft;
 };
 
 function formatRub(value: number): string {
@@ -2663,9 +2679,12 @@ function AdminProductsManager() {
 }
 
 function AdminOrdersView() {
+  const navigate = useNavigate();
+  const { state, dispatch } = useAppState();
   const [status, setStatus] = useState<OrderStatus>("new");
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (nextStatus: OrderStatus): Promise<void> => {
@@ -2688,14 +2707,54 @@ function AdminOrdersView() {
     void load(status);
   }, [status, load]);
 
-  async function setOrderStatus(orderId: string, next: OrderStatus): Promise<void> {
+  async function handleStartEdit(order: Order): Promise<void> {
+    if (state.orderEditSession?.source === "admin" && state.orderEditSession.orderId === order.id) {
+      navigate("/cart", { replace: false });
+      return;
+    }
+
+    const hasDraftToReplace =
+      state.cart.length > 0 ||
+      state.checkoutDraft.phone.trim().length > 0 ||
+      state.checkoutDraft.address.trim().length > 0 ||
+      state.checkoutDraft.comment.trim().length > 0 ||
+      state.checkoutDraft.deliveryDate.trim().length > 0 ||
+      state.checkoutDraft.deliveryTimeSlot.trim().length > 0 ||
+      state.orderEditSession !== null;
+
+    if (hasDraftToReplace) {
+      const confirmed = window.confirm(
+        "Запустить редактирование этого заказа? Текущая корзина и черновик оформления будут заменены.",
+      );
+      if (!confirmed) return;
+    }
+
     setError(null);
+    setEditingOrderId(order.id);
     try {
-      await apiPut(`/api/admin/orders/${orderId}/status`, { status: next });
-      await load(status);
+      const result = await apiPut<StartAdminOrderEditResponse>(
+        `/api/admin/orders/${order.id}/edit-session`,
+        {},
+      );
+
+      dispatch({
+        type: "order-edit/start",
+        session: {
+          orderId: result.orderId,
+          city: result.city,
+          expiresAt: result.expiresAt,
+          discountAmount: result.discountAmount,
+          source: "admin",
+        },
+        cart: result.cart,
+        checkoutDraft: result.checkoutDraft,
+      });
+      navigate("/cart", { replace: false });
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Ошибка обновления статуса";
+      const message = e instanceof Error ? e.message : "Ошибка запуска редактирования";
       setError(message);
+    } finally {
+      setEditingOrderId(null);
     }
   }
 
@@ -2767,10 +2826,11 @@ function AdminOrdersView() {
                   {o.status !== "done" ? (
                     <button
                       type="button"
-                      className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
-                      onClick={() => void setOrderStatus(o.id, "done")}
+                      className="rounded-xl border border-primary/45 bg-primary/15 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/25 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-700/40 disabled:text-slate-400"
+                      disabled={loading || editingOrderId !== null}
+                      onClick={() => void handleStartEdit(o)}
                     >
-                      Готово
+                      {editingOrderId === o.id ? "..." : "Редактировать"}
                     </button>
                   ) : null}
                 </div>

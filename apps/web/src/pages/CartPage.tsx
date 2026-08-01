@@ -538,14 +538,7 @@ function getBlgDeliveryFeeRub(params: {
   return paidDeliveryFee;
 }
 
-function getCartItemUnitPriceForDeliveryMethod(
-  item: CartItem,
-  deliveryMethod: DeliveryMethod,
-): number {
-  if (deliveryMethod === "express") {
-    return item.regularPrice ?? item.price;
-  }
-
+function getCartItemUnitPrice(item: CartItem): number {
   return item.price;
 }
 
@@ -664,6 +657,7 @@ export function CartPage() {
   );
   const checkoutDraft = state.checkoutDraft;
   const orderEditSession = state.orderEditSession;
+  const isAdminOrderEditSession = orderEditSession?.source === "admin";
   const deliveryUpgradesAvailable = DELIVERY_UPGRADES_ENABLED && state.city === "blg";
   const effectiveDeliveryMethod =
     deliveryUpgradesAvailable || checkoutDraft.deliveryMethod !== "express"
@@ -674,14 +668,17 @@ export function CartPage() {
     effectiveDeliveryMethod === "delivery" || isExpressDelivery;
   const isRegularBlgDelivery =
     state.city === "blg" && effectiveDeliveryMethod === "delivery";
-  const discountsAllowed = !isExpressDelivery;
+  const discountsAllowed =
+    effectiveDeliveryMethod === "pickup" ||
+    effectiveDeliveryMethod === "delivery" ||
+    effectiveDeliveryMethod === "express";
   const showDeliveryMap = deliveryUpgradesAvailable && isAddressDeliveryMethod;
   const showDeliveryDistanceDebug =
     isTelegram && webApp.initDataUnsafe?.user?.id === DELIVERY_DISTANCE_DEBUG_TG_USER_ID;
   const requiresGuestPhone = !isTelegram && !orderEditSession;
   const hasRequiredGuestPhone =
     !requiresGuestPhone || isValidPhoneInput(checkoutDraft.phone);
-  const editSessionExpired = orderEditSession
+  const editSessionExpired = orderEditSession && !isAdminOrderEditSession
     ? getOrderEditRemainingMs(orderEditSession, nowMs) <= 0
     : false;
   const showBlgDeliverySchedule = isRegularBlgDelivery;
@@ -712,7 +709,7 @@ export function CartPage() {
   const expressItemsTotal = useMemo(() => {
     return state.cart.reduce(
       (sum, item) =>
-        sum + getCartItemUnitPriceForDeliveryMethod(item, "express") * item.qty,
+        sum + getCartItemUnitPrice(item) * item.qty,
       0,
     );
   }, [state.cart]);
@@ -794,21 +791,26 @@ export function CartPage() {
     });
   }, [activePromotionRules, discountsAllowed, nowMs, state.cart]);
   const promotionDiscountAmount = discountsAllowed
-    ? Math.min(total, promotionDiscount.discountAmount)
+    ? Math.min(itemsTotal, promotionDiscount.discountAmount)
     : 0;
-  const totalAfterPromotionDiscount = Math.max(0, total - promotionDiscountAmount);
+  const itemsAfterPromotionDiscount = Math.max(0, itemsTotal - promotionDiscountAmount);
+  const totalAfterPromotionDiscount = itemsAfterPromotionDiscount + deliveryFee;
   const couponDiscountAmount = orderEditSession || !promoCodesAvailable
     ? 0
-    : Math.min(totalAfterPromotionDiscount, couponPreview?.discountAmount ?? 0);
+    : Math.min(itemsAfterPromotionDiscount, couponPreview?.discountAmount ?? 0);
   const totalAfterCouponDiscount = Math.max(
     0,
     totalAfterPromotionDiscount - couponDiscountAmount,
   );
+  const itemsAfterCouponDiscount = Math.max(
+    0,
+    itemsAfterPromotionDiscount - couponDiscountAmount,
+  );
 
   const maxPointsByOrderTotal = useMemo(() => {
     if (!discountsAllowed) return 0;
-    return Math.max(0, Math.floor((totalAfterCouponDiscount * pointsMaxSpendPercent) / 100));
-  }, [discountsAllowed, pointsMaxSpendPercent, totalAfterCouponDiscount]);
+    return Math.max(0, Math.floor((itemsAfterCouponDiscount * pointsMaxSpendPercent) / 100));
+  }, [discountsAllowed, itemsAfterCouponDiscount, pointsMaxSpendPercent]);
 
   const maxPointsToSpend = useMemo(() => {
     return Math.max(0, Math.min(pointsBalance, maxPointsByOrderTotal));
@@ -1159,10 +1161,10 @@ export function CartPage() {
       const data = await apiPost<CouponPreviewResponse>("/api/promocodes/preview", {
         code,
         citySlug: state.city,
-        total: totalAfterPromotionDiscount,
+        total: itemsAfterPromotionDiscount,
         lines: state.cart.map((item) => ({
           categorySlug: item.categorySlug ?? null,
-          total: getCartItemUnitPriceForDeliveryMethod(item, effectiveDeliveryMethod) * item.qty,
+          total: getCartItemUnitPrice(item) * item.qty,
         })),
       });
       setCouponCode(data.code);
@@ -1287,7 +1289,9 @@ export function CartPage() {
         headers["x-dev-admin"] = "1";
       }
       const requestPath = orderEditSession
-        ? `/api/orders/${orderEditSession.orderId}/edit`
+        ? isAdminOrderEditSession
+          ? `/api/admin/orders/${orderEditSession.orderId}/edit`
+          : `/api/orders/${orderEditSession.orderId}/edit`
         : "/api/order";
 
       const res = await fetch(buildApiUrl(requestPath), {
@@ -1388,10 +1392,7 @@ export function CartPage() {
 
       <div className="space-y-3">
         {state.cart.map((item) => {
-          const itemUnitPrice = getCartItemUnitPriceForDeliveryMethod(
-            item,
-            effectiveDeliveryMethod,
-          );
+          const itemUnitPrice = getCartItemUnitPrice(item);
 
           return (
             <Card key={item.productId} className="border-border/70 bg-card">

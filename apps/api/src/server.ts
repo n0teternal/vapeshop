@@ -47,6 +47,7 @@ import {
 } from "./order/telegramFinalStatus.js";
 import { HttpError, isHttpError } from "./httpError.js";
 import { registerAdminRoutes } from "./admin/routes.js";
+import { requireAdmin } from "./admin/requireAdmin.js";
 import {
   fetchCatalogByCity,
   type CatalogCitySlug,
@@ -80,6 +81,7 @@ type SuccessResponse = {
 type CitySlug = "vvo" | "blg";
 const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
 const DEV_FALLBACK_TG_USER_ID = 42;
+const ADMIN_ORDER_EDIT_SESSION_MS = 100 * 365 * 24 * 60 * 60 * 1_000;
 
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
@@ -1218,6 +1220,103 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
           : "Unexpected error";
 
       request.log.error({ err: e }, "Customer edit order request failed");
+      return reply.code(statusCode).send({ ok: false, error: { code, message } });
+    }
+  },
+);
+
+app.put<{
+  Params: { orderId: string };
+  Reply: ApiSuccess<Awaited<ReturnType<typeof startOrderEditSession>>> | ErrorResponse;
+}>("/api/admin/orders/:orderId/edit-session", async (request, reply) => {
+  try {
+    const orderId = request.params.orderId?.trim() ?? "";
+    if (!orderId) {
+      throw new HttpError(400, "BAD_REQUEST", "orderId is required");
+    }
+
+    await requireAdmin(request);
+
+    const result = await startOrderEditSession({
+      orderId,
+      allowPromoPrices: true,
+      skipDeliveryWindowCheck: true,
+      sessionDurationMs: ADMIN_ORDER_EDIT_SESSION_MS,
+    });
+    return reply.code(200).send(ok(result));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Admin start edit session request failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
+  "/api/admin/orders/:orderId/edit",
+  async (request, reply) => {
+    try {
+      const orderId = request.params.orderId?.trim() ?? "";
+      if (!orderId) {
+        throw new HttpError(400, "BAD_REQUEST", "orderId is required");
+      }
+
+      await requireAdmin(request);
+
+      const body = parseOrderRequestBody(request.body);
+      const deliveryLocation = getAllowedDeliveryLocation(
+        body.citySlug,
+        body.deliveryLocation,
+      );
+
+      const result = await applyOrderEdit({
+        orderId,
+        allowPromoPrices: true,
+        skipEditSessionExpiryCheck: true,
+        payload: {
+          citySlug: body.citySlug,
+          deliveryMethod: body.deliveryMethod,
+          phone: body.phone,
+          address: body.address,
+          comment: body.comment,
+          deliveryDate: body.deliveryDate,
+          deliveryTimeSlot: body.deliveryTimeSlot,
+          deliveryLocation,
+          couponCode: null,
+          pointsToSpend: body.pointsToSpend,
+          items: body.items,
+        },
+      });
+
+      try {
+        await syncEditedOrderTelegramState({
+          orderId: result.orderId,
+          logger: request.log,
+        });
+      } catch (syncError) {
+        request.log.error(
+          { err: syncError, orderId: result.orderId },
+          "Admin-edited order saved, but Telegram edited order sync failed",
+        );
+      }
+
+      return reply.code(200).send({ ok: true, orderId: result.orderId, notified: true });
+    } catch (e: unknown) {
+      const statusCode = isHttpError(e) ? e.statusCode : 500;
+      const code = isHttpError(e) ? e.code : "INTERNAL";
+      const message = isHttpError(e)
+        ? e.message
+        : e instanceof Error
+          ? e.message
+          : "Unexpected error";
+
+      request.log.error({ err: e }, "Admin edit order request failed");
       return reply.code(statusCode).send({ ok: false, error: { code, message } });
     }
   },

@@ -483,16 +483,26 @@ export async function startOrderEditSession(params: {
   orderId: string;
   expectedTgUserId?: number;
   allowPromoPrices?: boolean;
+  skipDeliveryWindowCheck?: boolean;
+  sessionDurationMs?: number;
 }): Promise<StartOrderEditSessionResult> {
   const supabase = createServiceSupabaseClient();
   const order = await loadOrder(params);
   const city = await loadOrderCity(order.city_id);
-  ensureOrderEditableByWindow({
-    citySlug: city.citySlug,
-    comment: order.comment,
-  });
+  if (params.skipDeliveryWindowCheck !== true) {
+    ensureOrderEditableByWindow({
+      citySlug: city.citySlug,
+      comment: order.comment,
+    });
+  }
 
-  const expiresAt = new Date(Date.now() + ORDER_EDIT_WINDOW_MS).toISOString();
+  const sessionDurationMs =
+    typeof params.sessionDurationMs === "number" &&
+    Number.isFinite(params.sessionDurationMs) &&
+    params.sessionDurationMs > 0
+      ? params.sessionDurationMs
+      : ORDER_EDIT_WINDOW_MS;
+  const expiresAt = new Date(Date.now() + sessionDurationMs).toISOString();
   const { error: updateError } = await supabase
     .from("orders")
     .update({ edit_session_expires_at: expiresAt })
@@ -591,6 +601,7 @@ export async function applyOrderEdit(params: {
   expectedTgUserId?: number;
   payload: CreateOrderPayload;
   allowPromoPrices?: boolean;
+  skipEditSessionExpiryCheck?: boolean;
 }): Promise<{ orderId: string }> {
   const supabase = createServiceSupabaseClient();
   const order = await loadOrder({
@@ -608,16 +619,18 @@ export async function applyOrderEdit(params: {
     params.payload.deliveryMethod,
   );
 
-  const sessionExpiresAtMs =
-    typeof order.edit_session_expires_at === "string"
-      ? new Date(order.edit_session_expires_at).getTime()
-      : Number.NaN;
-  if (!Number.isFinite(sessionExpiresAtMs) || sessionExpiresAtMs <= Date.now()) {
-    throw new HttpError(
-      409,
-      "ORDER_EDIT_SESSION_EXPIRED",
-      "Режим редактирования истёк. Запустите его заново.",
-    );
+  if (params.skipEditSessionExpiryCheck !== true) {
+    const sessionExpiresAtMs =
+      typeof order.edit_session_expires_at === "string"
+        ? new Date(order.edit_session_expires_at).getTime()
+        : Number.NaN;
+    if (!Number.isFinite(sessionExpiresAtMs) || sessionExpiresAtMs <= Date.now()) {
+      throw new HttpError(
+        409,
+        "ORDER_EDIT_SESSION_EXPIRED",
+        "Режим редактирования истёк. Запустите его заново.",
+      );
+    }
   }
 
   const requested = normalizeItems(params.payload.items);
@@ -703,10 +716,13 @@ export async function applyOrderEdit(params: {
   }
 
   const promotionDiscountAmount = discountsAllowed
-    ? calculatePromotionDiscount({
-        rules: await loadActivePromotionRules({ supabase, cityId: city.id }),
-        lines,
-      }).discountAmount
+    ? Math.min(
+        itemsSubtotal,
+        calculatePromotionDiscount({
+          rules: await loadActivePromotionRules({ supabase, cityId: city.id }),
+          lines,
+        }).discountAmount,
+      )
     : 0;
   const deliveryPricingSettings = await loadDeliveryPricingSettings({
     supabase,
@@ -734,10 +750,8 @@ export async function applyOrderEdit(params: {
     settings: deliveryPricingSettings,
   });
   const totalBeforeDiscount = itemsSubtotal + deliveryFee;
-  const totalAfterPromotionDiscount = Math.max(
-    0,
-    totalBeforeDiscount - promotionDiscountAmount,
-  );
+  const itemsAfterPromotionDiscount = Math.max(0, itemsSubtotal - promotionDiscountAmount);
+  const totalAfterPromotionDiscount = itemsAfterPromotionDiscount + deliveryFee;
 
   const previousDiscountAmount =
     order.discount_amount === null || order.discount_amount === undefined
@@ -746,7 +760,7 @@ export async function applyOrderEdit(params: {
   const nextDiscountAmount = discountsAllowed
     ? Math.min(
         previousDiscountAmount,
-        getMaxPointsDiscountForTotal(totalAfterPromotionDiscount),
+        getMaxPointsDiscountForTotal(itemsAfterPromotionDiscount),
       )
     : 0;
   const totalAfterDiscount = Math.max(0, totalAfterPromotionDiscount - nextDiscountAmount);

@@ -61,6 +61,7 @@ export type OrderEditSession = {
   city: City;
   expiresAt: string;
   discountAmount: number;
+  source?: "customer" | "admin";
   restore: OrderEditRestoreSnapshot;
 };
 
@@ -221,6 +222,7 @@ function sanitizeOrderEditSession(value: unknown): OrderEditSession | null {
     city: value.city,
     expiresAt: value.expiresAt,
     discountAmount: Math.max(0, Math.trunc(value.discountAmount)),
+    source: value.source === "admin" ? "admin" : "customer",
     restore,
   };
 }

@@ -20,7 +20,7 @@ export function isDeliveryAddressMethod(value: string): boolean {
 }
 
 export function areDiscountsAllowedForDeliveryMethod(value: string): boolean {
-  return value !== DELIVERY_METHOD_EXPRESS;
+  return isOrderDeliveryMethod(value);
 }
 
 export function formatDeliveryMethodLabel(value: string): string {

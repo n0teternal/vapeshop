@@ -378,10 +378,13 @@ export async function createOrder(params: {
   }
 
   const promotionDiscountAmount = discountsAllowed
-    ? calculatePromotionDiscount({
-        rules: await loadActivePromotionRules({ supabase, cityId: city.id }),
-        lines,
-      }).discountAmount
+    ? Math.min(
+        itemsSubtotal,
+        calculatePromotionDiscount({
+          rules: await loadActivePromotionRules({ supabase, cityId: city.id }),
+          lines,
+        }).discountAmount,
+      )
     : 0;
   const deliveryPricingSettings = await loadDeliveryPricingSettings({
     supabase,
@@ -410,10 +413,8 @@ export async function createOrder(params: {
     settings: deliveryPricingSettings,
   });
   const totalBeforeDiscount = itemsSubtotal + deliveryFee;
-  const totalAfterPromotionDiscount = Math.max(
-    0,
-    totalBeforeDiscount - promotionDiscountAmount,
-  );
+  const itemsAfterPromotionDiscount = Math.max(0, itemsSubtotal - promotionDiscountAmount);
+  const totalAfterPromotionDiscount = itemsAfterPromotionDiscount + deliveryFee;
 
   const reservations: ReservedInventory[] = [];
 
@@ -462,7 +463,7 @@ export async function createOrder(params: {
   try {
     promoReservation = await reservePromoCode({
       code: couponCodeForOrder,
-      orderTotal: totalAfterPromotionDiscount,
+      orderTotal: itemsAfterPromotionDiscount,
       lines: lines.map((line) => ({
         categorySlug: line.categorySlug,
         total: line.unitPrice * line.qty,
@@ -483,10 +484,14 @@ export async function createOrder(params: {
     0,
     totalAfterPromotionDiscount - couponDiscountAmount,
   );
+  const itemsAfterCouponDiscount = Math.max(
+    0,
+    itemsAfterPromotionDiscount - couponDiscountAmount,
+  );
   const requestedPointsToSpend = discountsAllowed
     ? Math.max(0, Math.trunc(params.payload.pointsToSpend))
     : 0;
-  const maxPointsByOrderTotal = getMaxPointsDiscountForTotal(totalAfterCouponDiscount);
+  const maxPointsByOrderTotal = getMaxPointsDiscountForTotal(itemsAfterCouponDiscount);
   const discountAmount = Math.min(requestedPointsToSpend, maxPointsByOrderTotal);
   const totalAfterDiscount = Math.max(0, totalAfterCouponDiscount - discountAmount);
 

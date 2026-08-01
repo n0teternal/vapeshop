@@ -57,6 +57,7 @@ export function Layout() {
       ? webApp.initDataUnsafe.user.photo_url
       : null;
   const orderEditSession = state.orderEditSession;
+  const isAdminOrderEditSession = orderEditSession?.source === "admin";
 
   useEffect(() => {
     if (!orderEditSession) return;
@@ -70,11 +71,13 @@ export function Layout() {
     };
   }, [orderEditSession]);
 
-  const remainingMs = orderEditSession
+  const remainingMs = orderEditSession && !isAdminOrderEditSession
     ? getOrderEditRemainingMs(orderEditSession, nowMs)
     : 0;
   const remainingMinutes = Math.ceil(remainingMs / 60_000);
-  const editModeExpired = orderEditSession ? remainingMs <= 0 : false;
+  const editModeExpired = orderEditSession && !isAdminOrderEditSession
+    ? remainingMs <= 0
+    : false;
 
   async function handleExitEditMode(): Promise<void> {
     const session = orderEditSession;
@@ -82,7 +85,9 @@ export function Layout() {
 
     setExitingEditMode(true);
     try {
-      await apiDelete(`/api/orders/${session.orderId}/edit-session`);
+      if (session.source !== "admin") {
+        await apiDelete(`/api/orders/${session.orderId}/edit-session`);
+      }
     } catch {
       // Keep local exit resilient even if backend cleanup fails.
     } finally {
@@ -116,14 +121,18 @@ export function Layout() {
             <div className="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-white">
-                  {editModeExpired
-                    ? "Режим редактирования заказа истёк"
-                    : `Включен режим редактирования, осталось минут: ${remainingMinutes}`}
+                  {isAdminOrderEditSession
+                    ? "Админ редактирует заказ"
+                    : editModeExpired
+                      ? "Режим редактирования заказа истёк"
+                      : `Включен режим редактирования, осталось минут: ${remainingMinutes}`}
                 </div>
                 <div className="mt-1 text-xs text-white/80">
-                  {editModeExpired
-                    ? "Можно выйти из режима и запустить редактирование заново из управления заказами."
-                    : "Изменения применятся только после повторного оформления заказа."}
+                  {isAdminOrderEditSession
+                    ? "Изменения сохранятся после обновления заказа."
+                    : editModeExpired
+                      ? "Можно выйти из режима и запустить редактирование заново из управления заказами."
+                      : "Изменения применятся только после повторного оформления заказа."}
                 </div>
               </div>
 
