@@ -95,6 +95,8 @@ create table if not exists public.promo_codes (
   max_uses int not null,
   used_count int not null default 0,
   is_active boolean not null default true,
+  requires_previous_order boolean not null default false,
+  category_slug text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (btrim(code) <> ''),
@@ -102,6 +104,7 @@ create table if not exists public.promo_codes (
   check (max_uses > 0),
   check (used_count >= 0),
   check (used_count <= max_uses),
+  check (category_slug is null or btrim(category_slug) <> ''),
   check (ends_at >= starts_at)
 );
 
@@ -190,6 +193,10 @@ create index if not exists promotion_rules_active_window_idx
 
 create index if not exists promo_codes_active_window_idx
   on public.promo_codes (is_active, starts_at, ends_at, code);
+
+create index if not exists promo_codes_category_slug_idx
+  on public.promo_codes (category_slug)
+  where category_slug is not null;
 
 create index if not exists orders_status_created_at_idx
   on public.orders (status, created_at desc);

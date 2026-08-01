@@ -142,6 +142,8 @@ type AdminPromoCode = {
   maxUses: number;
   usedCount: number;
   isActive: boolean;
+  requiresPreviousOrder: boolean;
+  categorySlug: string | null;
   createdAt: string;
 };
 
@@ -155,6 +157,8 @@ type AdminPromoCodeDraft = {
   startsAt: string;
   endsAt: string;
   maxUses: string;
+  requiresPreviousOrder: boolean;
+  categorySlug: string;
 };
 
 type AdminPromotionBrandOption = {
@@ -1273,6 +1277,10 @@ function formatPromotionProductScope(productIds: string[]): string | null {
   return `Конкретных моделей: ${productIds.length}`;
 }
 
+function formatPromoCodeCategoryScope(categorySlug: string | null): string {
+  return categorySlug ? formatPromotionCategory(categorySlug) : "Все товары";
+}
+
 function parseCatalogCitySlug(value: string): CitySlug | null {
   return value === "vvo" || value === "blg" ? value : null;
 }
@@ -2141,6 +2149,8 @@ function createDefaultPromoCodeDraft(): AdminPromoCodeDraft {
     startsAt: getDateInputValue(),
     endsAt: getDateInputValue(7),
     maxUses: "1",
+    requiresPreviousOrder: false,
+    categorySlug: "",
   };
 }
 
@@ -2151,6 +2161,7 @@ function AdminPromoCodesManager() {
   );
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -2194,9 +2205,12 @@ function AdminPromoCodesManager() {
         startsAt: draft.startsAt,
         endsAt: draft.endsAt,
         maxUses,
+        requiresPreviousOrder: draft.requiresPreviousOrder,
+        categorySlug: draft.categorySlug || null,
       });
       setItems((prev) => [created, ...prev.filter((item) => item.code !== created.code)]);
       setDraft((prev) => ({ ...createDefaultPromoCodeDraft(), startsAt: prev.startsAt }));
+      setModalOpen(false);
       setNotice(`Промокод ${created.code} создан.`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Не удалось создать промокод");
@@ -2217,94 +2231,29 @@ function AdminPromoCodesManager() {
     <Card>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold">Создание промокодов</div>
+          <div className="text-sm font-semibold">Промокоды</div>
           <div className="mt-1 text-xs text-muted-foreground/80">
-            Код, период, скидка и лимит использований.
+            Скидки по коду, условия применения и лимиты.
           </div>
         </div>
-        <button
-          type="button"
-          className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={loading || saving}
-          onClick={() => void load()}
-        >
-          Обновить
-        </button>
-      </div>
-
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <label className="grid gap-1.5 text-sm lg:col-span-2">
-          <span className="text-xs font-semibold text-muted-foreground">Название / код</span>
-          <input
-            className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm uppercase"
-            value={draft.code}
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={loading || saving}
+            onClick={() => void load()}
+          >
+            Обновить
+          </button>
+          <button
+            type="button"
+            className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
             disabled={saving}
-            placeholder="SALE500"
-            onChange={(e) => updateDraft({ code: e.target.value })}
-          />
-        </label>
-
-        <label className="grid gap-1.5 text-sm">
-          <span className="text-xs font-semibold text-muted-foreground">Скидка, ₽</span>
-          <input
-            type="number"
-            min={1}
-            step={1}
-            className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
-            value={draft.discountAmount}
-            disabled={saving}
-            placeholder="500"
-            onChange={(e) => updateDraft({ discountAmount: e.target.value })}
-          />
-        </label>
-
-        <label className="grid gap-1.5 text-sm">
-          <span className="text-xs font-semibold text-muted-foreground">Использований</span>
-          <input
-            type="number"
-            min={1}
-            step={1}
-            className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
-            value={draft.maxUses}
-            disabled={saving}
-            onChange={(e) => updateDraft({ maxUses: e.target.value })}
-          />
-        </label>
-
-        <div className="grid gap-2 sm:grid-cols-2 lg:col-span-5">
-          <label className="grid gap-1.5 text-sm">
-            <span className="text-xs font-semibold text-muted-foreground">Начало</span>
-            <input
-              type="date"
-              className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
-              value={draft.startsAt}
-              disabled={saving}
-              onChange={(e) => updateDraft({ startsAt: e.target.value })}
-            />
-          </label>
-
-          <label className="grid gap-1.5 text-sm">
-            <span className="text-xs font-semibold text-muted-foreground">Окончание</span>
-            <input
-              type="date"
-              className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
-              value={draft.endsAt}
-              disabled={saving}
-              onChange={(e) => updateDraft({ endsAt: e.target.value })}
-            />
-          </label>
+            onClick={() => setModalOpen(true)}
+          >
+            Создать
+          </button>
         </div>
-      </div>
-
-      <div className="mt-3 flex justify-end">
-        <button
-          type="button"
-          className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
-          disabled={!canCreate}
-          onClick={() => void createPromoCode()}
-        >
-          {saving ? "Создаём..." : "Создать промокод"}
-        </button>
       </div>
 
       {error ? (
@@ -2330,13 +2279,23 @@ function AdminPromoCodesManager() {
           items.slice(0, 8).map((item) => (
             <div
               key={item.code}
-              className="rounded-2xl border border-border/70 bg-card/90 p-3"
+              className="rounded-xl border border-border/70 bg-card/90 px-3 py-2.5"
             >
               <div className="flex min-w-0 items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{item.code}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {formatDateTime(item.startsAt)} - {formatDateTime(item.endsAt)}
+                  <div className="truncate text-sm font-semibold">
+                    {item.code}
+                    {!item.isActive ? (
+                      <span className="ml-2 text-xs text-muted-foreground">off</span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                    <span>
+                      {formatDateTime(item.startsAt)} - {formatDateTime(item.endsAt)}
+                    </span>
+                    <span>{item.usedCount}/{item.maxUses}</span>
+                    <span>{formatPromoCodeCategoryScope(item.categorySlug)}</span>
+                    {item.requiresPreviousOrder ? <span>после 1-й покупки</span> : null}
                   </div>
                 </div>
                 <div className="shrink-0 text-right">
@@ -2352,6 +2311,151 @@ function AdminPromoCodesManager() {
           ))
         )}
       </div>
+
+      {modalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border/70 bg-card p-4 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-base font-semibold">Создать промокод</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Скидка, период, лимит и условия применения.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+                disabled={saving}
+                onClick={() => setModalOpen(false)}
+              >
+                Закрыть
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">Название / код</span>
+                <input
+                  className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm uppercase"
+                  value={draft.code}
+                  disabled={saving}
+                  placeholder="SALE500"
+                  onChange={(e) => updateDraft({ code: e.target.value })}
+                />
+              </label>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-semibold text-muted-foreground">Скидка, ₽</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                    value={draft.discountAmount}
+                    disabled={saving}
+                    placeholder="500"
+                    onChange={(e) => updateDraft({ discountAmount: e.target.value })}
+                  />
+                </label>
+
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-semibold text-muted-foreground">Использований</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                    value={draft.maxUses}
+                    disabled={saving}
+                    onChange={(e) => updateDraft({ maxUses: e.target.value })}
+                  />
+                </label>
+              </div>
+
+              <label className="grid gap-1.5 text-sm">
+                <span className="text-xs font-semibold text-muted-foreground">Группа товаров</span>
+                <select
+                  className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                  value={draft.categorySlug}
+                  disabled={saving}
+                  onChange={(e) => updateDraft({ categorySlug: e.target.value })}
+                >
+                  <option value="">Все товары</option>
+                  {PROMOTION_CATEGORY_OPTIONS.map((category) => (
+                    <option key={category.value} value={category.value}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="flex min-h-10 items-start gap-2 rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4 shrink-0 accent-primary"
+                  checked={draft.requiresPreviousOrder}
+                  disabled={saving}
+                  onChange={(e) => updateDraft({ requiresPreviousOrder: e.target.checked })}
+                />
+                <span>
+                  Только после первой покупки
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Клиент должен иметь хотя бы один завершённый заказ.
+                  </span>
+                </span>
+              </label>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-semibold text-muted-foreground">Начало</span>
+                  <input
+                    type="date"
+                    className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                    value={draft.startsAt}
+                    disabled={saving}
+                    onChange={(e) => updateDraft({ startsAt: e.target.value })}
+                  />
+                </label>
+
+                <label className="grid gap-1.5 text-sm">
+                  <span className="text-xs font-semibold text-muted-foreground">Окончание</span>
+                  <input
+                    type="date"
+                    className="h-10 rounded-xl border border-border/70 bg-card/90 px-3 text-sm"
+                    value={draft.endsAt}
+                    disabled={saving}
+                    onChange={(e) => updateDraft({ endsAt: e.target.value })}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+                disabled={saving}
+                onClick={() => setModalOpen(false)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
+                disabled={!canCreate}
+                onClick={() => void createPromoCode()}
+              >
+                {saving ? "Создаём..." : "Создать"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }

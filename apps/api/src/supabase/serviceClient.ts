@@ -162,6 +162,8 @@ export type Database = {
           max_uses: number;
           used_count: number;
           is_active: boolean;
+          requires_previous_order: boolean;
+          category_slug: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -173,6 +175,8 @@ export type Database = {
           max_uses: number;
           used_count?: number;
           is_active?: boolean;
+          requires_previous_order?: boolean;
+          category_slug?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -184,6 +188,8 @@ export type Database = {
           max_uses?: number;
           used_count?: number;
           is_active?: boolean;
+          requires_previous_order?: boolean;
+          category_slug?: string | null;
           created_at?: string;
           updated_at?: string;
         };

@@ -463,6 +463,11 @@ export async function createOrder(params: {
     promoReservation = await reservePromoCode({
       code: couponCodeForOrder,
       orderTotal: totalAfterPromotionDiscount,
+      lines: lines.map((line) => ({
+        categorySlug: line.categorySlug,
+        total: line.unitPrice * line.qty,
+      })),
+      tgUserId: effectiveTgUser.id,
     });
   } catch (e) {
     await rollbackReservedInventory({

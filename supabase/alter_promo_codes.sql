@@ -22,8 +22,30 @@ alter table public.orders
   add column if not exists coupon_id text null,
   add column if not exists coupon_discount_amount numeric not null default 0;
 
+alter table public.promo_codes
+  add column if not exists requires_previous_order boolean not null default false,
+  add column if not exists category_slug text null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'promo_codes_category_slug_check'
+      and conrelid = 'public.promo_codes'::regclass
+  ) then
+    alter table public.promo_codes
+      add constraint promo_codes_category_slug_check
+      check (category_slug is null or btrim(category_slug) <> '');
+  end if;
+end $$;
+
 create index if not exists promo_codes_active_window_idx
   on public.promo_codes (is_active, starts_at, ends_at, code);
+
+create index if not exists promo_codes_category_slug_idx
+  on public.promo_codes (category_slug)
+  where category_slug is not null;
 
 create index if not exists orders_coupon_id_idx
   on public.orders (coupon_id)

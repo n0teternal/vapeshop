@@ -168,8 +168,13 @@ type PromoCodeAdminRow = {
   max_uses: number;
   used_count: number;
   is_active: boolean;
+  requires_previous_order?: boolean | null;
+  category_slug?: string | null;
   created_at: string;
 };
+
+const PROMO_CODE_ADMIN_SELECT =
+  "code,discount_amount,starts_at,ends_at,max_uses,used_count,is_active,requires_previous_order,category_slug,created_at";
 
 const PROMOTION_RULE_ADMIN_SELECT_WITH_PRODUCT_IDS =
   "id,city_id,type,title,category_slug,brand,product_ids,starts_at,ends_at,is_active,created_at";
@@ -315,6 +320,14 @@ function isMissingColumnError(error: unknown, columnName: string): boolean {
       (message.includes("schema cache") ||
         message.includes("column") ||
         message.includes("does not exist")))
+  );
+}
+
+function isPromoCodesSchemaOutdatedError(error: unknown): boolean {
+  return (
+    isMissingDbObjectError(error, "promo_codes") ||
+    isMissingColumnError(error, "requires_previous_order") ||
+    isMissingColumnError(error, "category_slug")
   );
 }
 
@@ -493,6 +506,11 @@ function mapPromoCodeForAdmin(row: PromoCodeAdminRow) {
     maxUses: row.max_uses,
     usedCount: row.used_count,
     isActive: row.is_active,
+    requiresPreviousOrder: row.requires_previous_order === true,
+    categorySlug:
+      typeof row.category_slug === "string" && row.category_slug.trim().length > 0
+        ? normalizePromotionCategorySlug(row.category_slug)
+        : null,
     createdAt: row.created_at,
   };
 }
@@ -836,7 +854,7 @@ async function fetchReportPromoCodes(
 ): Promise<PromoCodeAdminRow[]> {
   const { data, error } = await supabase
     .from("promo_codes")
-    .select("code,discount_amount,starts_at,ends_at,max_uses,used_count,is_active,created_at")
+    .select(PROMO_CODE_ADMIN_SELECT)
     .order("created_at", { ascending: false })
     .limit(1000);
 
@@ -1373,6 +1391,8 @@ export async function buildBusinessReportWorkbook(
     "Лимит использований": promoCode.max_uses,
     "Использовано": promoCode.used_count,
     "Осталось": Math.max(0, promoCode.max_uses - promoCode.used_count),
+    "Категория": promoCode.category_slug ? categoryReportLabel(promoCode.category_slug) : "Все товары",
+    "После первой покупки": promoCode.requires_previous_order ? "да" : "нет",
     "Активен": promoCode.is_active ? "да" : "нет",
     "Создан": formatReportDate(promoCode.created_at),
   }));
@@ -1769,17 +1789,17 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         const { data, error } = await supabase
           .from("promo_codes")
           .select(
-            "code,discount_amount,starts_at,ends_at,max_uses,used_count,is_active,created_at",
+            PROMO_CODE_ADMIN_SELECT,
           )
           .order("created_at", { ascending: false })
           .limit(100);
 
         if (error) {
-          if (isMissingDbObjectError(error, "promo_codes")) {
+          if (isPromoCodesSchemaOutdatedError(error)) {
             throw new HttpError(
               500,
               "DB_SCHEMA_OUTDATED",
-              "Promo codes schema is missing. Run supabase/alter_promo_codes.sql in Supabase SQL Editor.",
+              "Promo codes schema is outdated. Run supabase/alter_promo_codes.sql in Supabase SQL Editor.",
             );
           }
           throw new HttpError(500, "DB", `Failed to load promo codes: ${error.message}`);
@@ -1807,6 +1827,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           startsAt: z.string().trim().min(1).max(80),
           endsAt: z.string().trim().min(1).max(80),
           maxUses: z.coerce.number().int().min(1).max(100_000),
+          requiresPreviousOrder: z.boolean().optional().default(false),
+          categorySlug: z.string().trim().max(80).nullable().optional(),
         });
         const parsed = schema.safeParse(request.body);
         if (!parsed.success) {
@@ -1827,6 +1849,11 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         if (new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
           throw new HttpError(400, "BAD_REQUEST", "endsAt must be after startsAt");
         }
+        const categorySlug =
+          typeof parsed.data.categorySlug === "string" &&
+          parsed.data.categorySlug.trim().length > 0
+            ? normalizePromotionCategorySlug(parsed.data.categorySlug)
+            : null;
 
         const supabase = createServiceSupabaseClient();
         const { data, error } = await supabase
@@ -1839,10 +1866,12 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             max_uses: parsed.data.maxUses,
             used_count: 0,
             is_active: true,
+            requires_previous_order: parsed.data.requiresPreviousOrder,
+            category_slug: categorySlug,
             updated_at: new Date().toISOString(),
           })
           .select(
-            "code,discount_amount,starts_at,ends_at,max_uses,used_count,is_active,created_at",
+            PROMO_CODE_ADMIN_SELECT,
           )
           .single();
 
@@ -1851,11 +1880,11 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           if (codeText === "23505") {
             throw new HttpError(409, "PROMO_CODE_EXISTS", "Promo code already exists.");
           }
-          if (isMissingDbObjectError(error, "promo_codes")) {
+          if (isPromoCodesSchemaOutdatedError(error)) {
             throw new HttpError(
               500,
               "DB_SCHEMA_OUTDATED",
-              "Promo codes schema is missing. Run supabase/alter_promo_codes.sql in Supabase SQL Editor.",
+              "Promo codes schema is outdated. Run supabase/alter_promo_codes.sql in Supabase SQL Editor.",
             );
           }
           throw new HttpError(500, "DB", `Failed to create promo code: ${error.message}`);

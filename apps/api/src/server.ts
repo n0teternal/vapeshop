@@ -54,7 +54,7 @@ import {
 } from "./catalog/getCatalog.js";
 import { config } from "./config.js";
 import { loadActivePromotionRules } from "./promotions/rules.js";
-import { previewPromoCode } from "./promoCodes/service.js";
+import { previewPromoCode, type PromoCodeLine } from "./promoCodes/service.js";
 import { bootstrapReferralProfile, getReferralOverview } from "./referral/service.js";
 import { createServiceSupabaseClient } from "./supabase/serviceClient.js";
 import { sendMessage } from "./telegram/api.js";
@@ -134,6 +134,28 @@ function requireCustomerTelegramUser(params: {
   if (config.isDev && devHeaderOn) {
     return { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" };
   }
+
+  return requireVerifiedTelegramRequest(params).user;
+}
+
+function readOptionalCustomerTelegramUser(params: {
+  headers: Record<string, unknown>;
+  initDataFallback?: string | undefined;
+}): { id: number; username: string | null } | null {
+  const devHeaderOn = getHeaderString(params.headers["x-dev-admin"]) === "1";
+  if (config.isDev && devHeaderOn && config.dev.adminTgUserId) {
+    return { id: config.dev.adminTgUserId, username: null };
+  }
+  if (config.isDev && devHeaderOn) {
+    return { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" };
+  }
+
+  const initData = (
+    getHeaderString(params.headers["x-telegram-init-data"]) ??
+    params.initDataFallback ??
+    ""
+  ).trim();
+  if (!initData) return null;
 
   return requireVerifiedTelegramRequest(params).user;
 }
@@ -431,6 +453,39 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   return base;
 }
 
+function parsePromoCodePreviewLines(value: unknown): PromoCodeLine[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, "BAD_REQUEST", "lines must be an array");
+  }
+
+  return value.map((line, index) => {
+    if (!isRecord(line)) {
+      throw new HttpError(400, "BAD_REQUEST", `lines[${index}] must be an object`);
+    }
+
+    const categorySlug =
+      typeof line.categorySlug === "string" && line.categorySlug.trim().length > 0
+        ? line.categorySlug.trim()
+        : null;
+    const totalRaw = line.total;
+    const total =
+      typeof totalRaw === "number"
+        ? totalRaw
+        : typeof totalRaw === "string"
+          ? Number(totalRaw)
+          : Number.NaN;
+    if (!Number.isFinite(total) || total < 0) {
+      throw new HttpError(400, "BAD_REQUEST", `lines[${index}].total must be a non-negative number`);
+    }
+
+    return {
+      categorySlug,
+      total,
+    };
+  });
+}
+
 function pickTelegramChatIds(citySlug: CitySlug): string[] {
   if (citySlug === "vvo") {
     return config.telegram.chatIdsVvo ?? config.telegram.chatIdsOwner;
@@ -678,7 +733,14 @@ app.get<{
 
 app.post<{
   Body: unknown;
-  Reply: ApiSuccess<{ code: string; discountAmount: number }> | ErrorResponse;
+  Reply:
+    | ApiSuccess<{
+        code: string;
+        discountAmount: number;
+        categorySlug: string | null;
+        requiresPreviousOrder: boolean;
+      }>
+    | ErrorResponse;
 }>("/api/promocodes/preview", async (request, reply) => {
   try {
     if (!isRecord(request.body)) {
@@ -712,7 +774,19 @@ app.post<{
       throw new HttpError(400, "BAD_REQUEST", "total must be a non-negative number");
     }
 
-    const result = await previewPromoCode({ code, orderTotal: total });
+    const lines = parsePromoCodePreviewLines(request.body.lines);
+    const user = readOptionalCustomerTelegramUser({
+      headers: request.headers as Record<string, unknown>,
+      initDataFallback:
+        typeof request.body.initData === "string" ? request.body.initData : undefined,
+    });
+
+    const result = await previewPromoCode({
+      code,
+      orderTotal: total,
+      lines,
+      tgUserId: user?.id ?? null,
+    });
     return reply.code(200).send(ok(result));
   } catch (e: unknown) {
     const statusCode = isHttpError(e) ? e.statusCode : 500;

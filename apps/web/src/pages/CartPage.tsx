@@ -70,6 +70,8 @@ type ReferralOverviewBalance = {
 type CouponPreviewResponse = {
   code: string;
   discountAmount: number;
+  categorySlug: string | null;
+  requiresPreviousOrder: boolean;
 };
 
 const DEFAULT_POINTS_EXPIRE_AFTER_MONTHS = 3;
@@ -1158,6 +1160,10 @@ export function CartPage() {
         code,
         citySlug: state.city,
         total: totalAfterPromotionDiscount,
+        lines: state.cart.map((item) => ({
+          categorySlug: item.categorySlug ?? null,
+          total: getCartItemUnitPriceForDeliveryMethod(item, effectiveDeliveryMethod) * item.qty,
+        })),
       });
       setCouponCode(data.code);
       setCouponPreview(data);
