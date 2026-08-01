@@ -242,7 +242,7 @@ export const config: AppConfig = (() => {
       geosuggestApiKey: readEnv("YANDEX_GEOSUGGEST_API_KEY"),
     },
     features: {
-      deliveryUpgradesEnabled: parseBooleanEnv("DELIVERY_UPGRADES_ENABLED", false),
+      deliveryUpgradesEnabled: parseBooleanEnv("DELIVERY_UPGRADES_ENABLED", true),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     dev: {

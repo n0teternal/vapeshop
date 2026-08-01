@@ -58,7 +58,7 @@ function readEnvBoolean(key: string, defaultValue: boolean): boolean {
 
 export const DELIVERY_UPGRADES_ENABLED = readEnvBoolean(
   "VITE_DELIVERY_UPGRADES_ENABLED",
-  false,
+  true,
 );
 
 function readEnvNumber(key: string): number | null {
