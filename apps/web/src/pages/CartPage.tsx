@@ -29,7 +29,9 @@ import {
 import {
   getOrderEditRemainingMs,
   useAppState,
+  type CartItem,
   type City,
+  type DeliveryMethod,
 } from "../state/AppStateProvider";
 import { fetchCatalog, type CatalogItem } from "../supabase/catalog";
 import { useTelegram } from "../telegram/TelegramProvider";
@@ -123,6 +125,8 @@ const BLG_ORDER_CUTOFF_BY_TIME_SLOT: Record<
 };
 const BLG_DELIVERY_FEE_RUB = 150;
 const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
+const BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB = 150;
+const EXPRESS_DELIVERY_SURCHARGE_RUB = 200;
 const DEFAULT_BLG_DELIVERY_PRICING: DeliveryPricingSettings = {
   citySlug: "blg",
   freeDeliveryThresholdRub: BLG_FREE_DELIVERY_THRESHOLD_RUB,
@@ -505,9 +509,8 @@ function getBlgDeliveryFeeRub(params: {
   distanceKm?: number | null;
   deliveryTimeSlot: string | null | undefined;
   pricing: DeliveryPricingSettings;
+  ignoreDeliveryThresholdDiscount?: boolean;
 }): number {
-  if (params.itemsSubtotalRub >= params.pricing.freeDeliveryThresholdRub) return 0;
-
   const matchedPeakSurchargeRule = getMatchedPeakSurchargeRule({
     deliveryTimeSlot: params.deliveryTimeSlot,
     pricing: params.pricing,
@@ -517,9 +520,28 @@ function getBlgDeliveryFeeRub(params: {
     distanceKm: params.distanceKm,
     pricing: params.pricing,
   });
-  if (matchedDistanceRule) return matchedDistanceRule.feeRub + peakSurchargeRub;
+  const paidDeliveryFee =
+    (matchedDistanceRule?.feeRub ?? params.pricing.baseFeeRub) + peakSurchargeRub;
 
-  return params.pricing.baseFeeRub + peakSurchargeRub;
+  if (
+    params.ignoreDeliveryThresholdDiscount !== true &&
+    params.itemsSubtotalRub >= params.pricing.freeDeliveryThresholdRub
+  ) {
+    return Math.max(0, paidDeliveryFee - BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB);
+  }
+
+  return paidDeliveryFee;
+}
+
+function getCartItemUnitPriceForDeliveryMethod(
+  item: CartItem,
+  deliveryMethod: DeliveryMethod,
+): number {
+  if (deliveryMethod === "express") {
+    return item.regularPrice ?? item.price;
+  }
+
+  return item.price;
 }
 
 type RecommendationCategoryId = CatalogFilterCategoryId | "other";
@@ -567,7 +589,7 @@ function getFreeDeliveryRecommendationCategories(
 }
 
 function getFreeDeliveryRecommendationReason(amountToFreeDelivery: number): string {
-  return amountToFreeDelivery <= 500 ? "Дешево добить" : "Одноразка до бесплатной";
+  return amountToFreeDelivery <= 500 ? "Дешево добить" : "Одноразка до скидки";
 }
 
 function buildFreeDeliveryRecommendations(params: {
@@ -637,19 +659,22 @@ export function CartPage() {
   );
   const checkoutDraft = state.checkoutDraft;
   const orderEditSession = state.orderEditSession;
+  const isExpressDelivery = checkoutDraft.deliveryMethod === "express";
+  const isAddressDeliveryMethod =
+    checkoutDraft.deliveryMethod === "delivery" || isExpressDelivery;
+  const isRegularBlgDelivery =
+    state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
+  const discountsAllowed = !isExpressDelivery;
   const showDeliveryMap =
-    state.city === "blg" &&
-    checkoutDraft.deliveryMethod === "delivery" &&
-    !orderEditSession;
+    state.city === "blg" && isAddressDeliveryMethod;
   const requiresGuestPhone = !isTelegram && !orderEditSession;
   const hasRequiredGuestPhone =
     !requiresGuestPhone || isValidPhoneInput(checkoutDraft.phone);
   const editSessionExpired = orderEditSession
     ? getOrderEditRemainingMs(orderEditSession, nowMs) <= 0
     : false;
-  const showBlgDeliverySchedule =
-    state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
-  const promoCodesAvailable = state.city === "blg";
+  const showBlgDeliverySchedule = isRegularBlgDelivery;
+  const promoCodesAvailable = state.city === "blg" && discountsAllowed;
   const availableDeliveryTimeSlots = useMemo(
     () =>
       getBlgDeliveryTimeSlotsForDate(checkoutDraft.deliveryDate).filter((slot) =>
@@ -670,46 +695,67 @@ export function CartPage() {
     showBlgDeliverySchedule &&
     checkoutDraft.deliveryDate.trim().length > 0 &&
     checkoutDraft.deliveryDate < minDeliveryDate;
-  const itemsTotal = useMemo(() => {
+  const regularItemsTotal = useMemo(() => {
     return state.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   }, [state.cart]);
-  const showBlgDeliveryFeeCard =
-    state.city === "blg" && checkoutDraft.deliveryMethod === "delivery";
-  const deliveryIsFreeByThreshold = itemsTotal >= deliveryPricing.freeDeliveryThresholdRub;
+  const expressItemsTotal = useMemo(() => {
+    return state.cart.reduce(
+      (sum, item) =>
+        sum + getCartItemUnitPriceForDeliveryMethod(item, "express") * item.qty,
+      0,
+    );
+  }, [state.cart]);
+  const itemsTotal = isExpressDelivery ? expressItemsTotal : regularItemsTotal;
+  const showDeliveryTypeOptions = isAddressDeliveryMethod;
   const confirmedDeliveryMapSelection =
     deliveryMapSelection &&
     normalizeDeliveryMapAddressKey(deliveryMapSelection.address) ===
       normalizeDeliveryMapAddressKey(checkoutDraft.address)
       ? deliveryMapSelection
       : null;
-  const deliveryMapSelectionRequired =
-    showDeliveryMap &&
-    deliveryPricing.rules.length > 0 &&
-    !deliveryIsFreeByThreshold &&
-    checkoutDraft.address.trim().length > 0;
-  const hasRequiredDeliveryMapSelection =
-    !deliveryMapSelectionRequired || confirmedDeliveryMapSelection !== null;
-  const matchedPeakSurchargeRule = deliveryIsFreeByThreshold
-    ? null
-    : getMatchedPeakSurchargeRule({
-        deliveryTimeSlot: checkoutDraft.deliveryTimeSlot || null,
-        pricing: deliveryPricing,
-      });
-  const deliveryFee =
-    showBlgDeliveryFeeCard
+  const regularDeliveryFee =
+    state.city === "blg"
       ? getBlgDeliveryFeeRub({
-          itemsSubtotalRub: itemsTotal,
+          itemsSubtotalRub: regularItemsTotal,
           distanceKm: confirmedDeliveryMapSelection?.distanceKm ?? null,
           deliveryTimeSlot: checkoutDraft.deliveryTimeSlot || null,
           pricing: deliveryPricing,
         })
       : 0;
-  const amountToFreeDelivery = Math.max(
-    0,
-    deliveryPricing.freeDeliveryThresholdRub - itemsTotal,
-  );
+  const expressDeliveryFee =
+    (state.city === "blg"
+      ? getBlgDeliveryFeeRub({
+          itemsSubtotalRub: expressItemsTotal,
+          distanceKm: confirmedDeliveryMapSelection?.distanceKm ?? null,
+          deliveryTimeSlot: null,
+          pricing: deliveryPricing,
+          ignoreDeliveryThresholdDiscount: true,
+        })
+      : 0) + EXPRESS_DELIVERY_SURCHARGE_RUB;
+  const deliveryMapSelectionRequired =
+    showDeliveryMap &&
+    deliveryPricing.rules.length > 0 &&
+    checkoutDraft.address.trim().length > 0;
+  const hasRequiredDeliveryMapSelection =
+    !deliveryMapSelectionRequired || confirmedDeliveryMapSelection !== null;
+  const matchedPeakSurchargeRule =
+    isRegularBlgDelivery
+      ? getMatchedPeakSurchargeRule({
+        deliveryTimeSlot: checkoutDraft.deliveryTimeSlot || null,
+        pricing: deliveryPricing,
+      })
+      : null;
+  const deliveryFee =
+    isExpressDelivery
+      ? expressDeliveryFee
+      : isRegularBlgDelivery
+      ? regularDeliveryFee
+      : 0;
+  const amountToFreeDelivery = isRegularBlgDelivery
+    ? Math.max(0, deliveryPricing.freeDeliveryThresholdRub - regularItemsTotal)
+    : 0;
   const shouldShowFreeDeliveryRecommendations =
-    showBlgDeliveryFeeCard &&
+    isRegularBlgDelivery &&
     deliveryFee > 0 &&
     amountToFreeDelivery > 0 &&
     state.cart.length > 0;
@@ -726,13 +772,19 @@ export function CartPage() {
   ]);
   const total = itemsTotal + deliveryFee;
   const promotionDiscount = useMemo(() => {
+    if (!discountsAllowed) {
+      return { discountAmount: 0, freeQty: 0, title: null };
+    }
+
     return calculateCartPromotionDiscount({
       cart: state.cart,
       rules: activePromotionRules,
       nowMs,
     });
-  }, [activePromotionRules, nowMs, state.cart]);
-  const promotionDiscountAmount = Math.min(total, promotionDiscount.discountAmount);
+  }, [activePromotionRules, discountsAllowed, nowMs, state.cart]);
+  const promotionDiscountAmount = discountsAllowed
+    ? Math.min(total, promotionDiscount.discountAmount)
+    : 0;
   const totalAfterPromotionDiscount = Math.max(0, total - promotionDiscountAmount);
   const couponDiscountAmount = orderEditSession || !promoCodesAvailable
     ? 0
@@ -743,8 +795,9 @@ export function CartPage() {
   );
 
   const maxPointsByOrderTotal = useMemo(() => {
+    if (!discountsAllowed) return 0;
     return Math.max(0, Math.floor((totalAfterCouponDiscount * pointsMaxSpendPercent) / 100));
-  }, [pointsMaxSpendPercent, totalAfterCouponDiscount]);
+  }, [discountsAllowed, pointsMaxSpendPercent, totalAfterCouponDiscount]);
 
   const maxPointsToSpend = useMemo(() => {
     return Math.max(0, Math.min(pointsBalance, maxPointsByOrderTotal));
@@ -754,12 +807,14 @@ export function CartPage() {
     ? Math.max(0, Math.min(orderEditSession.discountAmount, maxPointsByOrderTotal))
     : 0;
   const pointsToSpend = orderEditSession
-    ? fixedEditPointsToSpend
+    ? discountsAllowed
+      ? fixedEditPointsToSpend
+      : 0
     : pointsEnabled
       ? maxPointsToSpend
       : 0;
   const totalToPay = Math.max(0, totalAfterCouponDiscount - pointsToSpend);
-  const checkoutHasDiscount = totalToPay < total;
+  const checkoutHasDiscount = discountsAllowed && totalToPay < total;
   const checkoutButtonLabel = submitting
     ? orderEditSession
       ? "Обновляем..."
@@ -835,10 +890,10 @@ export function CartPage() {
 
   useEffect(() => {
     setDeliveryMapSelection(null);
-    if (checkoutDraft.deliveryMethod !== "delivery" || !state.city) {
+    if (!isAddressDeliveryMethod || !state.city) {
       clearStoredDeliveryMapSelection();
     }
-  }, [checkoutDraft.deliveryMethod, state.city]);
+  }, [checkoutDraft.deliveryMethod, isAddressDeliveryMethod, state.city]);
 
   useEffect(() => {
     if (!deliveryMapSelection) return;
@@ -871,7 +926,7 @@ export function CartPage() {
   useEffect(() => {
     let cancelled = false;
 
-    if (!state.city) {
+    if (!state.city || !discountsAllowed) {
       setActivePromotionRules([]);
       return () => {
         cancelled = true;
@@ -892,7 +947,7 @@ export function CartPage() {
     return () => {
       cancelled = true;
     };
-  }, [state.city]);
+  }, [discountsAllowed, state.city]);
 
   useEffect(() => {
     let cancelled = false;
@@ -960,13 +1015,13 @@ export function CartPage() {
   }, [shouldShowFreeDeliveryRecommendations, state.city]);
 
   useEffect(() => {
-    if (orderEditSession) {
+    if (orderEditSession || !discountsAllowed) {
       setPointsEnabled(false);
       return;
     }
     if (maxPointsToSpend > 0) return;
     setPointsEnabled(false);
-  }, [maxPointsToSpend, orderEditSession]);
+  }, [discountsAllowed, maxPointsToSpend, orderEditSession]);
 
   useEffect(() => {
     if (promoCodesAvailable) return;
@@ -1023,8 +1078,7 @@ export function CartPage() {
     hasRequiredGuestPhone &&
     hasRequiredBlgDeliverySchedule &&
     hasRequiredDeliveryMapSelection &&
-    (checkoutDraft.deliveryMethod !== "delivery" ||
-      checkoutDraft.address.trim().length > 0);
+    (!isAddressDeliveryMethod || checkoutDraft.address.trim().length > 0);
 
   async function notify(message: string): Promise<void> {
     if (isTelegram) {
@@ -1040,7 +1094,7 @@ export function CartPage() {
 
   function updateCheckoutDraft(
     patch: Partial<{
-      deliveryMethod: "pickup" | "delivery";
+      deliveryMethod: DeliveryMethod;
       phone: string;
       address: string;
       comment: string;
@@ -1049,6 +1103,14 @@ export function CartPage() {
     }>,
   ): void {
     dispatch({ type: "checkout/set", patch });
+  }
+
+  function selectDeliveryMethod(deliveryMethod: DeliveryMethod): void {
+    updateCheckoutDraft({
+      deliveryMethod,
+      deliveryDate: deliveryMethod === "delivery" ? checkoutDraft.deliveryDate : "",
+      deliveryTimeSlot: deliveryMethod === "delivery" ? checkoutDraft.deliveryTimeSlot : "",
+    });
   }
 
   function updateDeliveryMapSelection(selection: DeliveryMapSelection | null): void {
@@ -1145,7 +1207,7 @@ export function CartPage() {
         setSubmitError("Р’С‹Р±РµСЂРёС‚Рµ РІСЂРµРјСЏ РґРѕСЃС‚Р°РІРєРё.");
         return;
       }
-      if (checkoutDraft.deliveryMethod === "delivery" && !trimmedAddress) {
+      if (isAddressDeliveryMethod && !trimmedAddress) {
         setSubmitError("Укажите адрес для доставки.");
         return;
       }
@@ -1180,7 +1242,9 @@ export function CartPage() {
       }
 
       const couponCodeForOrder =
-        orderEditSession || !promoCodesAvailable ? null : couponPreview?.code ?? null;
+        !discountsAllowed || orderEditSession || !promoCodesAvailable
+          ? null
+          : couponPreview?.code ?? null;
       if (
         !orderEditSession &&
         promoCodesAvailable &&
@@ -1191,11 +1255,13 @@ export function CartPage() {
         return;
       }
 
-      const pointsToSpendForOrder = orderEditSession
-        ? fixedEditPointsToSpend
-        : pointsEnabled
-          ? maxPointsToSpend
-          : 0;
+      const pointsToSpendForOrder = discountsAllowed
+        ? orderEditSession
+          ? fixedEditPointsToSpend
+          : pointsEnabled
+            ? maxPointsToSpend
+            : 0
+        : 0;
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -1306,87 +1372,112 @@ export function CartPage() {
       </div>
 
       <div className="space-y-3">
-        {state.cart.map((item) => (
-          <Card key={item.productId} className="border-border/70 bg-card">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-3">
-                <ProductImagePreview
-                  imageUrl={item.imageUrl}
-                  alt={item.title}
-                  loading="lazy"
-                  targetWidth={160}
-                  className="h-20 w-20 shrink-0 rounded-lg object-cover"
-                  placeholderClassName="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
-                />
+        {state.cart.map((item) => {
+          const itemUnitPrice = getCartItemUnitPriceForDeliveryMethod(
+            item,
+            checkoutDraft.deliveryMethod,
+          );
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">{item.title}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {formatPriceRub(item.price)} / шт
+          return (
+            <Card key={item.productId} className="border-border/70 bg-card">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <ProductImagePreview
+                    imageUrl={item.imageUrl}
+                    alt={item.title}
+                    loading="lazy"
+                    targetWidth={160}
+                    className="h-20 w-20 shrink-0 rounded-lg object-cover"
+                    placeholderClassName="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{item.title}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {formatPriceRub(itemUnitPrice)} / шт
+                        </div>
                       </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() =>
+                          dispatch({ type: "cart/remove", productId: item.productId })
+                        }
+                      >
+                        Удалить
+                      </Button>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() =>
-                        dispatch({ type: "cart/remove", productId: item.productId })
-                      }
-                    >
-                      Удалить
-                    </Button>
-                  </div>
 
-                  <div className="mt-3 flex items-center justify-between">
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        className="h-8 w-8"
-                        disabled={submitting}
-                        onClick={() =>
-                          dispatch({ type: "cart/dec", productId: item.productId })
-                        }
-                      >
-                        <Minus className="h-3.5 w-3.5" />
-                      </Button>
-                      <div className="min-w-9 text-center text-sm font-semibold">{item.qty}</div>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        className="h-8 w-8"
-                        disabled={submitting}
-                        onClick={() =>
-                          dispatch({ type: "cart/inc", productId: item.productId })
-                        }
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {formatPriceRub(item.price * item.qty)}
+                    <div className="mt-3 flex items-center justify-between">
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          className="h-8 w-8"
+                          disabled={submitting}
+                          onClick={() =>
+                            dispatch({ type: "cart/dec", productId: item.productId })
+                          }
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                        </Button>
+                        <div className="min-w-9 text-center text-sm font-semibold">
+                          {item.qty}
+                        </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          className="h-8 w-8"
+                          disabled={submitting}
+                          onClick={() =>
+                            dispatch({ type: "cart/inc", productId: item.productId })
+                          }
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <div className="text-sm font-semibold">
+                        {formatPriceRub(itemUnitPrice * item.qty)}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          );
+        })}
 
-        {showBlgDeliveryFeeCard ? (
-          <Card className="border-border/70 bg-card">
-            <CardContent className="p-4">
+        {showDeliveryTypeOptions ? (
+          <div className="space-y-2">
+            <button
+              type="button"
+              disabled={submitting}
+              aria-pressed={!isExpressDelivery}
+              className={`w-full rounded-lg border p-4 text-left transition-colors ${
+                !isExpressDelivery
+                  ? "border-sky-300/70 bg-sky-400/10"
+                  : "border-border/70 bg-card"
+              } ${submitting ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
+              onClick={() => selectDeliveryMethod("delivery")}
+            >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold">Доставка</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    Бесплатно от {formatPriceRub(deliveryPricing.freeDeliveryThresholdRub)}, иначе от{" "}
-                    {formatPriceRub(deliveryPricing.baseFeeRub)}
+                    {state.city === "blg" ? (
+                      <>
+                        Скидка {formatPriceRub(BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB)} от{" "}
+                        {formatPriceRub(deliveryPricing.freeDeliveryThresholdRub)}
+                      </>
+                    ) : (
+                      "Обычная доставка"
+                    )}
                   </div>
                   {matchedPeakSurchargeRule ? (
                     <div className="mt-1 text-xs font-medium text-amber-500">
@@ -1394,12 +1485,36 @@ export function CartPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="text-sm font-semibold">
-                  {deliveryFee === 0 ? "Бесплатно" : formatPriceRub(deliveryFee)}
+                <div className="shrink-0 text-sm font-semibold">
+                  {regularDeliveryFee === 0 ? "Бесплатно" : formatPriceRub(regularDeliveryFee)}
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </button>
+
+            <button
+              type="button"
+              disabled={submitting}
+              aria-pressed={isExpressDelivery}
+              className={`w-full rounded-lg border p-4 text-left transition-colors ${
+                isExpressDelivery
+                  ? "border-sky-300/70 bg-sky-400/10"
+                  : "border-border/70 bg-card"
+              } ${submitting ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
+              onClick={() => selectDeliveryMethod("express")}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold">Экспресс доставка</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Основная доставка + {formatPriceRub(EXPRESS_DELIVERY_SURCHARGE_RUB)}, от 30 минут
+                  </div>
+                </div>
+                <div className="shrink-0 text-sm font-semibold">
+                  {formatPriceRub(expressDeliveryFee)}
+                </div>
+              </div>
+            </button>
+          </div>
         ) : null}
 
         {promotionDiscountAmount > 0 ? (
@@ -1478,12 +1593,10 @@ export function CartPage() {
             <span className="text-xs font-semibold text-muted-foreground">Способ получения</span>
             <select
               className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-              value={checkoutDraft.deliveryMethod}
+              value={isAddressDeliveryMethod ? "delivery" : "pickup"}
               disabled={submitting}
               onChange={(e) =>
-                updateCheckoutDraft({
-                  deliveryMethod: e.target.value === "delivery" ? "delivery" : "pickup",
-                })
+                selectDeliveryMethod(e.target.value === "delivery" ? "delivery" : "pickup")
               }
             >
               <option value="pickup">Самовывоз</option>
@@ -1491,7 +1604,7 @@ export function CartPage() {
             </select>
           </label>
 
-          {checkoutDraft.deliveryMethod === "delivery" ? (
+          {isAddressDeliveryMethod ? (
             <div className="space-y-3">
               {showDeliveryMap && state.city ? (
                 <>
@@ -1687,52 +1800,54 @@ export function CartPage() {
             </div>
           ) : null}
 
-          {orderEditSession ? (
-            orderEditSession.discountAmount > 0 ? (
+          {discountsAllowed ? (
+            orderEditSession ? (
+              orderEditSession.discountAmount > 0 ? (
+                <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
+                  <div className="text-sm font-medium">
+                    Скидка баллами при сохранении: -{formatPriceRub(pointsToSpend)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Если сумма заказа станет меньше или сработает лимит {pointsMaxSpendPercent}%,
+                    лишние баллы автоматически вернутся на баланс.
+                  </div>
+                </div>
+              ) : null
+            ) : (
               <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
-                <div className="text-sm font-medium">
-                  Скидка баллами при сохранении: -{formatPriceRub(pointsToSpend)}
-                </div>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-input"
+                    checked={pointsEnabled}
+                    disabled={submitting || pointsLoading || maxPointsToSpend <= 0}
+                    onChange={(e) => setPointsEnabled(e.target.checked)}
+                  />
+                  <span>
+                    Использовать баллы ({pointsBalance})
+                    {maxPointsToSpend > 0
+                      ? `, спишется до ${pointsToSpend || maxPointsToSpend}`
+                      : ""}
+                  </span>
+                </label>
                 <div className="text-xs text-muted-foreground">
-                  Если сумма заказа станет меньше или сработает лимит {pointsMaxSpendPercent}%,
-                  лишние баллы автоматически вернутся на баланс.
+                  Можно оплатить до {pointsMaxSpendPercent}% корзины. Баллы действуют{" "}
+                  {pointsExpireAfterMonths} мес.
                 </div>
+                {pointsToSpend > 0 ? (
+                  <div className="text-xs text-muted-foreground">
+                    Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате:{" "}
+                    {formatPriceRub(totalToPay)}.
+                  </div>
+                ) : null}
+                {pointsError ? (
+                  <div className="text-xs text-destructive">
+                    Баллы временно недоступны: {pointsError}
+                  </div>
+                ) : null}
               </div>
-            ) : null
-          ) : (
-            <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-input"
-                  checked={pointsEnabled}
-                  disabled={submitting || pointsLoading || maxPointsToSpend <= 0}
-                  onChange={(e) => setPointsEnabled(e.target.checked)}
-                />
-                <span>
-                  Использовать баллы ({pointsBalance})
-                  {maxPointsToSpend > 0
-                    ? `, спишется до ${pointsToSpend || maxPointsToSpend}`
-                    : ""}
-                </span>
-              </label>
-              <div className="text-xs text-muted-foreground">
-                Можно оплатить до {pointsMaxSpendPercent}% корзины. Баллы действуют{" "}
-                {pointsExpireAfterMonths} мес.
-              </div>
-              {pointsToSpend > 0 ? (
-                <div className="text-xs text-muted-foreground">
-                  Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате:{" "}
-                  {formatPriceRub(totalToPay)}.
-                </div>
-              ) : null}
-              {pointsError ? (
-                <div className="text-xs text-destructive">
-                  Баллы временно недоступны: {pointsError}
-                </div>
-              ) : null}
-            </div>
-          )}
+            )
+          ) : null}
 
           {submitError ? (
             <Alert variant="destructive">
@@ -1779,7 +1894,7 @@ export function CartPage() {
         <Card className="border-border/70 bg-card">
           <CardContent className="space-y-3 p-4">
             <div className="text-xl font-semibold leading-tight text-foreground">
-              Любой товар до бесплатной доставки:
+              Любой товар до скидки на доставку:
             </div>
 
             {recommendationsLoading && freeDeliveryRecommendations.length === 0 ? (

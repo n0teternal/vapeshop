@@ -10,6 +10,7 @@ export type CatalogItem = {
   imageUrl: string | null;
   categorySlug: string;
   price: number;
+  regularPrice: number;
   inStock: boolean;
   promoOldPrice?: number | null;
   promoNewPrice?: number | null;
@@ -171,6 +172,7 @@ export async function fetchCatalogByCity(params: {
       imageUrl: product.image_url,
       categorySlug: product.category_slug,
       price: overridePrice ?? basePrice,
+      regularPrice: overridePrice ?? basePrice,
       inStock: row.in_stock === true,
     };
     items.push(item);

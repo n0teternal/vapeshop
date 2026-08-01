@@ -463,7 +463,7 @@ export function ProfilePage() {
                     {deliveryPricingSaving ? "Сохраняем..." : "Сохранить"}
                   </Button>
                   <div className="text-xs text-muted-foreground">
-                    Бесплатно от {deliveryPricing.freeDeliveryThresholdRub} ₽
+                    Скидка 150 ₽ от {deliveryPricing.freeDeliveryThresholdRub} ₽
                   </div>
                 </div>
               </>

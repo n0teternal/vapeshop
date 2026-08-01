@@ -221,6 +221,13 @@ function formatRub(value: number): string {
   }).format(value);
 }
 
+function formatDeliveryMethodLabel(value: string): string {
+  if (value === "pickup") return "Самовывоз";
+  if (value === "delivery") return "Доставка";
+  if (value === "express") return "Экспресс";
+  return value;
+}
+
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -2648,7 +2655,7 @@ function AdminOrdersView() {
                     {" • "}
                     {formatRub(o.total_price)}
                     {" • "}
-                    {o.delivery_method}
+                    {formatDeliveryMethodLabel(o.delivery_method)}
                   </div>
                 </div>
 

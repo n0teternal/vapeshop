@@ -44,6 +44,8 @@ const MAX_DISTANCE_KM = 100;
 
 export const DEFAULT_BLG_DELIVERY_FEE_RUB = 150;
 export const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
+export const BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB = 150;
+export const EXPRESS_DELIVERY_SURCHARGE_RUB = 200;
 
 const DEFAULT_DELIVERY_PRICING_BY_CITY: Record<DeliveryPricingCitySlug, DeliveryPricingSettings> = {
   vvo: {
@@ -388,8 +390,10 @@ export function calculateDeliveryFeeRub(params: {
   deliveryTimeSlot?: string | null;
   settings: DeliveryPricingSettings;
 }): number {
-  if (params.citySlug !== "blg" || params.deliveryMethod !== "delivery") return 0;
-  if (params.itemsSubtotalRub >= params.settings.freeDeliveryThresholdRub) return 0;
+  if (params.citySlug !== "blg") {
+    return params.deliveryMethod === "express" ? EXPRESS_DELIVERY_SURCHARGE_RUB : 0;
+  }
+  if (params.deliveryMethod !== "delivery" && params.deliveryMethod !== "express") return 0;
 
   const peakSurchargeRub = calculatePeakSurchargeRub({
     deliveryTimeSlot: params.deliveryTimeSlot,
@@ -401,8 +405,24 @@ export function calculateDeliveryFeeRub(params: {
     settings: params.settings,
   });
   if (matchedDistanceRule) {
-    return matchedDistanceRule.feeRub + peakSurchargeRub;
+    const paidDeliveryFee = matchedDistanceRule.feeRub + peakSurchargeRub;
+    if (params.deliveryMethod === "express") {
+      return paidDeliveryFee + EXPRESS_DELIVERY_SURCHARGE_RUB;
+    }
+    if (params.itemsSubtotalRub >= params.settings.freeDeliveryThresholdRub) {
+      return Math.max(0, paidDeliveryFee - BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB);
+    }
+    return paidDeliveryFee;
   }
 
-  return params.settings.baseFeeRub + peakSurchargeRub;
+  const paidDeliveryFee = params.settings.baseFeeRub + peakSurchargeRub;
+  if (params.deliveryMethod === "express") {
+    return paidDeliveryFee + EXPRESS_DELIVERY_SURCHARGE_RUB;
+  }
+
+  if (params.itemsSubtotalRub >= params.settings.freeDeliveryThresholdRub) {
+    return Math.max(0, paidDeliveryFee - BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB);
+  }
+
+  return paidDeliveryFee;
 }

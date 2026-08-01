@@ -15,6 +15,10 @@ import {
   buildOrderTelegramMessage,
   type TelegramOrderMessage,
 } from "./telegramMessage.js";
+import {
+  areDiscountsAllowedForDeliveryMethod,
+  isDeliveryAddressMethod,
+} from "./deliveryMethod.js";
 
 export type CitySlug = "vvo" | "blg";
 
@@ -269,6 +273,9 @@ export async function createOrder(params: {
   });
   const requested = normalizeItems(params.payload.items);
   const productIds = Array.from(requested.keys());
+  const discountsAllowed = areDiscountsAllowedForDeliveryMethod(
+    params.payload.deliveryMethod,
+  );
 
   const { data: city, error: cityError } = await supabase
     .from("cities")
@@ -282,7 +289,7 @@ export async function createOrder(params: {
   if (!city) {
     throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
   }
-  if (params.payload.citySlug === "vvo" && params.payload.couponCode) {
+  if (discountsAllowed && params.payload.citySlug === "vvo" && params.payload.couponCode) {
     throw new HttpError(
       400,
       "PROMO_CODES_CITY_DISABLED",
@@ -317,7 +324,7 @@ export async function createOrder(params: {
   );
   const productById = new Map<string, ProductRow>(productList.map((p) => [p.id, p]));
   const promoPriceByProductId =
-    params.allowPromoPrices === true
+    params.allowPromoPrices === true && discountsAllowed
       ? await loadActivePromoPricesByProductId({
           supabase,
           cityId: city.id,
@@ -369,20 +376,19 @@ export async function createOrder(params: {
     itemsSubtotal += unitPrice * qty;
   }
 
-  const promotionRules = await loadActivePromotionRules({ supabase, cityId: city.id });
-  const promotionDiscount = calculatePromotionDiscount({
-    rules: promotionRules,
-    lines,
-  });
-  const promotionDiscountAmount = promotionDiscount.discountAmount;
+  const promotionDiscountAmount = discountsAllowed
+    ? calculatePromotionDiscount({
+        rules: await loadActivePromotionRules({ supabase, cityId: city.id }),
+        lines,
+      }).discountAmount
+    : 0;
   const deliveryPricingSettings = await loadDeliveryPricingSettings({
     supabase,
     citySlug: params.payload.citySlug,
   });
   if (
     params.payload.citySlug === "blg" &&
-    params.payload.deliveryMethod === "delivery" &&
-    itemsSubtotal < deliveryPricingSettings.freeDeliveryThresholdRub &&
+    isDeliveryAddressMethod(params.payload.deliveryMethod) &&
     deliveryPricingSettings.rules.length > 0 &&
     !params.payload.deliveryLocation
   ) {
@@ -450,9 +456,10 @@ export async function createOrder(params: {
   }
 
   let promoReservation: Awaited<ReturnType<typeof reservePromoCode>> = null;
+  const couponCodeForOrder = discountsAllowed ? params.payload.couponCode : null;
   try {
     promoReservation = await reservePromoCode({
-      code: params.payload.couponCode,
+      code: couponCodeForOrder,
       orderTotal: totalAfterPromotionDiscount,
     });
   } catch (e) {
@@ -469,7 +476,9 @@ export async function createOrder(params: {
     0,
     totalAfterPromotionDiscount - couponDiscountAmount,
   );
-  const requestedPointsToSpend = Math.max(0, Math.trunc(params.payload.pointsToSpend));
+  const requestedPointsToSpend = discountsAllowed
+    ? Math.max(0, Math.trunc(params.payload.pointsToSpend))
+    : 0;
   const maxPointsByOrderTotal = getMaxPointsDiscountForTotal(totalAfterCouponDiscount);
   const discountAmount = Math.min(requestedPointsToSpend, maxPointsByOrderTotal);
   const totalAfterDiscount = Math.max(0, totalAfterCouponDiscount - discountAmount);

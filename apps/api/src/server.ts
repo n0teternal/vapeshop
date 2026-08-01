@@ -34,6 +34,10 @@ import {
   isBlgDeliveryTimeSlotOrderOpen,
   isValidIsoDate,
 } from "./order/deliverySchedule.js";
+import {
+  isDeliveryAddressMethod,
+  isOrderDeliveryMethod,
+} from "./order/deliveryMethod.js";
 import { sendOrderNotificationToChats } from "./order/sendOrderNotification.js";
 import {
   buildNotifyTargetRecords,
@@ -254,6 +258,9 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     throw new HttpError(400, "BAD_REQUEST", "deliveryMethod is required");
   }
   const normalizedDeliveryMethod = deliveryMethod.trim();
+  if (!isOrderDeliveryMethod(normalizedDeliveryMethod)) {
+    throw new HttpError(400, "BAD_REQUEST", "deliveryMethod is invalid");
+  }
 
   const phone = parseOptionalTrimmedString(value.phone, "phone");
   validatePhoneIfPresent(phone);
@@ -266,6 +273,10 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   );
   const deliveryLocation = parseOptionalDeliveryLocation(value.deliveryLocation);
   const couponCode = parseOptionalTrimmedString(value.couponCode, "couponCode");
+
+  if (isDeliveryAddressMethod(normalizedDeliveryMethod) && address === null) {
+    throw new HttpError(400, "BAD_REQUEST", "Укажите адрес для доставки.");
+  }
 
   if (citySlug === "blg" && normalizedDeliveryMethod === "delivery" && deliveryDate === null) {
     throw new HttpError(400, "BAD_REQUEST", "Р’С‹Р±РµСЂРёС‚Рµ РґР°С‚Сѓ РґРѕСЃС‚Р°РІРєРё.");
@@ -395,10 +406,10 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
     phone,
     address,
     comment,
-    deliveryDate,
-    deliveryTimeSlot,
+    deliveryDate: normalizedDeliveryMethod === "delivery" ? deliveryDate : null,
+    deliveryTimeSlot: normalizedDeliveryMethod === "delivery" ? deliveryTimeSlot : null,
     deliveryLocation:
-      normalizedDeliveryMethod === "delivery"
+      isDeliveryAddressMethod(normalizedDeliveryMethod)
         ? deliveryLocation
         : null,
     couponCode,

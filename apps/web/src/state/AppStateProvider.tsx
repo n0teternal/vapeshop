@@ -14,6 +14,7 @@ export type CartItem = {
   productId: string;
   title: string;
   price: number;
+  regularPrice?: number | null;
   categorySlug?: string | null;
   qty: number;
   imageUrl?: string | null;
@@ -28,7 +29,7 @@ export type FavoriteItem = {
   inStock: boolean;
 };
 
-export type DeliveryMethod = "pickup" | "delivery";
+export type DeliveryMethod = "pickup" | "delivery" | "express";
 
 export type CheckoutDraft = {
   phone: string;
@@ -130,6 +131,9 @@ function isCartItem(value: unknown): value is CartItem {
     typeof value.title === "string" &&
     typeof value.price === "number" &&
     Number.isFinite(value.price) &&
+    (value.regularPrice === undefined ||
+      value.regularPrice === null ||
+      (typeof value.regularPrice === "number" && Number.isFinite(value.regularPrice))) &&
     (value.categorySlug === undefined ||
       value.categorySlug === null ||
       typeof value.categorySlug === "string") &&
@@ -158,7 +162,7 @@ function isFavoriteItem(value: unknown): value is FavoriteItem {
 }
 
 function isDeliveryMethod(value: unknown): value is DeliveryMethod {
-  return value === "pickup" || value === "delivery";
+  return value === "pickup" || value === "delivery" || value === "express";
 }
 
 function sanitizeCheckoutDraft(value: unknown): CheckoutDraft {
@@ -300,6 +304,7 @@ function reducer(state: AppState, action: Action): AppState {
               ? {
                   ...x,
                   price: action.item.price,
+                  regularPrice: x.regularPrice ?? action.item.regularPrice ?? null,
                   categorySlug: x.categorySlug ?? action.item.categorySlug ?? null,
                   qty: x.qty + 1,
                   imageUrl: x.imageUrl ?? action.item.imageUrl ?? null,
@@ -315,6 +320,7 @@ function reducer(state: AppState, action: Action): AppState {
           ...state.cart,
           {
             ...action.item,
+            regularPrice: action.item.regularPrice ?? null,
             categorySlug: action.item.categorySlug ?? null,
             qty: 1,
             imageUrl: action.item.imageUrl ?? null,

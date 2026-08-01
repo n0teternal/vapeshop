@@ -9,6 +9,10 @@ import { HttpError, isHttpError } from "../httpError.js";
 import { decodeCsvBuffer } from "../import/decodeCsvBuffer.js";
 import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import { parseOrderComment } from "../order/orderComment.js";
+import {
+  formatDeliveryMethodLabel,
+  isDeliveryAddressMethod,
+} from "../order/deliveryMethod.js";
 import { importProductsCsv } from "../import/productsCsv.js";
 import { importPromoProductsCsv } from "../import/promoProductsCsv.js";
 import { normalizePromoCode } from "../promoCodes/service.js";
@@ -1088,7 +1092,7 @@ export async function buildBusinessReportWorkbook(
       "Клиент": customer,
       "tg_user_id": order.tg_user_id,
       "username": order.tg_username ? `@${order.tg_username}` : "",
-      "Тип доставки": order.delivery_method,
+      "Тип доставки": formatDeliveryMethodLabel(order.delivery_method),
       "Телефон": parsedComment.phone ?? "",
       "Адрес": parsedComment.address ?? "",
       "Дата доставки": parsedComment.deliveryDate ?? "",
@@ -1147,7 +1151,7 @@ export async function buildBusinessReportWorkbook(
     if (referral) cityStat.referralOrders += 1;
     cityStat.qty += itemQty;
     cityStat.customers.add(order.tg_user_id);
-    if (order.delivery_method === "delivery") cityStat.delivery += 1;
+    if (isDeliveryAddressMethod(order.delivery_method)) cityStat.delivery += 1;
     else cityStat.pickup += 1;
     cityStats.set(cityKey, cityStat);
 

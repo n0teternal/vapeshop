@@ -3,6 +3,7 @@ import {
   buildConversationRequestButton,
   buildConversationRequestConfirmButton,
 } from "./conversationRequest.js";
+import { formatDeliveryMethodLabel } from "./deliveryMethod.js";
 import { parseOrderComment } from "./orderComment.js";
 
 export type OrderStatus = "new" | "processing" | "done" | "cancelled";
@@ -172,7 +173,7 @@ function buildOrderBody(params: OrderMessageBaseParams): string {
     `<b>Позиции</b>\n` +
     `${itemsLines}${discountsPart}\n\n` +
     `<b>Итого:</b> ${formatRub(params.totalPrice)}${totalSuffix}\n` +
-    `Получение: ${escapeHtml(params.deliveryMethod)}` +
+    `Получение: ${escapeHtml(formatDeliveryMethodLabel(params.deliveryMethod))}` +
     paymentPart +
     commentPart +
     `\n\nUUID: <code>${escapeHtml(params.orderId)}</code>`

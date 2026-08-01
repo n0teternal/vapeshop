@@ -1,5 +1,6 @@
 import { isValidIsoDate } from "./deliverySchedule.js";
 import type { DeliveryLocationPayload } from "./createOrder.js";
+import { isDeliveryAddressMethod } from "./deliveryMethod.js";
 
 export type OrderCommentPayload = {
   citySlug: "vvo" | "blg";
@@ -40,7 +41,7 @@ export function buildOrderComment(params: OrderCommentPayload): string | null {
     lines.push(`Телефон: ${trimmedPhone}`);
   }
 
-  if (params.deliveryMethod !== "delivery") {
+  if (!isDeliveryAddressMethod(params.deliveryMethod)) {
     if (trimmedComment.length > 0) {
       lines.push(trimmedComment);
     }

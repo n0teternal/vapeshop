@@ -13,6 +13,12 @@ import {
   isCancellationLockedByDeliveryWindow,
   type DeliveryCitySlug,
 } from "./deliverySchedule.js";
+import {
+  areDiscountsAllowedForDeliveryMethod,
+  isDeliveryAddressMethod,
+  isOrderDeliveryMethod,
+  type OrderDeliveryMethod,
+} from "./deliveryMethod.js";
 import type { CitySlug, CreateOrderPayload } from "./createOrder.js";
 import { buildOrderComment, parseOrderComment } from "./orderComment.js";
 
@@ -89,13 +95,14 @@ export type OrderEditCartItem = {
   title: string;
   categorySlug: string | null;
   price: number;
+  regularPrice: number;
   qty: number;
   imageUrl: string | null;
 };
 
 export type OrderEditCheckoutDraft = {
   phone: string;
-  deliveryMethod: "pickup" | "delivery";
+  deliveryMethod: OrderDeliveryMethod;
   address: string;
   comment: string;
   deliveryDate: string;
@@ -502,10 +509,14 @@ export async function startOrderEditSession(params: {
         .filter((productId): productId is string => typeof productId === "string"),
     ),
   );
+  const deliveryMethod = isOrderDeliveryMethod(order.delivery_method)
+    ? order.delivery_method
+    : "pickup";
+  const discountsAllowed = areDiscountsAllowedForDeliveryMethod(deliveryMethod);
   const [productsById, inventoryByProductId, promoPriceByProductId] = await Promise.all([
     loadProductsById(productIds),
     loadInventoryByProductId({ cityId: city.id, productIds }),
-    params.allowPromoPrices === true
+    params.allowPromoPrices === true && discountsAllowed
       ? loadActivePromoPricesByProductId({ cityId: city.id, productIds })
       : Promise.resolve(new Map<string, number>()),
   ]);
@@ -515,19 +526,22 @@ export async function startOrderEditSession(params: {
     .map((row) => {
       const product = productsById.get(row.product_id);
       const inventory = inventoryByProductId.get(row.product_id);
-      const price =
-        promoPriceByProductId.get(row.product_id) ??
-        (inventory?.price_override === null || inventory?.price_override === undefined
+      const regularPrice =
+        inventory?.price_override === null || inventory?.price_override === undefined
           ? product
             ? numberFromUnknown(product.base_price, "products.base_price")
             : numberFromUnknown(row.unit_price, "order_items.unit_price")
-          : numberFromUnknown(inventory.price_override, "inventory.price_override"));
+          : numberFromUnknown(inventory.price_override, "inventory.price_override");
+      const price =
+        promoPriceByProductId.get(row.product_id) ??
+        regularPrice;
 
       return {
         productId: row.product_id,
         title: product?.title ?? "Unknown",
         categorySlug: product?.category_slug ?? null,
         price,
+        regularPrice,
         qty: row.qty,
         imageUrl: product?.image_url ?? null,
       };
@@ -539,13 +553,13 @@ export async function startOrderEditSession(params: {
     city: city.citySlug,
     expiresAt,
     discountAmount:
-      order.discount_amount === null || order.discount_amount === undefined
+      !discountsAllowed || order.discount_amount === null || order.discount_amount === undefined
         ? 0
         : Math.max(0, Math.trunc(numberFromUnknown(order.discount_amount, "orders.discount_amount"))),
     cart,
     checkoutDraft: {
       phone: parsedComment.phone ?? "",
-      deliveryMethod: order.delivery_method === "delivery" ? "delivery" : "pickup",
+      deliveryMethod,
       address: parsedComment.address ?? "",
       comment: parsedComment.comment ?? "",
       deliveryDate: parsedComment.deliveryDate ?? "",
@@ -589,6 +603,9 @@ export async function applyOrderEdit(params: {
   if (params.payload.citySlug !== city.citySlug) {
     throw new HttpError(409, "ORDER_CITY_MISMATCH", "Edited order must stay in the same city");
   }
+  const discountsAllowed = areDiscountsAllowedForDeliveryMethod(
+    params.payload.deliveryMethod,
+  );
 
   const sessionExpiresAtMs =
     typeof order.edit_session_expires_at === "string"
@@ -625,7 +642,7 @@ export async function applyOrderEdit(params: {
   const [productsById, inventoryByProductId, promoPriceByProductId] = await Promise.all([
     loadProductsById(productIds),
     loadInventoryByProductId({ cityId: city.id, productIds }),
-    params.allowPromoPrices === true
+    params.allowPromoPrices === true && discountsAllowed
       ? loadActivePromoPricesByProductId({ cityId: city.id, productIds })
       : Promise.resolve(new Map<string, number>()),
   ]);
@@ -684,16 +701,28 @@ export async function applyOrderEdit(params: {
     itemsSubtotal += unitPrice * requestedQty;
   }
 
-  const promotionRules = await loadActivePromotionRules({ supabase, cityId: city.id });
-  const promotionDiscount = calculatePromotionDiscount({
-    rules: promotionRules,
-    lines,
-  });
-  const promotionDiscountAmount = promotionDiscount.discountAmount;
+  const promotionDiscountAmount = discountsAllowed
+    ? calculatePromotionDiscount({
+        rules: await loadActivePromotionRules({ supabase, cityId: city.id }),
+        lines,
+      }).discountAmount
+    : 0;
   const deliveryPricingSettings = await loadDeliveryPricingSettings({
     supabase,
     citySlug: params.payload.citySlug,
   });
+  if (
+    params.payload.citySlug === "blg" &&
+    isDeliveryAddressMethod(params.payload.deliveryMethod) &&
+    deliveryPricingSettings.rules.length > 0 &&
+    !params.payload.deliveryLocation
+  ) {
+    throw new HttpError(
+      400,
+      "DELIVERY_DISTANCE_REQUIRED",
+      "Нажмите поиск рядом с адресом, чтобы посчитать расстояние и доставку.",
+    );
+  }
   const deliveryFee = calculateDeliveryFeeRub({
     citySlug: params.payload.citySlug,
     deliveryMethod: params.payload.deliveryMethod,
@@ -712,10 +741,12 @@ export async function applyOrderEdit(params: {
     order.discount_amount === null || order.discount_amount === undefined
       ? 0
       : Math.max(0, Math.trunc(numberFromUnknown(order.discount_amount, "orders.discount_amount")));
-  const nextDiscountAmount = Math.min(
-    previousDiscountAmount,
-    getMaxPointsDiscountForTotal(totalAfterPromotionDiscount),
-  );
+  const nextDiscountAmount = discountsAllowed
+    ? Math.min(
+        previousDiscountAmount,
+        getMaxPointsDiscountForTotal(totalAfterPromotionDiscount),
+      )
+    : 0;
   const totalAfterDiscount = Math.max(0, totalAfterPromotionDiscount - nextDiscountAmount);
 
   const inventoryUpdates: RestorableInventoryUpdate[] = [];
@@ -840,6 +871,7 @@ export async function applyOrderEdit(params: {
       total_price: totalAfterDiscount,
       total_before_discount: totalBeforeDiscount,
       promotion_discount_amount: promotionDiscountAmount,
+      ...(discountsAllowed ? {} : { coupon_id: null, coupon_discount_amount: 0 }),
       discount_amount: nextDiscountAmount,
       total_after_discount: totalAfterDiscount,
       edited_at: nowIso,

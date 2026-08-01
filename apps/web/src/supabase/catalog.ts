@@ -30,6 +30,7 @@ export type CatalogItem = {
   imageUrl: string | null;
   categorySlug: string;
   price: number;
+  regularPrice: number;
   inStock: boolean;
   promoOldPrice?: number | null;
   promoNewPrice?: number | null;

@@ -4,6 +4,7 @@ import {
   isCancellationLockedByDeliveryWindow,
   type DeliveryCitySlug,
 } from "./deliverySchedule.js";
+import { formatDeliveryMethodLabel } from "./deliveryMethod.js";
 import type { OrderStatus } from "./telegramMessage.js";
 
 type CustomerOrderRow = {
@@ -195,7 +196,7 @@ export async function listCustomerOrders(tgUserId: number): Promise<CustomerOrde
         "orders.total_after_discount",
       ),
       createdAt: row.created_at,
-      deliveryMethod: row.delivery_method,
+      deliveryMethod: formatDeliveryMethodLabel(row.delivery_method),
       comment: row.comment,
       canCancel,
       cancelDisabledReason,
