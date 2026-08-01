@@ -139,6 +139,7 @@ const DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME =
   "border-sky-300/70 focus:ring-sky-200/70 focus-visible:ring-sky-200/70";
 const DELIVERY_MAP_SELECTION_STORAGE_KEY = "vapeshop:cart:delivery-map-selection:v1";
 const DELIVERY_MAP_SELECTION_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
+const DELIVERY_DISTANCE_DEBUG_TG_USER_ID = 1208488286;
 
 const CITY_UTC_OFFSET_MINUTES: Record<City, number> = {
   vvo: 10 * 60,
@@ -667,6 +668,8 @@ export function CartPage() {
   const discountsAllowed = !isExpressDelivery;
   const showDeliveryMap =
     state.city === "blg" && isAddressDeliveryMethod;
+  const showDeliveryDistanceDebug =
+    isTelegram && webApp.initDataUnsafe?.user?.id === DELIVERY_DISTANCE_DEBUG_TG_USER_ID;
   const requiresGuestPhone = !isTelegram && !orderEditSession;
   const hasRequiredGuestPhone =
     !requiresGuestPhone || isValidPhoneInput(checkoutDraft.phone);
@@ -1614,7 +1617,7 @@ export function CartPage() {
                     disabled={submitting}
                     required
                     inputClassName={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
-                    showDistanceStatus
+                    showDistanceStatus={showDeliveryDistanceDebug}
                     restoredSelection={confirmedDeliveryMapSelection}
                     onAddressChange={(address) => updateCheckoutDraft({ address })}
                     onSelectionChange={updateDeliveryMapSelection}

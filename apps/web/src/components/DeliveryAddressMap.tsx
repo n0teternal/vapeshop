@@ -5,7 +5,7 @@ import {
   YANDEX_MAPS_API_KEY,
   YANDEX_MAPS_SUGGEST_API_KEY,
 } from "../config";
-import { ApiError, apiGet } from "../api/client";
+import { apiGet } from "../api/client";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
@@ -32,24 +32,8 @@ type DeliveryGeocodeResponse = {
   lon: number;
 };
 
-type DeliveryDistancePreviewResponse = {
-  address: string;
-  distanceKm: number;
-  source: "geosuggest";
-};
-
-type DeliveryDistancePreview = {
-  address: string;
-  distanceKm: number;
-};
-
-type AddressSearchOptions = {
-  showErrors?: boolean;
-};
-
 type AddressSearchAttempt = {
   found: boolean;
-  errorMessage: string | null;
 };
 
 type AddressSuggestion = {
@@ -354,11 +338,8 @@ export function DeliveryAddressMap({
   const [ymapsApi, setYmapsApi] = useState<YMapsApi | null>(null);
   const [localAddress, setLocalAddress] = useState(address);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
-  const [selection, setSelection] = useState<DeliveryMapSelection | null>(null);
-  const [distancePreview, setDistancePreview] = useState<DeliveryDistancePreview | null>(null);
   const [mapOpen, setMapOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [mapError, setMapError] = useState<string | null>(null);
 
   const origin = DELIVERY_ORIGINS[city];
   const originCoords = useMemo<YMapsCoords>(() => [origin.lat, origin.lon], [origin.lat, origin.lon]);
@@ -370,11 +351,9 @@ export function DeliveryAddressMap({
 
   useEffect(() => {
     let cancelled = false;
-    setMapError(null);
 
     if (!mapConfigured) {
       setYmapsApi(null);
-      setMapError("Добавь VITE_YANDEX_MAPS_API_KEY, чтобы включить карту.");
       return () => {
         cancelled = true;
       };
@@ -385,10 +364,9 @@ export function DeliveryAddressMap({
         if (cancelled) return;
         setYmapsApi(api);
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (cancelled) return;
         setYmapsApi(null);
-        setMapError(error instanceof Error ? error.message : "Не удалось загрузить карту.");
       });
 
     return () => {
@@ -498,9 +476,6 @@ export function DeliveryAddressMap({
   useEffect(() => {
     if (!restoredSelection) return;
 
-    setSelection(restoredSelection);
-    setDistancePreview(null);
-    setMapError(null);
     setLocalAddress(restoredSelection.address);
     setCustomerPlacemark([restoredSelection.lat, restoredSelection.lon]);
     // Restores a confirmed selection owned by the parent cart state.
@@ -519,10 +494,7 @@ export function DeliveryAddressMap({
 
     setCustomerPlacemark(coords);
     setLocalAddress(addressLine);
-    setSelection(nextSelection);
-    setDistancePreview(null);
     setSuggestions([]);
-    setMapError(null);
     onAddressChange(addressLine);
     onSelectionChange(nextSelection);
   }
@@ -531,25 +503,19 @@ export function DeliveryAddressMap({
     if (!ymapsApi || disabled) return;
 
     setLoading(true);
-    setMapError(null);
     try {
       const result = await ymapsApi.geocode(coords, { results: 1 });
       const geoObject = result.geoObjects.get(0);
       const nextAddress = geoObject ? getGeoObjectAddress(geoObject, fallbackAddress) : fallbackAddress;
       applyDeliverySelection(nextAddress, coords);
     } catch {
-      setMapError("Не удалось получить адрес по точке.");
+      // The parent form still validates the selected address before submit.
     } finally {
       setLoading(false);
     }
   }
 
-  async function searchAddressViaApi(
-    query: string,
-    options: AddressSearchOptions = {},
-  ): Promise<AddressSearchAttempt> {
-    const showErrors = options.showErrors ?? true;
-
+  async function searchAddressViaApi(query: string): Promise<AddressSearchAttempt> {
     try {
       const search = new URLSearchParams({
         citySlug: city,
@@ -562,67 +528,18 @@ export function DeliveryAddressMap({
       if (!isValidCoords(coords)) {
         return {
           found: false,
-          errorMessage: "Геокодер вернул некорректные координаты.",
         };
       }
 
       applyDeliverySelection(result.address || query, coords);
-      return { found: true, errorMessage: null };
-    } catch (error) {
-      if (error instanceof ApiError) {
-        if (
-          error.code === "YANDEX_GEOCODER_NOT_CONFIGURED" ||
-          error.code === "YANDEX_GEOCODER_ERROR" ||
-          error.code === "ADDRESS_NOT_FOUND"
-        ) {
-          return { found: false, errorMessage: showErrors ? error.message : null };
-        }
-      }
-      return { found: false, errorMessage: null };
-    }
-  }
-
-  async function previewDistanceViaApi(
-    query: string,
-    options: AddressSearchOptions = {},
-  ): Promise<AddressSearchAttempt> {
-    const showErrors = options.showErrors ?? true;
-
-    try {
-      const search = new URLSearchParams({
-        citySlug: city,
-        address: query,
-        originLat: String(origin.lat),
-        originLon: String(origin.lon),
-      });
-      const result = await apiGet<DeliveryDistancePreviewResponse>(
-        `/api/delivery/distance-preview?${search.toString()}`,
-      );
-
-      setDistancePreview({
-        address: result.address || query,
-        distanceKm: result.distanceKm,
-      });
-      setMapError(null);
-      return { found: true, errorMessage: null };
-    } catch (error) {
-      if (error instanceof ApiError) {
-        if (error.code === "YANDEX_GEOSUGGEST_NOT_CONFIGURED") {
-          return { found: false, errorMessage: null };
-        }
-        if (error.code === "YANDEX_GEOSUGGEST_NETWORK") {
-          return { found: false, errorMessage: null };
-        }
-        if (error.code === "YANDEX_GEOSUGGEST_ERROR" || error.code === "ADDRESS_NOT_FOUND") {
-          return { found: false, errorMessage: showErrors ? error.message : null };
-        }
-      }
-      return { found: false, errorMessage: null };
+      return { found: true };
+    } catch {
+      return { found: false };
     }
   }
 
   async function searchAddressViaYmaps(query: string): Promise<AddressSearchAttempt> {
-    if (!ymapsApi) return { found: false, errorMessage: null };
+    if (!ymapsApi) return { found: false };
 
     const searchQueries = buildAddressSearchQueries(city, query);
 
@@ -638,61 +555,29 @@ export function DeliveryAddressMap({
       if (!isValidCoords(coords)) continue;
 
       applyDeliverySelection(getGeoObjectAddress(geoObject, query), coords);
-      return { found: true, errorMessage: null };
+      return { found: true };
     }
 
-    return { found: false, errorMessage: null };
+    return { found: false };
   }
 
-  async function searchAddress(
-    nextAddress = localAddress,
-    options: AddressSearchOptions = {},
-  ): Promise<void> {
-    const showErrors = options.showErrors ?? true;
+  async function searchAddress(nextAddress = localAddress): Promise<void> {
     const query = nextAddress.trim();
     if (!query || disabled) return;
 
     setLoading(true);
-    setMapError(null);
-    setDistancePreview(null);
     try {
       const ymapsAttempt = await searchAddressViaYmaps(query);
       if (ymapsAttempt.found) return;
 
       if (!ymapsApi) {
-        const apiAttempt = await searchAddressViaApi(query, { showErrors });
-        if (apiAttempt.found) return;
-
-        const previewAttempt = await previewDistanceViaApi(query, { showErrors });
-        if (previewAttempt.found) return;
-
-        if (showErrors) {
-          setMapError(
-            previewAttempt.errorMessage ??
-              apiAttempt.errorMessage ??
-              "Карта еще загружается. Попробуй еще раз через пару секунд.",
-          );
-        }
+        await searchAddressViaApi(query);
         return;
       }
 
-      const apiAttempt = await searchAddressViaApi(query, { showErrors });
-      if (apiAttempt.found) return;
-
-      const previewAttempt = await previewDistanceViaApi(query, { showErrors });
-      if (previewAttempt.found) return;
-
-      if (showErrors) {
-        setMapError(
-          previewAttempt.errorMessage ??
-            apiAttempt.errorMessage ??
-            "Адрес не найден. Попробуй добавить улицу, дом и город.",
-        );
-      }
+      await searchAddressViaApi(query);
     } catch {
-      if (showErrors) {
-        setMapError("Не удалось найти адрес.");
-      }
+      // The parent form validates the address before submit.
     } finally {
       setLoading(false);
     }
@@ -700,9 +585,6 @@ export function DeliveryAddressMap({
 
   function handleAddressInput(value: string): void {
     setLocalAddress(value);
-    setSelection(null);
-    setDistancePreview(null);
-    setMapError(null);
     onAddressChange(value);
     onSelectionChange(null);
   }
@@ -764,11 +646,9 @@ export function DeliveryAddressMap({
               onClick={() => {
                 setLocalAddress(suggestion.value);
                 onAddressChange(suggestion.value);
-                setSelection(null);
                 onSelectionChange(null);
                 setSuggestions([]);
-                setMapError(null);
-                void searchAddress(suggestion.value, { showErrors: false });
+                void searchAddress(suggestion.value);
               }}
             >
               <span className="line-clamp-2">{suggestion.label}</span>
@@ -789,49 +669,34 @@ export function DeliveryAddressMap({
         </div>
       ) : null}
 
-      {showDistanceStatus && (loading || selection || distancePreview) ? (
+      {showDistanceStatus && (loading || restoredSelection) ? (
         <div
           className={`flex min-h-11 items-start gap-2 rounded-md border px-3 py-2 text-xs ${
-            selection
-              ? selection.zone.toneClassName
-              : distancePreview
-                ? "border-amber-300/40 bg-amber-400/10 text-amber-400"
-              : loading
-                ? "border-sky-300/40 bg-sky-400/10 text-sky-400"
-                : "border-border/70 bg-background/55 text-muted-foreground"
+            restoredSelection
+              ? restoredSelection.zone.toneClassName
+              : "border-sky-300/40 bg-sky-400/10 text-sky-400"
           }`}
         >
-          {selection ? (
+          {restoredSelection ? (
             <Navigation className="mt-0.5 h-4 w-4 shrink-0" />
-          ) : distancePreview ? (
-            <Navigation className="mt-0.5 h-4 w-4 shrink-0" />
-          ) : loading ? (
-            <Search className="mt-0.5 h-4 w-4 shrink-0" />
           ) : (
-            <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
+            <Search className="mt-0.5 h-4 w-4 shrink-0" />
           )}
           <span className="min-w-0">
             <span className="block font-semibold">
-              {selection
-                ? `Расстояние от точки: ${formatDistanceKm(selection.distanceKm)}`
-                : distancePreview
-                  ? `Примерное расстояние от точки: ${formatDistanceKm(distancePreview.distanceKm)}`
-                : loading
-                  ? "Считаю расстояние..."
-                  : "Расстояние не посчитано"}
+              {restoredSelection
+                ? `Расстояние от точки: ${formatDistanceKm(restoredSelection.distanceKm)}`
+                : "Считаю расстояние..."}
             </span>
             <span className="mt-0.5 block text-[11px] opacity-80">
-              {selection
-                ? `${origin.label} • ${selection.zone.title} • ${selection.zone.feeHint}`
-                : distancePreview
-                  ? `${origin.label} • через подсказки Яндекса • координаты пока не получены`
-                : loading
-                  ? localAddress
-                  : mapError}
+              {restoredSelection
+                ? `${origin.label} • ${restoredSelection.zone.title} • ${restoredSelection.zone.feeHint}`
+                : localAddress}
             </span>
           </span>
         </div>
       ) : null}
+
     </div>
   );
 }
