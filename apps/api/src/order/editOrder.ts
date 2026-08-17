@@ -602,6 +602,7 @@ export async function applyOrderEdit(params: {
   payload: CreateOrderPayload;
   allowPromoPrices?: boolean;
   skipEditSessionExpiryCheck?: boolean;
+  adminItemsOnly?: boolean;
 }): Promise<{ orderId: string }> {
   const supabase = createServiceSupabaseClient();
   const order = await loadOrder({
@@ -611,12 +612,33 @@ export async function applyOrderEdit(params: {
       : {}),
   });
   const city = await loadOrderCity(order.city_id);
+  const payload = params.adminItemsOnly
+    ? (() => {
+        const parsedComment = parseOrderComment(order.comment);
+        const deliveryMethod = isOrderDeliveryMethod(order.delivery_method)
+          ? order.delivery_method
+          : params.payload.deliveryMethod;
+        return {
+          ...params.payload,
+          citySlug: city.citySlug,
+          deliveryMethod,
+          phone: parsedComment.phone,
+          address: parsedComment.address,
+          comment: parsedComment.comment,
+          deliveryDate: parsedComment.deliveryDate,
+          deliveryTimeSlot: parsedComment.deliveryTimeSlot,
+          deliveryLocation: null,
+          couponCode: null,
+          pointsToSpend: 0,
+        };
+      })()
+    : params.payload;
 
-  if (params.payload.citySlug !== city.citySlug) {
+  if (payload.citySlug !== city.citySlug) {
     throw new HttpError(409, "ORDER_CITY_MISMATCH", "Edited order must stay in the same city");
   }
   const discountsAllowed = areDiscountsAllowedForDeliveryMethod(
-    params.payload.deliveryMethod,
+    payload.deliveryMethod,
   );
 
   if (params.skipEditSessionExpiryCheck !== true) {
@@ -633,7 +655,7 @@ export async function applyOrderEdit(params: {
     }
   }
 
-  const requested = normalizeItems(params.payload.items);
+  const requested = normalizeItems(payload.items);
   const previousOrderItems = await loadOrderItems(order.id);
   const currentQtyByProductId = new Map<string, number>();
   const currentUnitPriceByProductId = new Map<string, number>();
@@ -726,14 +748,14 @@ export async function applyOrderEdit(params: {
     : 0;
   const deliveryPricingSettings = await loadDeliveryPricingSettings({
     supabase,
-    citySlug: params.payload.citySlug,
+    citySlug: payload.citySlug,
   });
   if (
     config.features.deliveryUpgradesEnabled &&
-    params.payload.citySlug === "blg" &&
-    isDeliveryAddressMethod(params.payload.deliveryMethod) &&
+    payload.citySlug === "blg" &&
+    isDeliveryAddressMethod(payload.deliveryMethod) &&
     deliveryPricingSettings.rules.length > 0 &&
-    !params.payload.deliveryLocation
+    !payload.deliveryLocation
   ) {
     throw new HttpError(
       400,
@@ -742,11 +764,11 @@ export async function applyOrderEdit(params: {
     );
   }
   const deliveryFee = calculateDeliveryFeeRub({
-    citySlug: params.payload.citySlug,
-    deliveryMethod: params.payload.deliveryMethod,
+    citySlug: payload.citySlug,
+    deliveryMethod: payload.deliveryMethod,
     itemsSubtotalRub: itemsSubtotal,
-    distanceKm: params.payload.deliveryLocation?.distanceKm ?? null,
-    deliveryTimeSlot: params.payload.deliveryTimeSlot,
+    distanceKm: payload.deliveryLocation?.distanceKm ?? null,
+    deliveryTimeSlot: payload.deliveryTimeSlot,
     settings: deliveryPricingSettings,
   });
   const totalBeforeDiscount = itemsSubtotal + deliveryFee;
@@ -876,12 +898,12 @@ export async function applyOrderEdit(params: {
     }
   }
 
-  const orderComment = buildOrderComment(params.payload);
+  const orderComment = buildOrderComment(payload);
   const nowIso = new Date().toISOString();
   const { error: updateOrderError } = await supabase
     .from("orders")
     .update({
-      delivery_method: params.payload.deliveryMethod,
+      delivery_method: payload.deliveryMethod,
       comment: orderComment,
       status: "new",
       total_price: totalAfterDiscount,

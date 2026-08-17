@@ -1297,30 +1297,36 @@ export function CartPage() {
       const res = await fetch(buildApiUrl(requestPath), {
         method: orderEditSession ? "PUT" : "POST",
         headers,
-        body: JSON.stringify({
-          citySlug: state.city,
-          deliveryMethod: effectiveDeliveryMethod,
-          phone: trimmedPhone || null,
-          address: trimmedAddress || null,
-          comment: checkoutDraft.comment.trim() || null,
-          deliveryDate: showBlgDeliverySchedule ? checkoutDraft.deliveryDate || null : null,
-          deliveryTimeSlot: showBlgDeliverySchedule
-            ? checkoutDraft.deliveryTimeSlot || null
-            : null,
-          deliveryLocation:
-            showDeliveryMap && confirmedDeliveryMapSelection
-              ? {
-                  address: confirmedDeliveryMapSelection.address,
-                  lat: confirmedDeliveryMapSelection.lat,
-                  lon: confirmedDeliveryMapSelection.lon,
-                  distanceKm: confirmedDeliveryMapSelection.distanceKm,
-                  zone: confirmedDeliveryMapSelection.zone.id,
-                }
-              : null,
-          couponCode: couponCodeForOrder,
-          pointsToSpend: pointsToSpendForOrder,
-          items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
-        }),
+        body: JSON.stringify(
+          isAdminOrderEditSession
+            ? {
+                items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
+              }
+            : {
+                citySlug: state.city,
+                deliveryMethod: effectiveDeliveryMethod,
+                phone: trimmedPhone || null,
+                address: trimmedAddress || null,
+                comment: checkoutDraft.comment.trim() || null,
+                deliveryDate: showBlgDeliverySchedule ? checkoutDraft.deliveryDate || null : null,
+                deliveryTimeSlot: showBlgDeliverySchedule
+                  ? checkoutDraft.deliveryTimeSlot || null
+                  : null,
+                deliveryLocation:
+                  showDeliveryMap && confirmedDeliveryMapSelection
+                    ? {
+                        address: confirmedDeliveryMapSelection.address,
+                        lat: confirmedDeliveryMapSelection.lat,
+                        lon: confirmedDeliveryMapSelection.lon,
+                        distanceKm: confirmedDeliveryMapSelection.distanceKm,
+                        zone: confirmedDeliveryMapSelection.zone.id,
+                      }
+                    : null,
+                couponCode: couponCodeForOrder,
+                pointsToSpend: pointsToSpendForOrder,
+                items: state.cart.map((x) => ({ productId: x.productId, qty: x.qty })),
+              },
+        ),
       });
 
       const json = (await res.json().catch(() => null)) as unknown;
@@ -1589,8 +1595,10 @@ export function CartPage() {
         </CardHeader>
 
         <CardContent className="space-y-3">
-          {requiresGuestPhone ? (
-            <label className="grid gap-1.5 text-sm">
+          {!isAdminOrderEditSession ? (
+            <>
+              {requiresGuestPhone ? (
+                <label className="grid gap-1.5 text-sm">
               <span className="text-xs font-semibold text-muted-foreground">
                 Номер телефона <span className="text-destructive">*</span>
               </span>
@@ -1776,6 +1784,8 @@ export function CartPage() {
               placeholder="Опционально"
             />
           </label>
+            </>
+          ) : null}
 
           {!orderEditSession && promoCodesAvailable ? (
             <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
