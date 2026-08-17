@@ -268,6 +268,33 @@ function parseOptionalDeliveryLocation(value: unknown): CreateOrderPayload["deli
   };
 }
 
+type AdminOrderItemsEditBody = Pick<CreateOrderPayload, "items">;
+
+function parseAdminOrderItemsEditBody(value: unknown): AdminOrderItemsEditBody {
+  if (!isRecord(value)) {
+    throw new HttpError(400, "BAD_REQUEST", "Request body must be an object");
+  }
+  const itemsRaw = value.items;
+  if (!Array.isArray(itemsRaw) || itemsRaw.length === 0) {
+    throw new HttpError(400, "BAD_REQUEST", "items must be a non-empty array");
+  }
+  const items: CreateOrderPayload["items"] = itemsRaw.map((item) => {
+    if (!isRecord(item)) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid items[] element");
+    }
+    const productId = item.productId;
+    const qty = item.qty;
+    if (typeof productId !== "string" || productId.trim().length === 0) {
+      throw new HttpError(400, "BAD_REQUEST", "items[].productId is required");
+    }
+    if (typeof qty !== "number" || !Number.isInteger(qty) || qty <= 0) {
+      throw new HttpError(400, "BAD_REQUEST", "items[].qty must be a positive integer");
+    }
+    return { productId: productId.trim(), qty };
+  });
+  return { items };
+}
+
 function parseOrderRequestBody(value: unknown): OrderRequestBody {
   if (!isRecord(value)) {
     throw new HttpError(400, "BAD_REQUEST", "Invalid JSON body");
@@ -1269,27 +1296,24 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
 
       await requireAdmin(request);
 
-      const body = parseOrderRequestBody(request.body);
-      const deliveryLocation = getAllowedDeliveryLocation(
-        body.citySlug,
-        body.deliveryLocation,
-      );
+      const body = parseAdminOrderItemsEditBody(request.body);
 
       const result = await applyOrderEdit({
         orderId,
         allowPromoPrices: true,
         skipEditSessionExpiryCheck: true,
+        adminItemsOnly: true,
         payload: {
-          citySlug: body.citySlug,
-          deliveryMethod: body.deliveryMethod,
-          phone: body.phone,
-          address: body.address,
-          comment: body.comment,
-          deliveryDate: body.deliveryDate,
-          deliveryTimeSlot: body.deliveryTimeSlot,
-          deliveryLocation,
+          citySlug: "vvo",
+          deliveryMethod: "pickup",
+          phone: null,
+          address: null,
+          comment: null,
+          deliveryDate: null,
+          deliveryTimeSlot: null,
+          deliveryLocation: null,
           couponCode: null,
-          pointsToSpend: body.pointsToSpend,
+          pointsToSpend: 0,
           items: body.items,
         },
       });
