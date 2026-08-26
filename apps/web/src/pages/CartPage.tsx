@@ -748,8 +748,6 @@ export function CartPage() {
     deliveryPricing.rules.length > 0 &&
     checkoutDraft.address.trim().length > 0 &&
     !canUseBaseDeliveryFeeWithoutDistance;
-  const hasRequiredDeliveryMapSelection =
-    !deliveryMapSelectionRequired || confirmedDeliveryMapSelection !== null;
   const matchedPeakSurchargeRule =
     isRegularBlgDelivery
       ? getMatchedPeakSurchargeRule({
