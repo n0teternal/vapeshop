@@ -2180,6 +2180,17 @@ function AdminPromoCodesManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  const visibleItems = items.filter((item) => {
+    const endsAtMs = new Date(item.endsAt).getTime();
+    return !Number.isFinite(endsAtMs) || endsAtMs >= nowMs;
+  });
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -2287,12 +2298,12 @@ function AdminPromoCodesManager() {
       <div className="mt-4 grid gap-2">
         {loading ? (
           <div className="h-16 animate-pulse rounded-2xl bg-muted/60" />
-        ) : items.length === 0 ? (
+        ) : visibleItems.length === 0 ? (
           <div className="rounded-2xl border border-border/70 bg-card/90 p-3 text-sm text-muted-foreground">
             Промокодов пока нет.
           </div>
         ) : (
-          items.slice(0, 8).map((item) => (
+          visibleItems.slice(0, 8).map((item) => (
             <div
               key={item.code}
               className="rounded-xl border border-border/70 bg-card/90 px-3 py-2.5"

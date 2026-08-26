@@ -1786,11 +1786,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       try {
         await requireAdmin(request);
         const supabase = createServiceSupabaseClient();
+        const nowIso = new Date().toISOString();
         const { data, error } = await supabase
           .from("promo_codes")
           .select(
             PROMO_CODE_ADMIN_SELECT,
           )
+          .gte("ends_at", nowIso)
           .order("created_at", { ascending: false })
           .limit(100);
 
