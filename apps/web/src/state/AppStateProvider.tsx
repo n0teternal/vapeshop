@@ -18,6 +18,7 @@ export type CartItem = {
   categorySlug?: string | null;
   qty: number;
   imageUrl?: string | null;
+  stockQty?: number | null;
 };
 
 export type FavoriteItem = {
@@ -27,6 +28,7 @@ export type FavoriteItem = {
   categorySlug?: string | null;
   imageUrl: string | null;
   inStock: boolean;
+  stockQty?: number | null;
 };
 
 export type DeliveryMethod = "pickup" | "delivery" | "express";
@@ -143,7 +145,12 @@ function isCartItem(value: unknown): value is CartItem {
     value.qty > 0 &&
     (value.imageUrl === undefined ||
       value.imageUrl === null ||
-      typeof value.imageUrl === "string")
+      typeof value.imageUrl === "string") &&
+    (value.stockQty === undefined ||
+      value.stockQty === null ||
+      (typeof value.stockQty === "number" &&
+        Number.isInteger(value.stockQty) &&
+        value.stockQty >= 0))
   );
 }
 
@@ -158,8 +165,18 @@ function isFavoriteItem(value: unknown): value is FavoriteItem {
         value.categorySlug === null ||
         typeof value.categorySlug === "string") &&
       typeof value.inStock === "boolean" &&
-      (value.imageUrl === null || typeof value.imageUrl === "string")
+      (value.imageUrl === null || typeof value.imageUrl === "string") &&
+      (value.stockQty === undefined ||
+        value.stockQty === null ||
+        (typeof value.stockQty === "number" &&
+          Number.isInteger(value.stockQty) &&
+          value.stockQty >= 0))
   );
+}
+
+function canIncreaseCartItem(item: CartItem): boolean {
+  return item.stockQty === null ||
+    (typeof item.stockQty === "number" && item.qty < item.stockQty);
 }
 
 function isDeliveryMethod(value: unknown): value is DeliveryMethod {
@@ -298,6 +315,8 @@ function reducer(state: AppState, action: Action): AppState {
     case "cart/add": {
       const existing = state.cart.find((x) => x.productId === action.item.productId);
       if (existing) {
+        const stockQty =
+          action.item.stockQty !== undefined ? action.item.stockQty : existing.stockQty;
         return {
           ...state,
           cartCity: state.city,
@@ -308,8 +327,9 @@ function reducer(state: AppState, action: Action): AppState {
                   price: action.item.price,
                   regularPrice: x.regularPrice ?? action.item.regularPrice ?? null,
                   categorySlug: x.categorySlug ?? action.item.categorySlug ?? null,
-                  qty: x.qty + 1,
+                  qty: canIncreaseCartItem({ ...x, stockQty }) ? x.qty + 1 : x.qty,
                   imageUrl: x.imageUrl ?? action.item.imageUrl ?? null,
+                  stockQty,
                 }
               : x,
           ),
@@ -326,6 +346,7 @@ function reducer(state: AppState, action: Action): AppState {
             categorySlug: action.item.categorySlug ?? null,
             qty: 1,
             imageUrl: action.item.imageUrl ?? null,
+            stockQty: action.item.stockQty,
           },
         ],
       };
@@ -342,7 +363,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         cartCity: state.city,
         cart: state.cart.map((x) =>
-          x.productId === action.productId ? { ...x, qty: x.qty + 1 } : x,
+          x.productId === action.productId && canIncreaseCartItem(x) ? { ...x, qty: x.qty + 1 } : x,
         ),
       };
     case "cart/dec":

@@ -740,10 +740,14 @@ export function CartPage() {
           ignoreDeliveryThresholdDiscount: true,
         })
       : 0) + EXPRESS_DELIVERY_SURCHARGE_RUB;
+  // Distance only selects a higher tariff. If Maps cannot resolve an address,
+  // checkout continues with the regular base delivery fee.
+  const canUseBaseDeliveryFeeWithoutDistance = true;
   const deliveryMapSelectionRequired =
     showDeliveryMap &&
     deliveryPricing.rules.length > 0 &&
-    checkoutDraft.address.trim().length > 0;
+    checkoutDraft.address.trim().length > 0 &&
+    !canUseBaseDeliveryFeeWithoutDistance;
   const hasRequiredDeliveryMapSelection =
     !deliveryMapSelectionRequired || confirmedDeliveryMapSelection !== null;
   const matchedPeakSurchargeRule =
@@ -1090,7 +1094,6 @@ export function CartPage() {
     !editSessionExpired &&
     hasRequiredGuestPhone &&
     hasRequiredBlgDeliverySchedule &&
-    hasRequiredDeliveryMapSelection &&
     (!isAddressDeliveryMethod || checkoutDraft.address.trim().length > 0);
 
   async function notify(message: string): Promise<void> {
@@ -1456,7 +1459,11 @@ export function CartPage() {
                           size="icon"
                           variant="outline"
                           className="h-8 w-8"
-                          disabled={submitting}
+                          disabled={
+                            submitting ||
+                            item.stockQty === undefined ||
+                            (typeof item.stockQty === "number" && item.qty >= item.stockQty)
+                          }
                           onClick={() =>
                             dispatch({ type: "cart/inc", productId: item.productId })
                           }
@@ -1975,6 +1982,7 @@ export function CartPage() {
                               price: item.price,
                               categorySlug: item.categorySlug,
                               imageUrl: item.imageUrl,
+                              stockQty: item.stockQty,
                             },
                           })
                         }

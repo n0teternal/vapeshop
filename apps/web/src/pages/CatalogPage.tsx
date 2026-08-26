@@ -842,6 +842,7 @@ function mapMockCatalog(): CatalogData {
       price: p.price,
       regularPrice: p.price,
       inStock: p.inStock,
+      stockQty: null,
     })),
     promoItems: [],
   };
@@ -1516,6 +1517,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                 regularPrice: item.regularPrice,
                 categorySlug: item.categorySlug,
                 imageUrl: item.imageUrl,
+                stockQty: item.stockQty,
               },
             });
             showToast("Промо-товар добавлен в корзину");
@@ -1594,6 +1596,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                       regularPrice: item.regularPrice ?? item.promoOldPrice ?? item.price,
                       categorySlug: item.categorySlug,
                       imageUrl: item.imageUrl,
+                      stockQty: item.stockQty,
                     },
                   });
                   showToast("\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u043a\u043e\u0440\u0437\u0438\u043d\u0443");
@@ -1609,6 +1612,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                       categorySlug: item.categorySlug,
                       imageUrl: item.imageUrl,
                       inStock: item.inStock,
+                      stockQty: item.stockQty,
                     },
                   });
                   showToast(

@@ -90,6 +90,7 @@ export function FavoritesPage() {
                       price: item.price,
                       categorySlug: item.categorySlug,
                       imageUrl: item.imageUrl,
+                      stockQty: item.stockQty,
                     },
                   })
                 }

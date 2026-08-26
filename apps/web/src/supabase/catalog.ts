@@ -32,6 +32,7 @@ export type CatalogItem = {
   price: number;
   regularPrice: number;
   inStock: boolean;
+  stockQty: number | null;
   promoOldPrice?: number | null;
   promoNewPrice?: number | null;
 };

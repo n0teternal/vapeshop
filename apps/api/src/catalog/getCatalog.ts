@@ -12,6 +12,7 @@ export type CatalogItem = {
   price: number;
   regularPrice: number;
   inStock: boolean;
+  stockQty: number | null;
   promoOldPrice?: number | null;
   promoNewPrice?: number | null;
 };
@@ -57,6 +58,15 @@ function numberFromUnknown(value: unknown, fieldName: string): number {
   }
 
   return n;
+}
+
+function stockQtyFromUnknown(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const quantity = numberFromUnknown(value, "inventory.stock_qty");
+  if (!Number.isInteger(quantity) || quantity < 0) {
+    throw new HttpError(500, "DB", "Invalid numeric field inventory.stock_qty");
+  }
+  return quantity;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -126,7 +136,7 @@ export async function fetchCatalogByCity(params: {
     supabase
       .from("inventory")
       .select(
-        "in_stock,price_override,products!inner(id,title,description,base_price,image_url,category_slug,is_active),cities!inner(slug)",
+        "in_stock,stock_qty,price_override,products!inner(id,title,description,base_price,image_url,category_slug,is_active),cities!inner(slug)",
       )
       .eq("cities.slug", params.citySlug)
       .eq("products.is_active", true),
@@ -174,6 +184,7 @@ export async function fetchCatalogByCity(params: {
       price: overridePrice ?? basePrice,
       regularPrice: overridePrice ?? basePrice,
       inStock: row.in_stock === true,
+      stockQty: stockQtyFromUnknown(row.stock_qty),
     };
     items.push(item);
     itemById.set(item.id, item);

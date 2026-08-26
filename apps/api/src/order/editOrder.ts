@@ -1,5 +1,4 @@
 import { HttpError } from "../httpError.js";
-import { config } from "../config.js";
 import { getMaxPointsDiscountForTotal } from "../referral/service.js";
 import {
   calculatePromotionDiscount,
@@ -16,7 +15,6 @@ import {
 } from "./deliverySchedule.js";
 import {
   areDiscountsAllowedForDeliveryMethod,
-  isDeliveryAddressMethod,
   isOrderDeliveryMethod,
   type OrderDeliveryMethod,
 } from "./deliveryMethod.js";
@@ -99,6 +97,7 @@ export type OrderEditCartItem = {
   regularPrice: number;
   qty: number;
   imageUrl: string | null;
+  stockQty: number | null;
 };
 
 export type OrderEditCheckoutDraft = {
@@ -555,6 +554,10 @@ export async function startOrderEditSession(params: {
         regularPrice,
         qty: row.qty,
         imageUrl: product?.image_url ?? null,
+        stockQty:
+          inventory?.stock_qty === null
+            ? null
+            : (inventory?.stock_qty ?? 0) + row.qty,
       };
     });
 
@@ -750,19 +753,8 @@ export async function applyOrderEdit(params: {
     supabase,
     citySlug: payload.citySlug,
   });
-  if (
-    config.features.deliveryUpgradesEnabled &&
-    payload.citySlug === "blg" &&
-    isDeliveryAddressMethod(payload.deliveryMethod) &&
-    deliveryPricingSettings.rules.length > 0 &&
-    !payload.deliveryLocation
-  ) {
-    throw new HttpError(
-      400,
-      "DELIVERY_DISTANCE_REQUIRED",
-      "Нажмите поиск рядом с адресом, чтобы посчитать расстояние и доставку.",
-    );
-  }
+  // A missing map point means distance-based rules cannot be selected.
+  // calculateDeliveryFeeRub then falls back to the regular base delivery fee.
   const deliveryFee = calculateDeliveryFeeRub({
     citySlug: payload.citySlug,
     deliveryMethod: payload.deliveryMethod,
