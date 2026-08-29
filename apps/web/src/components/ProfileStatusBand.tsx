@@ -2,6 +2,7 @@ import { useState } from "react";
 
 type StatusTier = {
   name: string;
+  cashbackRate: string;
   progressLabel: string;
   progress: number;
   className: string;
@@ -10,24 +11,28 @@ type StatusTier = {
 const STATUS_TIERS: StatusTier[] = [
   {
     name: "Пока без кэшбека",
+    cashbackRate: "0% кэшбека",
     progressLabel: "До 3% осталось 2 150 ₽",
     progress: 25,
     className: "loyalty-band--locked",
   },
   {
     name: "Базовый",
+    cashbackRate: "3% кэшбека",
     progressLabel: "До 5% осталось 2 000 ₽",
     progress: 60,
     className: "loyalty-band--bronze",
   },
   {
     name: "Продвинутый",
+    cashbackRate: "5% кэшбека",
     progressLabel: "До 7% осталось 5 000 ₽",
     progress: 50,
     className: "loyalty-band--silver",
   },
   {
     name: "VIP",
+    cashbackRate: "7% кэшбека",
     progressLabel: "Максимальный статус",
     progress: 100,
     className: "loyalty-band--gold",
@@ -55,6 +60,7 @@ export function ProfileStatusBand() {
           {isLocked ? "☆" : "★"}
         </span>
         <span className="loyalty-band__title">{tier.name}</span>
+        <span className="loyalty-band__cashback-rate">{tier.cashbackRate}</span>
 
         <span className="loyalty-band__progress-copy">{tier.progressLabel}</span>
         <span className="loyalty-band__progress" aria-hidden="true">

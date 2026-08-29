@@ -287,6 +287,7 @@ textarea {
 }
 
 .loyalty-band__title,
+.loyalty-band__cashback-rate,
 .loyalty-band__progress-copy,
 .loyalty-band__star,
 .loyalty-band__progress {
@@ -308,6 +309,28 @@ textarea {
   font-size: 1.35rem;
   font-weight: 700;
   line-height: 1.1;
+}
+
+.loyalty-band__cashback-rate {
+  margin-top: 0.55rem;
+  color: #a7ddff;
+  font-family: "Sora", "Manrope", sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.loyalty-band--bronze .loyalty-band__cashback-rate {
+  color: #dfb68e;
+}
+
+.loyalty-band--silver .loyalty-band__cashback-rate {
+  color: #dcecff;
+}
+
+.loyalty-band--gold .loyalty-band__cashback-rate {
+  color: #8ed6ff;
 }
 
 .loyalty-band__progress-copy {
