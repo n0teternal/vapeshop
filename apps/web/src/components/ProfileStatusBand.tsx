@@ -2,7 +2,6 @@ import { useState } from "react";
 
 type StatusTier = {
   name: string;
-  material: string;
   cashback: string;
   threshold: string;
   balance?: string;
@@ -14,14 +13,12 @@ type StatusTier = {
 const STATUS_TIERS: StatusTier[] = [
   {
     name: "Пока без кэшбека",
-    material: "",
     cashback: "",
     threshold: "До 3% осталось 2 150 ₽",
     className: "loyalty-band--locked",
   },
   {
     name: "Базовый",
-    material: "Бронза",
     cashback: "3% кэшбек · с заказов от 3 000 ₽",
     threshold: "",
     balance: "340 ₽",
@@ -31,7 +28,6 @@ const STATUS_TIERS: StatusTier[] = [
   },
   {
     name: "Продвинутый",
-    material: "Серебро",
     cashback: "5% кэшбек · с заказов от 5 000 ₽",
     threshold: "",
     balance: "1 240 ₽",
@@ -41,7 +37,6 @@ const STATUS_TIERS: StatusTier[] = [
   },
   {
     name: "VIP",
-    material: "Чёрное золото",
     cashback: "7% кэшбек · с заказов от 10 000 ₽",
     threshold: "",
     balance: "3 080 ₽",
@@ -61,16 +56,13 @@ export function ProfileStatusBand() {
   }
 
   return (
-    <section className="loyalty-status" aria-label="Статус Smoke Diller">
+    <section className="loyalty-status loyalty-status--embedded" aria-label="Статус Smoke Diller">
       <button
         type="button"
         className={`loyalty-band ${tier.className}`}
         onClick={showNextTier}
         aria-label={`Статус ${tier.name}. Нажмите, чтобы показать следующий уровень`}
       >
-        <span className="loyalty-band__eyebrow">
-          Smoke Diller · Статус{tier.material ? ` · ${tier.material}` : ""}
-        </span>
         <span className="loyalty-band__star" aria-hidden="true">
           {isLocked ? "☆" : "★"}
         </span>
@@ -88,10 +80,6 @@ export function ProfileStatusBand() {
           </span>
         ) : null}
       </button>
-
-      <p className="loyalty-status__hint">
-        Нажмите на карту, чтобы посмотреть все уровни · {tierIndex + 1}/4
-      </p>
 
       {isLocked ? (
         <div className="loyalty-status__details">

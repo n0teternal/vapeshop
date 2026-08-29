@@ -210,6 +210,16 @@ textarea {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 12px 28px rgb(2 9 20 / 0.16);
 }
 
+.loyalty-status--embedded {
+  margin-top: 1rem;
+  border: 0;
+  border-top: 1px solid rgb(78 124 166 / 0.35);
+  border-radius: 0;
+  padding: 1rem 0 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 .loyalty-band {
   position: relative;
   display: flex;
@@ -276,7 +286,6 @@ textarea {
     linear-gradient(135deg, #1c2b42 0%, #101b2c 100%);
 }
 
-.loyalty-band__eyebrow,
 .loyalty-band__title,
 .loyalty-band__cashback,
 .loyalty-band__progress-copy,
@@ -284,15 +293,6 @@ textarea {
 .loyalty-band__progress {
   position: relative;
   z-index: 1;
-}
-
-.loyalty-band__eyebrow {
-  max-width: calc(100% - 2rem);
-  font-size: 0.56rem;
-  font-weight: 700;
-  letter-spacing: 0.15em;
-  line-height: 1.25;
-  text-transform: uppercase;
 }
 
 .loyalty-band__star {
@@ -304,7 +304,7 @@ textarea {
 }
 
 .loyalty-band__title {
-  margin-top: 0.2rem;
+  margin-top: 0;
   font-family: "Sora", "Manrope", sans-serif;
   font-size: 1.35rem;
   font-weight: 700;
@@ -351,15 +351,8 @@ textarea {
   width: 25%;
 }
 
-.loyalty-status__hint {
-  margin: 0.85rem 0 0.95rem;
-  color: #7187a1;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.59rem;
-  letter-spacing: 0.025em;
-}
-
 .loyalty-status__details {
+  margin-top: 0.95rem;
   border: 1px solid #2b425f;
   border-radius: 0.75rem;
   padding: 0.72rem 0.85rem;

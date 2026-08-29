@@ -266,10 +266,9 @@ export function ProfilePage() {
               </div>
             </div>
           </div>
+          {shouldShowLoyaltyStatus ? <ProfileStatusBand /> : null}
         </CardContent>
       </Card>
-
-      {shouldShowLoyaltyStatus ? <ProfileStatusBand /> : null}
 
       {canManageDeliveryPricing ? (
         <Card className="border-border/80 bg-card/90">
