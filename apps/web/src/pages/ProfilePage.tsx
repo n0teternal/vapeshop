@@ -6,6 +6,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
+import { ProfileStatusBand } from "../components/ProfileStatusBand";
 import {
   writeCachedDeliveryPricingSettings,
   type DeliveryPeakSurchargeRule,
@@ -69,6 +70,7 @@ export function ProfilePage() {
   }, []);
 
   const tgUser = webApp.initDataUnsafe?.user;
+  const shouldShowLoyaltyStatus = tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
   const canManageDeliveryPricing =
     isTelegram && tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
 
@@ -266,6 +268,8 @@ export function ProfilePage() {
           </div>
         </CardContent>
       </Card>
+
+      {shouldShowLoyaltyStatus ? <ProfileStatusBand /> : null}
 
       {canManageDeliveryPricing ? (
         <Card className="border-border/80 bg-card/90">
