@@ -2,7 +2,6 @@ import { useState } from "react";
 
 type StatusTier = {
   name: string;
-  cashback: string;
   threshold: string;
   balance?: string;
   expiry?: string;
@@ -13,13 +12,11 @@ type StatusTier = {
 const STATUS_TIERS: StatusTier[] = [
   {
     name: "Пока без кэшбека",
-    cashback: "",
     threshold: "До 3% осталось 2 150 ₽",
     className: "loyalty-band--locked",
   },
   {
     name: "Базовый",
-    cashback: "3% кэшбек · с заказов от 3 000 ₽",
     threshold: "",
     balance: "340 ₽",
     expiry: "2 октября",
@@ -28,7 +25,6 @@ const STATUS_TIERS: StatusTier[] = [
   },
   {
     name: "Продвинутый",
-    cashback: "5% кэшбек · с заказов от 5 000 ₽",
     threshold: "",
     balance: "1 240 ₽",
     expiry: "14 сентября",
@@ -37,7 +33,6 @@ const STATUS_TIERS: StatusTier[] = [
   },
   {
     name: "VIP",
-    cashback: "7% кэшбек · с заказов от 10 000 ₽",
     threshold: "",
     balance: "3 080 ₽",
     expiry: "29 августа",
@@ -70,9 +65,7 @@ export function ProfileStatusBand() {
 
         {isLocked ? (
           <span className="loyalty-band__progress-copy">{tier.threshold}</span>
-        ) : (
-          <span className="loyalty-band__cashback">{tier.cashback}</span>
-        )}
+        ) : null}
 
         {isLocked ? (
           <span className="loyalty-band__progress" aria-hidden="true">
@@ -81,14 +74,7 @@ export function ProfileStatusBand() {
         ) : null}
       </button>
 
-      {isLocked ? (
-        <div className="loyalty-status__details">
-          <p>Баллов пока нет — они появятся после первого заказа.</p>
-          <p>
-            Порог для 3% кэшбека — <strong>от 3 000 ₽</strong> покупки.
-          </p>
-        </div>
-      ) : (
+      {!isLocked ? (
         <div className="loyalty-status__details loyalty-status__details--earned">
           <p>
             <span>Баланс баллов</span>
@@ -102,7 +88,7 @@ export function ProfileStatusBand() {
             <span style={{ width: `${tier.expiryProgress}%` }} />
           </span>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

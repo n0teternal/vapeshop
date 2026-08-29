@@ -287,7 +287,6 @@ textarea {
 }
 
 .loyalty-band__title,
-.loyalty-band__cashback,
 .loyalty-band__progress-copy,
 .loyalty-band__star,
 .loyalty-band__progress {
@@ -311,7 +310,6 @@ textarea {
   line-height: 1.1;
 }
 
-.loyalty-band__cashback,
 .loyalty-band__progress-copy {
   margin-top: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
