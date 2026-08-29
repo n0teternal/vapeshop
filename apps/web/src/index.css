@@ -200,12 +200,14 @@ textarea {
 
 .loyalty-status {
   overflow: hidden;
-  border: 1px solid #3d3320;
+  border: 1px solid #2a425e;
   border-radius: 1rem;
   padding: 1rem;
-  background: #1c1810;
-  color: #d1c5aa;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  background:
+    radial-gradient(circle at 100% 0%, rgb(35 116 181 / 0.13), transparent 36%),
+    linear-gradient(145deg, #172338 0%, #111a2a 100%);
+  color: #b9c8da;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 12px 28px rgb(2 9 20 / 0.16);
 }
 
 .loyalty-band {
@@ -216,10 +218,10 @@ textarea {
   flex-direction: column;
   align-items: flex-start;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 0.13);
+  border: 1px solid #39536f;
   border-radius: 0.9rem;
   padding: 1.25rem;
-  color: #25190d;
+  color: #e6effa;
   text-align: left;
   transition: transform 180ms ease, filter 180ms ease;
 }
@@ -227,7 +229,9 @@ textarea {
 .loyalty-band::before {
   position: absolute;
   inset: 0;
-  background: repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.06) 0 1px, transparent 1px 5px);
+  background:
+    repeating-linear-gradient(-45deg, rgb(176 218 255 / 0.055) 0 1px, transparent 1px 5px),
+    linear-gradient(100deg, transparent 42%, rgb(179 224 255 / 0.055) 50%, transparent 58%);
   content: "";
   pointer-events: none;
 }
@@ -238,27 +242,38 @@ textarea {
 }
 
 .loyalty-band:focus-visible {
-  outline: 2px solid #d4aa3c;
+  outline: 2px solid #48b9ff;
   outline-offset: 3px;
 }
 
 .loyalty-band--locked {
-  color: #a29782;
-  background: #29251d;
+  color: #a9b9ca;
+  background:
+    radial-gradient(circle at 84% 15%, rgb(74 155 218 / 0.12), transparent 32%),
+    linear-gradient(135deg, #25344a 0%, #1b283a 100%);
 }
 
 .loyalty-band--bronze {
-  background: linear-gradient(135deg, #cd9661 0%, #8a5129 100%);
+  border-color: #52647b;
+  background:
+    linear-gradient(105deg, rgb(190 126 76 / 0.18), transparent 46%),
+    linear-gradient(135deg, #26374e 0%, #1d2c40 100%);
 }
 
 .loyalty-band--silver {
-  background: linear-gradient(135deg, #f1f3f5 0%, #9aa0aa 100%);
+  border-color: #71889f;
+  background:
+    linear-gradient(105deg, rgb(218 233 247 / 0.19), transparent 48%),
+    linear-gradient(135deg, #31465d 0%, #223348 100%);
 }
 
 .loyalty-band--gold {
-  border-color: #806714;
-  color: #d4b841;
-  background: linear-gradient(135deg, #282717 0%, #040504 100%);
+  border-color: #4a7ba7;
+  color: #dbeeff;
+  background:
+    radial-gradient(circle at 93% 8%, rgb(69 173 255 / 0.2), transparent 30%),
+    linear-gradient(105deg, rgb(197 155 51 / 0.15), transparent 45%),
+    linear-gradient(135deg, #1c2b42 0%, #101b2c 100%);
 }
 
 .loyalty-band__eyebrow,
@@ -290,7 +305,7 @@ textarea {
 
 .loyalty-band__title {
   margin-top: 0.2rem;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Sora", "Manrope", sans-serif;
   font-size: 1.35rem;
   font-weight: 700;
   line-height: 1.1;
@@ -307,7 +322,7 @@ textarea {
 }
 
 .loyalty-band__progress-copy {
-  color: #d8be00;
+  color: #8bd1ff;
 }
 
 .loyalty-band__progress,
@@ -317,7 +332,7 @@ textarea {
   height: 0.3rem;
   overflow: hidden;
   border-radius: 999px;
-  background: rgb(0 0 0 / 0.42);
+  background: rgb(6 17 31 / 0.74);
 }
 
 .loyalty-band__progress {
@@ -329,7 +344,7 @@ textarea {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #d6ba00, #e05a35);
+  background: linear-gradient(90deg, #38bdf8, #6d8eff);
 }
 
 .loyalty-band__progress > span {
@@ -338,18 +353,18 @@ textarea {
 
 .loyalty-status__hint {
   margin: 0.85rem 0 0.95rem;
-  color: #81755f;
+  color: #7187a1;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.59rem;
   letter-spacing: 0.025em;
 }
 
 .loyalty-status__details {
-  border: 1px solid #3a3020;
+  border: 1px solid #2b425f;
   border-radius: 0.75rem;
   padding: 0.72rem 0.85rem;
-  background: #110e09;
-  color: #a89b81;
+  background: rgb(10 20 34 / 0.75);
+  color: #9dafc4;
   font-size: 0.71rem;
   line-height: 1.55;
 }
@@ -359,7 +374,7 @@ textarea {
 }
 
 .loyalty-status__details strong {
-  color: #dbbb2d;
+  color: #79ccff;
   font-weight: 800;
 }
 
@@ -370,14 +385,14 @@ textarea {
 }
 
 .loyalty-status__details--earned strong {
-  color: #e5decc;
+  color: #e4f1ff;
   text-align: right;
 }
 
 .loyalty-status__expiry {
   margin-top: 0.35rem;
   height: 0.28rem;
-  background: #453b27;
+  background: #253a54;
 }
 
 @media (prefers-reduced-motion: reduce) {
