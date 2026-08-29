@@ -323,8 +323,7 @@ textarea {
   color: #8bd1ff;
 }
 
-.loyalty-band__progress,
-.loyalty-status__expiry {
+.loyalty-band__progress {
   display: block;
   width: 100%;
   height: 0.3rem;
@@ -337,54 +336,13 @@ textarea {
   margin-top: 0.45rem;
 }
 
-.loyalty-band__progress > span,
-.loyalty-status__expiry > span {
+.loyalty-band__progress > span {
   display: block;
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #38bdf8, #6d8eff);
 }
 
-.loyalty-band__progress > span {
-  width: 25%;
-}
-
-.loyalty-status__details {
-  margin-top: 0.95rem;
-  border: 1px solid #2b425f;
-  border-radius: 0.75rem;
-  padding: 0.72rem 0.85rem;
-  background: rgb(10 20 34 / 0.75);
-  color: #9dafc4;
-  font-size: 0.71rem;
-  line-height: 1.55;
-}
-
-.loyalty-status__details p {
-  margin: 0;
-}
-
-.loyalty-status__details strong {
-  color: #79ccff;
-  font-weight: 800;
-}
-
-.loyalty-status__details--earned p {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.loyalty-status__details--earned strong {
-  color: #e4f1ff;
-  text-align: right;
-}
-
-.loyalty-status__expiry {
-  margin-top: 0.35rem;
-  height: 0.28rem;
-  background: #253a54;
-}
 
 @media (prefers-reduced-motion: reduce) {
   .catalog-toast-enter,
