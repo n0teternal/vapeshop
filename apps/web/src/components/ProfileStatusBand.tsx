@@ -1,4 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+type ProfileStatusBandProps = {
+  pointsBalance: number | null;
+  pointsNextExpiresAt: string | null;
+};
 
 type StatusTier = {
   name: string;
@@ -39,21 +44,65 @@ const STATUS_TIERS: StatusTier[] = [
   },
 ];
 
-export function ProfileStatusBand() {
+function formatPointsBalance(value: number | null): string {
+  if (value === null) return "—";
+  return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
+}
+
+function formatExpiryDate(value: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+  }).format(date);
+}
+
+export function ProfileStatusBand({
+  pointsBalance,
+  pointsNextExpiresAt,
+}: ProfileStatusBandProps) {
   const [tierIndex, setTierIndex] = useState(0);
+  const [isFlipping, setIsFlipping] = useState(false);
+  const flipTimersRef = useRef<number[]>([]);
   const tier = STATUS_TIERS[tierIndex];
   const isLocked = tierIndex === 0;
+  const expiryDate = formatExpiryDate(pointsNextExpiresAt);
+
+  useEffect(
+    () => () => {
+      flipTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+    },
+    [],
+  );
 
   function showNextTier(): void {
-    setTierIndex((current) => (current + 1) % STATUS_TIERS.length);
+    if (isFlipping) return;
+
+    const showNext = () => {
+      setTierIndex((current) => (current + 1) % STATUS_TIERS.length);
+    };
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      showNext();
+      return;
+    }
+
+    setIsFlipping(true);
+    flipTimersRef.current = [
+      window.setTimeout(showNext, 280),
+      window.setTimeout(() => setIsFlipping(false), 560),
+    ];
   }
 
   return (
     <section className="loyalty-status loyalty-status--embedded" aria-label="Статус Smoke Diller">
       <button
         type="button"
-        className={`loyalty-band ${tier.className}`}
+        className={`loyalty-band ${tier.className}${isFlipping ? " loyalty-band--flipping" : ""}`}
         onClick={showNextTier}
+        disabled={isFlipping}
         aria-label={`Статус ${tier.name}. Нажмите, чтобы показать следующий уровень`}
       >
         <span className="loyalty-band__star" aria-hidden="true">
@@ -70,6 +119,18 @@ export function ProfileStatusBand() {
           <span style={{ width: `${tier.progress}%` }} />
         </span>
       </button>
+
+      <div className="loyalty-points-summary">
+        <div className="loyalty-points-summary__row">
+          <span>Баланс баллов</span>
+          <strong>{formatPointsBalance(pointsBalance)}</strong>
+        </div>
+        <div className="loyalty-points-summary__row loyalty-points-summary__expiry">
+          <span>{expiryDate ? "Сгорят, если не заказать до" : "Баллы пока не сгорают"}</span>
+          {expiryDate ? <strong>{expiryDate}</strong> : null}
+        </div>
+        <p className="loyalty-points-summary__hint">Нажмите на карту, чтобы посмотреть уровни</p>
+      </div>
     </section>
   );
 }

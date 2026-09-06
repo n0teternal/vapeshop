@@ -21,6 +21,11 @@ type AdminMe = {
   role: string;
 };
 
+type LoyaltyBalanceOverview = {
+  pointsBalance: number;
+  pointsNextExpiresAt: string | null;
+};
+
 const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
 
 function normalizeNumericInput(value: string): number {
@@ -39,6 +44,7 @@ export function ProfilePage() {
   const [deliveryPricingSaving, setDeliveryPricingSaving] = useState(false);
   const [deliveryPricingError, setDeliveryPricingError] = useState<string | null>(null);
   const [deliveryPricingSaved, setDeliveryPricingSaved] = useState(false);
+  const [loyaltyBalance, setLoyaltyBalance] = useState<LoyaltyBalanceOverview | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +79,29 @@ export function ProfilePage() {
   const shouldShowLoyaltyStatus = tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
   const canManageDeliveryPricing =
     isTelegram && tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!shouldShowLoyaltyStatus) {
+      setLoyaltyBalance(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    apiGet<LoyaltyBalanceOverview>("/api/referrals/overview?limit=1&offset=0")
+      .then((overview) => {
+        if (!cancelled) setLoyaltyBalance(overview);
+      })
+      .catch(() => {
+        if (!cancelled) setLoyaltyBalance(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldShowLoyaltyStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -266,7 +295,12 @@ export function ProfilePage() {
               </div>
             </div>
           </div>
-          {shouldShowLoyaltyStatus ? <ProfileStatusBand /> : null}
+          {shouldShowLoyaltyStatus ? (
+            <ProfileStatusBand
+              pointsBalance={loyaltyBalance?.pointsBalance ?? null}
+              pointsNextExpiresAt={loyaltyBalance?.pointsNextExpiresAt ?? null}
+            />
+          ) : null}
         </CardContent>
       </Card>
 

@@ -72,6 +72,7 @@ export type ReferralOverview = {
     pointsMaxSpendPercent: number;
   };
   pointsBalance: number;
+  pointsNextExpiresAt: string | null;
   pointsHistory: Array<{
     id: number;
     deltaPoints: number;
@@ -197,10 +198,15 @@ function getPointsExpiresAtIso(row: Pick<LoyaltyTransactionRow, "delta_points" |
   return getPointsExpiresAt(row.created_at).toISOString();
 }
 
-function calculateAvailablePointsBalance(params: {
+type AvailablePointsSummary = {
+  balance: number;
+  nextExpiresAt: string | null;
+};
+
+function calculateAvailablePointsSummary(params: {
   rows: LoyaltyTransactionRow[];
   nowMs: number;
-}): number {
+}): AvailablePointsSummary {
   const sortedRows = [...params.rows].sort((left, right) => {
     const leftMs = parseTimestampMs(left.created_at, "loyalty_transactions.created_at");
     const rightMs = parseTimestampMs(right.created_at, "loyalty_transactions.created_at");
@@ -244,14 +250,17 @@ function calculateAvailablePointsBalance(params: {
     }
   }
 
-  let total = 0;
-  for (const credit of credits) {
-    if (credit.remaining > 0 && credit.expiresAtMs > params.nowMs) {
-      total += credit.remaining;
-    }
-  }
+  const availableCredits = credits.filter(
+    (credit) => credit.remaining > 0 && credit.expiresAtMs > params.nowMs,
+  );
 
-  return total;
+  return {
+    balance: availableCredits.reduce((total, credit) => total + credit.remaining, 0),
+    nextExpiresAt:
+      availableCredits.length > 0
+        ? new Date(Math.min(...availableCredits.map((credit) => credit.expiresAtMs))).toISOString()
+        : null,
+  };
 }
 
 export function getMaxPointsDiscountForTotal(totalRub: number): number {
@@ -494,7 +503,7 @@ export async function getCustomerReferralShare(params: {
   };
 }
 
-export async function getPointsBalance(tgUserId: number): Promise<number> {
+async function getAvailablePointsSummary(tgUserId: number): Promise<AvailablePointsSummary> {
   const supabase = createServiceSupabaseClient();
   let offset = 0;
   const rows: LoyaltyTransactionRow[] = [];
@@ -519,10 +528,14 @@ export async function getPointsBalance(tgUserId: number): Promise<number> {
     offset += pageRows.length;
   }
 
-  return calculateAvailablePointsBalance({
+  return calculateAvailablePointsSummary({
     rows,
     nowMs: Date.now(),
   });
+}
+
+export async function getPointsBalance(tgUserId: number): Promise<number> {
+  return (await getAvailablePointsSummary(tgUserId)).balance;
 }
 
 export async function spendPointsForOrder(params: {
@@ -585,7 +598,7 @@ export async function getReferralOverview(params: {
 
   const supabase = createServiceSupabaseClient();
 
-  const [{ data: historyRows, error: historyError }, pointsBalance, referralRowsResponse] =
+  const [{ data: historyRows, error: historyError }, points, referralRowsResponse] =
     await Promise.all([
       supabase
         .from("loyalty_transactions")
@@ -593,7 +606,7 @@ export async function getReferralOverview(params: {
         .eq("tg_user_id", params.tgUserId)
         .order("created_at", { ascending: false })
         .limit(POINTS_HISTORY_LIMIT),
-      getPointsBalance(params.tgUserId),
+      getAvailablePointsSummary(params.tgUserId),
       supabase
         .from("referrals")
         .select("id,inviter_tg_user_id,invitee_tg_user_id,status,qualified_order_id,rewarded_at,created_at")
@@ -666,7 +679,8 @@ export async function getReferralOverview(params: {
       pointsExpireAfterMonths: config.referrals.pointsExpireAfterMonths,
       pointsMaxSpendPercent: config.referrals.pointsMaxSpendPercent,
     },
-    pointsBalance,
+    pointsBalance: points.balance,
+    pointsNextExpiresAt: points.nextExpiresAt,
     pointsHistory: ((historyRows ?? []) as LoyaltyTransactionRow[]).map((row) => ({
       id: row.id,
       deltaPoints: row.delta_points,

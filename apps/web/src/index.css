@@ -228,11 +228,13 @@ textarea {
   flex-direction: column;
   align-items: flex-start;
   overflow: hidden;
-  border: 1px solid #39536f;
+  border: 1px solid #514b3e;
   border-radius: 0.9rem;
   padding: 1.25rem;
-  color: #e6effa;
+  color: #e7e0d4;
   text-align: left;
+  backface-visibility: hidden;
+  transform-style: preserve-3d;
   transition: transform 180ms ease, filter 180ms ease;
 }
 
@@ -240,8 +242,8 @@ textarea {
   position: absolute;
   inset: 0;
   background:
-    repeating-linear-gradient(-45deg, rgb(176 218 255 / 0.055) 0 1px, transparent 1px 5px),
-    linear-gradient(100deg, transparent 42%, rgb(179 224 255 / 0.055) 50%, transparent 58%);
+    repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.05) 0 1px, transparent 1px 5px),
+    linear-gradient(100deg, transparent 42%, rgb(255 239 204 / 0.06) 50%, transparent 58%);
   content: "";
   pointer-events: none;
 }
@@ -251,39 +253,49 @@ textarea {
   transform: translateY(-1px);
 }
 
+.loyalty-band--flipping,
+.loyalty-band--flipping:hover {
+  animation: loyalty-band-flip 560ms cubic-bezier(0.65, 0, 0.35, 1);
+  filter: none;
+  transform: none;
+}
+
 .loyalty-band:focus-visible {
-  outline: 2px solid #48b9ff;
+  outline: 2px solid #d0a047;
   outline-offset: 3px;
 }
 
 .loyalty-band--locked {
-  color: #a9b9ca;
+  border-color: #5e5a51;
+  color: #c3c0b8;
   background:
-    radial-gradient(circle at 84% 15%, rgb(74 155 218 / 0.12), transparent 32%),
-    linear-gradient(135deg, #25344a 0%, #1b283a 100%);
+    radial-gradient(circle at 84% 15%, rgb(166 150 107 / 0.11), transparent 32%),
+    linear-gradient(135deg, #34332f 0%, #23231f 100%);
 }
 
 .loyalty-band--bronze {
-  border-color: #52647b;
+  border-color: #9b6c35;
+  color: #311d0c;
   background:
-    linear-gradient(105deg, rgb(190 126 76 / 0.18), transparent 46%),
-    linear-gradient(135deg, #26374e 0%, #1d2c40 100%);
+    radial-gradient(circle at 88% 12%, rgb(255 222 166 / 0.36), transparent 34%),
+    linear-gradient(135deg, #c7965c 0%, #9b6734 54%, #70451f 100%);
 }
 
 .loyalty-band--silver {
-  border-color: #71889f;
+  border-color: #c7c9ca;
+  color: #2c2d31;
   background:
-    linear-gradient(105deg, rgb(218 233 247 / 0.19), transparent 48%),
-    linear-gradient(135deg, #31465d 0%, #223348 100%);
+    radial-gradient(circle at 89% 10%, rgb(255 255 255 / 0.72), transparent 34%),
+    linear-gradient(135deg, #eceef1 0%, #c8cbd0 52%, #a7abb3 100%);
 }
 
 .loyalty-band--gold {
-  border-color: #4a7ba7;
-  color: #dbeeff;
+  border-color: #896916;
+  color: #e6ca75;
   background:
-    radial-gradient(circle at 93% 8%, rgb(69 173 255 / 0.2), transparent 30%),
-    linear-gradient(105deg, rgb(197 155 51 / 0.15), transparent 45%),
-    linear-gradient(135deg, #1c2b42 0%, #101b2c 100%);
+    radial-gradient(circle at 89% 10%, rgb(237 199 81 / 0.28), transparent 32%),
+    linear-gradient(115deg, rgb(192 148 37 / 0.19), transparent 48%),
+    linear-gradient(135deg, #29210c 0%, #111008 57%, #060604 100%);
 }
 
 .loyalty-band__title,
@@ -338,15 +350,15 @@ textarea {
 }
 
 .loyalty-band--bronze .loyalty-band__cashback-rate {
-  color: #dfb68e;
+  color: #251506;
 }
 
 .loyalty-band--silver .loyalty-band__cashback-rate {
-  color: #dcecff;
+  color: #25262b;
 }
 
 .loyalty-band--gold .loyalty-band__cashback-rate {
-  color: #8ed6ff;
+  color: #dfc06a;
 }
 
 .loyalty-band__progress-copy {
@@ -359,7 +371,22 @@ textarea {
 }
 
 .loyalty-band__progress-copy {
-  color: #8bd1ff;
+  color: #c8c3b8;
+}
+
+.loyalty-band--bronze .loyalty-band__progress-copy,
+.loyalty-band--bronze .loyalty-band__star {
+  color: #462a12;
+}
+
+.loyalty-band--silver .loyalty-band__progress-copy,
+.loyalty-band--silver .loyalty-band__star {
+  color: #4a4b50;
+}
+
+.loyalty-band--gold .loyalty-band__progress-copy,
+.loyalty-band--gold .loyalty-band__star {
+  color: #dabe6a;
 }
 
 .loyalty-band__progress {
@@ -368,7 +395,7 @@ textarea {
   height: 0.3rem;
   overflow: hidden;
   border-radius: 999px;
-  background: rgb(6 17 31 / 0.74);
+  background: rgb(12 11 8 / 0.62);
 }
 
 .loyalty-band__progress {
@@ -379,14 +406,90 @@ textarea {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #38bdf8, #6d8eff);
+  background: linear-gradient(90deg, #c8954e, #e0bb72);
 }
 
+.loyalty-band--silver .loyalty-band__progress {
+  background: rgb(49 51 56 / 0.24);
+}
+
+.loyalty-band--silver .loyalty-band__progress > span {
+  background: linear-gradient(90deg, #5d6168, #858a94);
+}
+
+.loyalty-band--gold .loyalty-band__progress {
+  background: rgb(4 4 2 / 0.72);
+}
+
+.loyalty-band--gold .loyalty-band__progress > span {
+  background: linear-gradient(90deg, #9c741b, #f0cf6f);
+}
+
+.loyalty-points-summary {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.8rem;
+  padding: 0.75rem 0.25rem 0;
+  border-top: 1px solid rgb(106 155 201 / 0.2);
+  color: #8fa4bc;
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.loyalty-points-summary__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.loyalty-points-summary__row strong {
+  color: #dbe8f6;
+  font-family: "Sora", "Manrope", sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.loyalty-points-summary__expiry {
+  color: #72869d;
+}
+
+.loyalty-points-summary__expiry strong {
+  color: #b9c8da;
+}
+
+.loyalty-points-summary__hint {
+  margin: 0.35rem 0 0;
+  color: #596878;
+  font-size: 0.58rem;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+@keyframes loyalty-band-flip {
+  0% {
+    transform: perspective(900px) rotateY(0deg);
+  }
+
+  46% {
+    transform: perspective(900px) rotateY(90deg) scale(0.97);
+  }
+
+  54% {
+    transform: perspective(900px) rotateY(-90deg) scale(0.97);
+  }
+
+  100% {
+    transform: perspective(900px) rotateY(0deg);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .catalog-toast-enter,
   .empty-heart-emoji,
-  .empty-cart-emoji {
+  .empty-cart-emoji,
+  .loyalty-band--flipping {
     animation: none !important;
   }
 }
