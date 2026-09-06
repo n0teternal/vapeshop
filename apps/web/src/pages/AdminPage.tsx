@@ -36,6 +36,26 @@ type AdminCity = {
   slug: string;
 };
 
+type AdminStaffMember = {
+  id: number;
+  name: string;
+  isActive: boolean;
+};
+
+type AdminStaffInventoryProduct = {
+  id: string;
+  title: string;
+  isActive: boolean;
+  cityStockQty: number | null;
+  allocations: Array<{ staffId: number; stockQty: number }>;
+};
+
+type AdminStaffInventorySnapshot = {
+  city: AdminCity;
+  staff: AdminStaffMember[];
+  products: AdminStaffInventoryProduct[];
+};
+
 type ImportProductsCsvResult = {
   delimiter: ";" | "," | "\t";
   decodedEncoding?: "utf-8" | "windows-1251" | "ibm866" | "koi8-r" | "xlsx";
@@ -43,6 +63,7 @@ type ImportProductsCsvResult = {
   rows: { total: number; valid: number; invalid: number };
   products: { inserted: number; updated: number };
   inventoryRows: number;
+  staffInventoryRows?: number;
   sync: {
     citySlug: string | null;
     inventoryDeleted: number;
@@ -646,6 +667,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
             Products: inserted={result.products.inserted} updated={result.products.updated}
           </div>
           <div>Inventory rows: {result.inventoryRows}</div>
+          {result.staffInventoryRows ? <div>Staff inventory rows: {result.staffInventoryRows}</div> : null}
           <div>
             Sync cleanup: city={result.sync.citySlug?.toUpperCase() ?? "ALL"}{" "}
             inventory deleted={result.sync.inventoryDeleted} products deleted=
@@ -876,6 +898,445 @@ function AdminImportProductsCsv() {
         <AdminImportProductsCityCard key={city.id} city={city} />
       ))}
     </div>
+  );
+}
+
+function AdminStaffInventoryManager() {
+  const [cities, setCities] = useState<AdminCity[]>([]);
+  const [staff, setStaff] = useState<AdminStaffMember[]>([]);
+  const [selectedCitySlug, setSelectedCitySlug] = useState("");
+  const [snapshot, setSnapshot] = useState<AdminStaffInventorySnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingInventory, setLoadingInventory] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [newStaffName, setNewStaffName] = useState("");
+  const [nameDrafts, setNameDrafts] = useState<Record<number, string>>({});
+  const [stockDrafts, setStockDrafts] = useState<Record<string, string>>({});
+  const [productFilter, setProductFilter] = useState("");
+  const [operationKind, setOperationKind] = useState<"defect" | "replacement">("defect");
+  const [operationStaffId, setOperationStaffId] = useState("");
+  const [operationProductId, setOperationProductId] = useState("");
+  const [returnedProductId, setReturnedProductId] = useState("");
+  const [operationQty, setOperationQty] = useState("1");
+  const [operationNote, setOperationNote] = useState("");
+  const [savingOperation, setSavingOperation] = useState(false);
+
+  const loadSetup = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [nextCities, nextStaff] = await Promise.all([
+        apiGet<AdminCity[]>("/api/admin/cities"),
+        apiGet<AdminStaffMember[]>("/api/admin/staff"),
+      ]);
+      setCities(nextCities);
+      setStaff(nextStaff);
+      setNameDrafts(Object.fromEntries(nextStaff.map((member) => [member.id, member.name])));
+      setSelectedCitySlug((current) => current || nextCities[0]?.slug || "");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось загрузить сотрудников");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadInventory = useCallback(async (): Promise<void> => {
+    if (!selectedCitySlug) {
+      setSnapshot(null);
+      return;
+    }
+
+    setLoadingInventory(true);
+    setError(null);
+    try {
+      const next = await apiGet<AdminStaffInventorySnapshot>(
+        `/api/admin/staff-inventory?citySlug=${encodeURIComponent(selectedCitySlug)}`,
+      );
+      setSnapshot(next);
+      setStaff(next.staff);
+      setNameDrafts((current) => ({
+        ...Object.fromEntries(next.staff.map((member) => [member.id, member.name])),
+        ...current,
+      }));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось загрузить остатки сотрудников");
+    } finally {
+      setLoadingInventory(false);
+    }
+  }, [selectedCitySlug]);
+
+  useEffect(() => {
+    void loadSetup();
+  }, [loadSetup]);
+
+  useEffect(() => {
+    void loadInventory();
+  }, [loadInventory]);
+
+  const activeStaff = useMemo(() => staff.filter((member) => member.isActive), [staff]);
+  const visibleProducts = useMemo(() => {
+    const query = productFilter.trim().toLocaleLowerCase("ru-RU");
+    const products = snapshot?.products ?? [];
+    if (!query) return products;
+    return products.filter((product) => product.title.toLocaleLowerCase("ru-RU").includes(query));
+  }, [productFilter, snapshot?.products]);
+
+  function allocationKey(staffId: number, productId: string): string {
+    return `${staffId}:${productId}`;
+  }
+
+  function getAllocationQty(staffId: number, product: AdminStaffInventoryProduct): number {
+    return product.allocations.find((allocation) => allocation.staffId === staffId)?.stockQty ?? 0;
+  }
+
+  async function addStaff(): Promise<void> {
+    const name = newStaffName.trim();
+    if (!name) return;
+
+    setError(null);
+    setNotice(null);
+    try {
+      const created = await apiPost<AdminStaffMember>("/api/admin/staff", { name });
+      setStaff((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name, "ru")));
+      setNameDrafts((current) => ({ ...current, [created.id]: created.name }));
+      setNewStaffName("");
+      setNotice("Сотрудник добавлен");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось добавить сотрудника");
+    }
+  }
+
+  async function saveStaff(member: AdminStaffMember, patch: Partial<Pick<AdminStaffMember, "name" | "isActive">>): Promise<void> {
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await apiPut<AdminStaffMember>(`/api/admin/staff/${member.id}`, patch);
+      setStaff((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setNameDrafts((current) => ({ ...current, [updated.id]: updated.name }));
+      setNotice("Сотрудник обновлён");
+      await loadInventory();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось обновить сотрудника");
+    }
+  }
+
+  async function saveStaffStock(staffId: number, product: AdminStaffInventoryProduct): Promise<void> {
+    const key = allocationKey(staffId, product.id);
+    const rawValue = stockDrafts[key];
+    if (rawValue === undefined) return;
+
+    const stockQty = Number(rawValue);
+    if (!Number.isInteger(stockQty) || stockQty < 0) {
+      setError("Остаток сотрудника должен быть целым числом от нуля");
+      return;
+    }
+    if (stockQty === getAllocationQty(staffId, product)) {
+      setStockDrafts((current) => {
+        const copy = { ...current };
+        delete copy[key];
+        return copy;
+      });
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPut("/api/admin/staff-inventory", {
+        citySlug: selectedCitySlug,
+        staffId,
+        productId: product.id,
+        stockQty,
+      });
+      setStockDrafts((current) => {
+        const copy = { ...current };
+        delete copy[key];
+        return copy;
+      });
+      await loadInventory();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось обновить остаток сотрудника");
+    }
+  }
+
+  async function submitOperation(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const staffId = Number(operationStaffId);
+    const qty = Number(operationQty);
+    if (!Number.isInteger(staffId) || staffId <= 0 || !operationProductId || !Number.isInteger(qty) || qty <= 0) {
+      setError("Выберите сотрудника и товар, затем укажите количество");
+      return;
+    }
+    if (operationKind === "replacement" && !returnedProductId) {
+      setError("Для замены выберите возвращённый бракованный товар");
+      return;
+    }
+
+    setSavingOperation(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPost("/api/admin/inventory-operations", {
+        kind: operationKind,
+        citySlug: selectedCitySlug,
+        staffId,
+        productId: operationProductId,
+        qty,
+        ...(operationKind === "replacement" ? { returnedProductId } : {}),
+        ...(operationNote.trim() ? { note: operationNote.trim() } : {}),
+      });
+      setOperationQty("1");
+      setOperationNote("");
+      setNotice(operationKind === "defect" ? "Брак списан без создания продажи" : "Замена проведена без создания продажи");
+      await loadInventory();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось провести операцию");
+    } finally {
+      setSavingOperation(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <div className="text-sm font-semibold">Сотрудники и остатки</div>
+        <div className="mt-3 h-28 animate-pulse rounded-xl bg-muted/60" />
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-base font-semibold">Сотрудники и остатки</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Остаток сотрудника списывается после выбора продавца в рабочем боте.
+          </div>
+        </div>
+        <select
+          value={selectedCitySlug}
+          onChange={(event) => setSelectedCitySlug(event.target.value)}
+          className="rounded-xl border border-border/70 bg-card px-3 py-2 text-sm"
+        >
+          {cities.map((city) => (
+            <option key={city.id} value={city.slug}>
+              {formatCityLabel(city)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {error ? (
+        <div className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+      {notice ? <div className="mt-3 text-sm text-emerald-300">{notice}</div> : null}
+
+      <div className="mt-4 rounded-xl border border-border/70 bg-background/20 p-3">
+        <div className="text-sm font-semibold">Имена сотрудников</div>
+        <div className="mt-3 grid gap-2">
+          {staff.map((member) => (
+            <div key={member.id} className="flex flex-wrap items-center gap-2">
+              <input
+                value={nameDrafts[member.id] ?? member.name}
+                onChange={(event) =>
+                  setNameDrafts((current) => ({ ...current, [member.id]: event.target.value }))
+                }
+                className="min-w-40 flex-1 rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                className="rounded-lg border border-border/70 bg-card px-3 py-2 text-xs font-semibold hover:bg-muted/55"
+                onClick={() => void saveStaff(member, { name: (nameDrafts[member.id] ?? member.name).trim() })}
+              >
+                Сохранить
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-border/70 bg-card px-3 py-2 text-xs font-semibold hover:bg-muted/55"
+                onClick={() => void saveStaff(member, { isActive: !member.isActive })}
+              >
+                {member.isActive ? "Отключить" : "Включить"}
+              </button>
+            </div>
+          ))}
+          {staff.length === 0 ? <div className="text-sm text-muted-foreground">Сотрудников пока нет.</div> : null}
+        </div>
+        <div className="mt-3 flex gap-2">
+          <input
+            value={newStaffName}
+            onChange={(event) => setNewStaffName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void addStaff();
+            }}
+            placeholder="Имя нового сотрудника"
+            className="min-w-0 flex-1 rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+          />
+          <button
+            type="button"
+            className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+            disabled={!newStaffName.trim()}
+            onClick={() => void addStaff()}
+          >
+            Добавить
+          </button>
+        </div>
+      </div>
+
+      <form onSubmit={(event) => void submitOperation(event)} className="mt-4 rounded-xl border border-border/70 bg-background/20 p-3">
+        <div className="text-sm font-semibold">Брак / замена</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Эти операции меняют склад, но не создают заказ и не попадают в выручку.
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          <select
+            value={operationKind}
+            onChange={(event) => setOperationKind(event.target.value as "defect" | "replacement")}
+            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+          >
+            <option value="defect">Брак — списать товар</option>
+            <option value="replacement">Замена — выдать новый товар</option>
+          </select>
+          <select
+            value={operationStaffId}
+            onChange={(event) => setOperationStaffId(event.target.value)}
+            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+          >
+            <option value="">Кто проводит операцию</option>
+            {activeStaff.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={operationProductId}
+            onChange={(event) => setOperationProductId(event.target.value)}
+            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+          >
+            <option value="">{operationKind === "defect" ? "Какой товар списать" : "Какой новый товар выдать"}</option>
+            {(snapshot?.products ?? []).map((product) => (
+              <option key={product.id} value={product.id}>
+                {product.title}
+              </option>
+            ))}
+          </select>
+          {operationKind === "replacement" ? (
+            <select
+              value={returnedProductId}
+              onChange={(event) => setReturnedProductId(event.target.value)}
+              className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+            >
+              <option value="">Какой товар вернули как брак</option>
+              {(snapshot?.products ?? []).map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.title}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={operationQty}
+              onChange={(event) => setOperationQty(event.target.value)}
+              inputMode="numeric"
+              placeholder="Количество"
+              className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+            />
+          )}
+          {operationKind === "replacement" ? (
+            <input
+              value={operationQty}
+              onChange={(event) => setOperationQty(event.target.value)}
+              inputMode="numeric"
+              placeholder="Количество"
+              className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+            />
+          ) : null}
+          <input
+            value={operationNote}
+            onChange={(event) => setOperationNote(event.target.value)}
+            placeholder="Комментарий (необязательно)"
+            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={savingOperation || activeStaff.length === 0 || !snapshot}
+          className="mt-3 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-60"
+        >
+          {savingOperation ? "Сохраняю..." : operationKind === "defect" ? "Списать брак" : "Провести замену"}
+        </button>
+      </form>
+
+      <div className="mt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold">Кто что держит: {snapshot?.city.name ?? ""}</div>
+            <div className="mt-1 text-xs text-muted-foreground">Общий остаток города и остатки сотрудников.</div>
+          </div>
+          <input
+            value={productFilter}
+            onChange={(event) => setProductFilter(event.target.value)}
+            placeholder="Найти товар"
+            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+          />
+        </div>
+
+        <div className="mt-3 max-h-[34rem] overflow-auto rounded-xl border border-border/70">
+          <table className="min-w-full text-left text-xs">
+            <thead className="sticky top-0 bg-card text-muted-foreground">
+              <tr>
+                <th className="px-3 py-2 font-medium">Товар</th>
+                <th className="px-3 py-2 text-right font-medium">Город</th>
+                {activeStaff.map((member) => (
+                  <th key={member.id} className="min-w-28 px-3 py-2 text-right font-medium">
+                    {member.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleProducts.map((product) => (
+                <tr key={product.id} className="border-t border-border/55">
+                  <td className="max-w-72 px-3 py-2">{product.title}</td>
+                  <td className="px-3 py-2 text-right text-muted-foreground">
+                    {product.cityStockQty === null ? "∞" : product.cityStockQty}
+                  </td>
+                  {activeStaff.map((member) => {
+                    const key = allocationKey(member.id, product.id);
+                    return (
+                      <td key={member.id} className="px-3 py-1.5 text-right">
+                        <input
+                          value={stockDrafts[key] ?? String(getAllocationQty(member.id, product))}
+                          onChange={(event) =>
+                            setStockDrafts((current) => ({ ...current, [key]: event.target.value }))
+                          }
+                          onBlur={() => void saveStaffStock(member.id, product)}
+                          inputMode="numeric"
+                          aria-label={`${product.title}, ${member.name}`}
+                          className="w-16 rounded-md border border-border/70 bg-card px-2 py-1 text-right"
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {!loadingInventory && visibleProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={Math.max(2, activeStaff.length + 2)} className="px-3 py-5 text-center text-muted-foreground">
+                    Товары не найдены.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        {loadingInventory ? <div className="mt-2 text-xs text-muted-foreground">Обновляю остатки…</div> : null}
+      </div>
+    </Card>
   );
 }
 
@@ -2967,6 +3428,7 @@ export function AdminPage() {
       {accessState === "ok" ? (
         <>
           <AdminImportProductsCsv />
+          <AdminStaffInventoryManager />
           <AdminUploadImages />
           <AdminPromotionsManager />
           <AdminBusinessReportsManager />

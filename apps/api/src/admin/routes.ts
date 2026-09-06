@@ -29,7 +29,18 @@ import {
 } from "../promotions/rules.js";
 import { processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import {
+  applyStaffInventoryOperation,
+  listStaffMembers,
+} from "../staffInventory/service.js";
 import { requireAdmin } from "./requireAdmin.js";
+import {
+  createImagesRestorePoint,
+  createProductsRestorePoint,
+  listAdminChangeVersions,
+  requireAdminHistoryOwner,
+  restoreAdminChangeVersion,
+} from "./versionHistory.js";
 
 type ApiSuccess<T> = { ok: true; data: T };
 type ApiFailure = { ok: false; error: { code: string; message: string } };
@@ -112,6 +123,132 @@ function decodeSpreadsheetBuffer(buffer: Buffer): string {
       return stringifyDelimitedRow(cells, ";");
     })
     .join("\n");
+}
+
+type ImportedStaffInventoryRow = {
+  staffId: number;
+  productId: string;
+  stockQty: number;
+};
+
+function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
+  const book = XLSX.read(buffer, { type: "buffer" });
+  const staffRows: ImportedStaffInventoryRow[] = [];
+
+  for (const sheetName of book.SheetNames.slice(1)) {
+    const sheet = book.Sheets[sheetName];
+    if (!sheet) continue;
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      raw: false,
+      defval: "",
+      blankrows: false,
+    });
+    if (rows.length === 0) continue;
+
+    for (const row of rows) {
+      const staffId = Number(String(row.staff_id ?? "").trim());
+      const productId = String(row.id ?? "").trim();
+      const stockQtyRaw = String(row.staff_stock_qty ?? "").trim();
+      const stockQty = stockQtyRaw.length === 0 ? 0 : Number(stockQtyRaw);
+
+      if (!Number.isSafeInteger(staffId) || staffId <= 0) {
+        throw new HttpError(400, "BAD_REQUEST", `Invalid staff_id in sheet ${sheetName}`);
+      }
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)) {
+        throw new HttpError(400, "BAD_REQUEST", `Invalid product id in sheet ${sheetName}`);
+      }
+      if (!Number.isInteger(stockQty) || stockQty < 0) {
+        throw new HttpError(400, "BAD_REQUEST", `Invalid staff_stock_qty in sheet ${sheetName}`);
+      }
+
+      staffRows.push({ staffId, productId, stockQty });
+    }
+  }
+
+  return staffRows;
+}
+
+async function syncStaffInventoryFromWorkbook(params: {
+  buffer: Buffer;
+  cityId: number;
+}): Promise<number> {
+  const rows = readStaffInventorySheets(params.buffer);
+  if (rows.length === 0) return 0;
+
+  const supabase = createServiceSupabaseClient();
+  const staffIds = Array.from(new Set(rows.map((row) => row.staffId)));
+  const productIds = Array.from(new Set(rows.map((row) => row.productId)));
+  const [{ data: staff, error: staffError }, { data: cityInventory, error: cityInventoryError }, { data: currentAllocations, error: allocationsError }] =
+    await Promise.all([
+      supabase.from("staff_members").select("id").in("id", staffIds),
+      supabase
+        .from("inventory")
+        .select("product_id,stock_qty")
+        .eq("city_id", params.cityId)
+        .in("product_id", productIds),
+      supabase
+        .from("staff_inventory")
+        .select("staff_id,product_id,stock_qty")
+        .eq("city_id", params.cityId)
+        .in("product_id", productIds),
+    ]);
+
+  if (staffError) throw new HttpError(500, "DB", `Failed to load staff: ${staffError.message}`);
+  if (cityInventoryError) {
+    throw new HttpError(500, "DB", `Failed to load city inventory: ${cityInventoryError.message}`);
+  }
+  if (allocationsError) {
+    throw new HttpError(500, "DB", `Failed to load staff inventory: ${allocationsError.message}`);
+  }
+
+  if ((staff ?? []).length !== staffIds.length) {
+    throw new HttpError(400, "BAD_REQUEST", "Workbook references an unknown staff member");
+  }
+
+  const cityQtyByProductId = new Map((cityInventory ?? []).map((row) => [row.product_id, row.stock_qty]));
+  for (const productId of productIds) {
+    if (!cityQtyByProductId.has(productId)) {
+      throw new HttpError(400, "BAD_REQUEST", "Workbook references a product missing from city inventory");
+    }
+  }
+
+  const importedQtyByProductId = new Map<string, number>();
+  for (const row of rows) {
+    importedQtyByProductId.set(row.productId, (importedQtyByProductId.get(row.productId) ?? 0) + row.stockQty);
+  }
+  const retainedQtyByProductId = new Map<string, number>();
+  for (const allocation of currentAllocations ?? []) {
+    if (staffIds.includes(allocation.staff_id)) continue;
+    retainedQtyByProductId.set(
+      allocation.product_id,
+      (retainedQtyByProductId.get(allocation.product_id) ?? 0) + allocation.stock_qty,
+    );
+  }
+
+  for (const productId of productIds) {
+    const cityQty = cityQtyByProductId.get(productId);
+    if (cityQty === null || cityQty === undefined) continue;
+    const totalStaffQty =
+      (importedQtyByProductId.get(productId) ?? 0) + (retainedQtyByProductId.get(productId) ?? 0);
+    if (totalStaffQty > cityQty) {
+      throw new HttpError(400, "STAFF_STOCK_EXCEEDS_CITY", "Staff stock cannot exceed city stock");
+    }
+  }
+
+  const { error: upsertError } = await supabase.from("staff_inventory").upsert(
+    rows.map((row) => ({
+      city_id: params.cityId,
+      staff_id: row.staffId,
+      product_id: row.productId,
+      stock_qty: row.stockQty,
+    })),
+    { onConflict: "staff_id,city_id,product_id" },
+  );
+  if (upsertError) {
+    throw new HttpError(500, "DB", `Failed to import staff inventory: ${upsertError.message}`);
+  }
+
+  return rows.length;
 }
 
 function sanitizeFileName(filename: string): string {
@@ -1510,6 +1647,341 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  app.get<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/change-versions",
+    async (request, reply) => {
+      try {
+        const admin = await requireAdmin(request);
+        requireAdminHistoryOwner(admin.tgUserId);
+        const parsed = z
+          .object({
+            kind: z.enum(["products", "images"]),
+            citySlug: z.string().trim().min(1).max(50).optional(),
+          })
+          .safeParse(request.query);
+        if (!parsed.success) throw new HttpError(400, "BAD_REQUEST", "Invalid history query");
+        const items = await listAdminChangeVersions({
+          kind: parsed.data.kind,
+          citySlug: parsed.data.citySlug ?? null,
+        });
+        return reply.code(200).send(ok({ items }));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/change-versions/:id/restore",
+    async (request, reply) => {
+      try {
+        const admin = await requireAdmin(request);
+        requireAdminHistoryOwner(admin.tgUserId);
+        const parsed = z.object({ id: z.string().uuid() }).safeParse(request.params);
+        if (!parsed.success) throw new HttpError(400, "BAD_REQUEST", "Invalid restore point id");
+        const result = await restoreAdminChangeVersion({
+          id: parsed.data.id,
+          tgUserId: admin.tgUserId,
+          itemsDir,
+        });
+        return reply.code(200).send(ok(result));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.get<{ Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/staff",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        return reply.code(200).send(ok(await listStaffMembers()));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Body: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/staff",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const parsed = z.object({ name: z.string().trim().min(1).max(60) }).safeParse(request.body);
+        if (!parsed.success) {
+          throw new HttpError(400, "BAD_REQUEST", parsed.error.issues[0]?.message ?? "Invalid body");
+        }
+
+        const supabase = createServiceSupabaseClient();
+        const { data, error } = await supabase
+          .from("staff_members")
+          .insert({ name: parsed.data.name })
+          .select("id,name,is_active")
+          .single();
+        if (error) throw new HttpError(500, "DB", `Failed to add staff member: ${error.message}`);
+
+        return reply.code(201).send(ok({ id: data.id, name: data.name, isActive: data.is_active }));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.put<{ Params: unknown; Body: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/staff/:id",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const params = z.object({ id: z.coerce.number().int().positive() }).safeParse(request.params);
+        const body = z
+          .object({
+            name: z.string().trim().min(1).max(60).optional(),
+            isActive: z.boolean().optional(),
+          })
+          .refine((value) => value.name !== undefined || value.isActive !== undefined, "No changes provided")
+          .safeParse(request.body);
+        if (!params.success || !body.success) {
+          throw new HttpError(
+            400,
+            "BAD_REQUEST",
+            params.error?.issues[0]?.message ?? body.error?.issues[0]?.message ?? "Invalid request",
+          );
+        }
+
+        const supabase = createServiceSupabaseClient();
+        const { data, error } = await supabase
+          .from("staff_members")
+          .update({
+            ...(body.data.name === undefined ? {} : { name: body.data.name }),
+            ...(body.data.isActive === undefined ? {} : { is_active: body.data.isActive }),
+          })
+          .eq("id", params.data.id)
+          .select("id,name,is_active")
+          .maybeSingle();
+        if (error) throw new HttpError(500, "DB", `Failed to update staff member: ${error.message}`);
+        if (!data) throw new HttpError(404, "NOT_FOUND", "Staff member not found");
+
+        return reply.code(200).send(ok({ id: data.id, name: data.name, isActive: data.is_active }));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.get<{ Querystring: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/staff-inventory",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const parsed = z.object({ citySlug: z.string().trim().min(1).max(50) }).safeParse(request.query);
+        if (!parsed.success) throw new HttpError(400, "BAD_REQUEST", "Invalid query");
+
+        const supabase = createServiceSupabaseClient();
+        const { data: city, error: cityError } = await supabase
+          .from("cities")
+          .select("id,name,slug")
+          .eq("slug", parsed.data.citySlug)
+          .maybeSingle();
+        if (cityError) throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
+        if (!city) throw new HttpError(404, "CITY_NOT_FOUND", "City not found");
+
+        const [{ data: cityInventory, error: cityInventoryError }, { data: allocations, error: allocationsError }] =
+          await Promise.all([
+            supabase
+              .from("inventory")
+              .select("product_id,stock_qty")
+              .eq("city_id", city.id)
+              .order("product_id", { ascending: true }),
+            supabase
+              .from("staff_inventory")
+              .select("staff_id,product_id,stock_qty")
+              .eq("city_id", city.id),
+          ]);
+        if (cityInventoryError) {
+          throw new HttpError(500, "DB", `Failed to load city inventory: ${cityInventoryError.message}`);
+        }
+        if (allocationsError) {
+          throw new HttpError(500, "DB", `Failed to load staff inventory: ${allocationsError.message}`);
+        }
+
+        const productIds = (cityInventory ?? []).map((row) => row.product_id);
+        const { data: products, error: productsError } =
+          productIds.length === 0
+            ? { data: [], error: null }
+            : await supabase
+                .from("products")
+                .select("id,title,is_active")
+                .in("id", productIds)
+                .order("title", { ascending: true });
+        if (productsError) throw new HttpError(500, "DB", `Failed to load products: ${productsError.message}`);
+
+        const cityQtyByProductId = new Map((cityInventory ?? []).map((row) => [row.product_id, row.stock_qty]));
+        const allocationsByProductId = new Map<string, Array<{ staffId: number; stockQty: number }>>();
+        for (const allocation of allocations ?? []) {
+          const rows = allocationsByProductId.get(allocation.product_id) ?? [];
+          rows.push({ staffId: allocation.staff_id, stockQty: allocation.stock_qty });
+          allocationsByProductId.set(allocation.product_id, rows);
+        }
+
+        return reply.code(200).send(
+          ok({
+            city,
+            staff: await listStaffMembers(),
+            products: (products ?? []).map((product) => ({
+              id: product.id,
+              title: product.title,
+              isActive: product.is_active,
+              cityStockQty: cityQtyByProductId.get(product.id) ?? null,
+              allocations: allocationsByProductId.get(product.id) ?? [],
+            })),
+          }),
+        );
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.put<{ Body: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/staff-inventory",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const parsed = z
+          .object({
+            citySlug: z.string().trim().min(1).max(50),
+            staffId: z.number().int().positive(),
+            productId: z.string().uuid(),
+            stockQty: z.number().int().nonnegative(),
+          })
+          .safeParse(request.body);
+        if (!parsed.success) {
+          throw new HttpError(400, "BAD_REQUEST", parsed.error.issues[0]?.message ?? "Invalid body");
+        }
+
+        const supabase = createServiceSupabaseClient();
+        const [{ data: city, error: cityError }, { data: staff, error: staffError }] = await Promise.all([
+          supabase.from("cities").select("id,slug").eq("slug", parsed.data.citySlug).maybeSingle(),
+          supabase.from("staff_members").select("id").eq("id", parsed.data.staffId).maybeSingle(),
+        ]);
+        if (cityError) throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
+        if (staffError) throw new HttpError(500, "DB", `Failed to load staff member: ${staffError.message}`);
+        if (!city) throw new HttpError(404, "CITY_NOT_FOUND", "City not found");
+        if (!staff) throw new HttpError(404, "NOT_FOUND", "Staff member not found");
+
+        const [{ data: cityInventory, error: cityInventoryError }, { data: allocations, error: allocationsError }] =
+          await Promise.all([
+            supabase
+              .from("inventory")
+              .select("stock_qty")
+              .eq("city_id", city.id)
+              .eq("product_id", parsed.data.productId)
+              .maybeSingle(),
+            supabase
+              .from("staff_inventory")
+              .select("staff_id,stock_qty")
+              .eq("city_id", city.id)
+              .eq("product_id", parsed.data.productId),
+          ]);
+        if (cityInventoryError) {
+          throw new HttpError(500, "DB", `Failed to load city stock: ${cityInventoryError.message}`);
+        }
+        if (allocationsError) {
+          throw new HttpError(500, "DB", `Failed to load staff allocations: ${allocationsError.message}`);
+        }
+        if (!cityInventory) throw new HttpError(404, "INVENTORY_MISSING", "City inventory row is missing");
+
+        if (cityInventory.stock_qty !== null) {
+          const otherStaffQty = (allocations ?? [])
+            .filter((row) => row.staff_id !== parsed.data.staffId)
+            .reduce((sum, row) => sum + row.stock_qty, 0);
+          if (otherStaffQty + parsed.data.stockQty > cityInventory.stock_qty) {
+            throw new HttpError(400, "STAFF_STOCK_EXCEEDS_CITY", "Staff stock cannot exceed city stock");
+          }
+        }
+
+        const { error: upsertError } = await supabase.from("staff_inventory").upsert(
+          {
+            city_id: city.id,
+            staff_id: parsed.data.staffId,
+            product_id: parsed.data.productId,
+            stock_qty: parsed.data.stockQty,
+          },
+          { onConflict: "staff_id,city_id,product_id" },
+        );
+        if (upsertError) {
+          throw new HttpError(500, "DB", `Failed to update staff stock: ${upsertError.message}`);
+        }
+
+        return reply.code(200).send(ok(parsed.data));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Body: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/inventory-operations",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const parsed = z
+          .object({
+            kind: z.enum(["defect", "replacement"]),
+            citySlug: z.string().trim().min(1).max(50),
+            staffId: z.number().int().positive(),
+            productId: z.string().uuid(),
+            qty: z.number().int().positive(),
+            returnedProductId: z.string().uuid().nullable().optional(),
+            note: z.string().trim().max(300).nullable().optional(),
+          })
+          .superRefine((value, ctx) => {
+            if (value.kind === "replacement" && !value.returnedProductId) {
+              ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Returned defective product is required" });
+            }
+          })
+          .safeParse(request.body);
+        if (!parsed.success) {
+          throw new HttpError(400, "BAD_REQUEST", parsed.error.issues[0]?.message ?? "Invalid body");
+        }
+
+        const supabase = createServiceSupabaseClient();
+        const { data: city, error: cityError } = await supabase
+          .from("cities")
+          .select("id,slug")
+          .eq("slug", parsed.data.citySlug)
+          .maybeSingle();
+        if (cityError) throw new HttpError(500, "DB", `Failed to load city: ${cityError.message}`);
+        if (!city) throw new HttpError(404, "CITY_NOT_FOUND", "City not found");
+
+        await applyStaffInventoryOperation({
+          kind: parsed.data.kind,
+          cityId: city.id,
+          staffId: parsed.data.staffId,
+          productId: parsed.data.productId,
+          qty: parsed.data.qty,
+          ...(parsed.data.returnedProductId === undefined
+            ? {}
+            : { returnedProductId: parsed.data.returnedProductId }),
+          ...(parsed.data.note === undefined ? {} : { note: parsed.data.note }),
+        });
+
+        return reply.code(201).send(ok(parsed.data));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
   app.get<{ Querystring: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
     "/api/admin/promotion-brands",
     async (request, reply) => {
@@ -2359,8 +2831,15 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         stock_qty: number | null;
         price_override: number | null;
       };
+      type ExportStaffInventoryRow = {
+        staff_id: number;
+        product_id: string;
+        stock_qty: number;
+      };
       const invRows: ExportInventoryRow[] = [];
       const soldOrderItems: Array<{ product_id: string | null }> = [];
+      let staffInventoryRows: ExportStaffInventoryRow[] = [];
+      let staffMembers: Array<{ id: number; name: string }> = [];
 
       await Promise.all(
         chunk(productIds, 100).map(async (part) => {
@@ -2378,8 +2857,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       );
 
       if (selectedCity) {
-        await Promise.all(
-          chunk(productIds, 100).map(async (part) => {
+        const [, staffInventoryResult, staffMembersResult] = await Promise.all([
+          Promise.all(chunk(productIds, 100).map(async (part) => {
             const { data, error } = await supabase
               .from("order_items")
               .select("product_id,orders!inner(city_id)")
@@ -2395,8 +2874,26 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             }
 
             soldOrderItems.push(...((data ?? []) as Array<{ product_id: string | null }>));
-          }),
-        );
+          })),
+          supabase
+            .from("staff_inventory")
+            .select("staff_id,product_id,stock_qty")
+            .eq("city_id", selectedCity.id),
+          supabase
+            .from("staff_members")
+            .select("id,name")
+            .eq("is_active", true)
+            .order("name", { ascending: true }),
+        ]);
+
+        if (staffInventoryResult.error) {
+          throw new HttpError(500, "DB", `Failed to load staff inventory for export: ${staffInventoryResult.error.message}`);
+        }
+        if (staffMembersResult.error) {
+          throw new HttpError(500, "DB", `Failed to load staff for export: ${staffMembersResult.error.message}`);
+        }
+        staffInventoryRows = (staffInventoryResult.data ?? []) as ExportStaffInventoryRow[];
+        staffMembers = staffMembersResult.data ?? [];
       }
 
       const invByKey = new Map<string, ExportInventoryRow>();
@@ -2465,7 +2962,53 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
 
       const sheet = XLSX.utils.aoa_to_sheet(aoa);
       const book = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(book, sheet, "products");
+      XLSX.utils.book_append_sheet(book, sheet, selectedCity ? "Общий" : "products");
+
+      if (selectedCity) {
+        const staffQtyByKey = new Map<string, number>();
+        for (const row of staffInventoryRows) {
+          staffQtyByKey.set(`${row.staff_id}:${row.product_id}`, row.stock_qty);
+        }
+
+        const usedSheetNames = new Set(book.SheetNames);
+        for (const staff of staffMembers) {
+          const staffHeaders = [
+            "id",
+            "title",
+            "description",
+            "category_slug",
+            "base_price",
+            "image_url",
+            "is_active",
+            "staff_id",
+            "staff_stock_qty",
+          ];
+          const staffAoa: Array<Array<string | number | boolean>> = [staffHeaders];
+          for (const product of filteredProductList) {
+            staffAoa.push([
+              product.id,
+              product.title,
+              product.description ?? "",
+              product.category_slug ?? "other",
+              toNumber(product.base_price, "products.base_price"),
+              product.image_url ?? "",
+              product.is_active === true,
+              staff.id,
+              staffQtyByKey.get(`${staff.id}:${product.id}`) ?? 0,
+            ]);
+          }
+
+          const baseName = `Сотрудник ${staff.name}`.slice(0, 31) || `Сотрудник ${staff.id}`;
+          let sheetName = baseName;
+          let suffix = 2;
+          while (usedSheetNames.has(sheetName)) {
+            sheetName = `${baseName.slice(0, Math.max(1, 31 - String(suffix).length - 1))} ${suffix}`;
+            suffix += 1;
+          }
+          usedSheetNames.add(sheetName);
+          XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(staffAoa), sheetName);
+        }
+      }
       const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
       const datePart = new Date().toISOString().slice(0, 10);
       const fileName = selectedCity
@@ -2734,7 +3277,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     "/api/admin/import/products",
     async (request, reply) => {
       try {
-        await requireAdmin(request);
+        const admin = await requireAdmin(request);
 
         const querySchema = z.object({
           citySlug: z.string().trim().min(1).max(50).optional(),
@@ -2808,6 +3351,12 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           }
         }
 
+        const restorePoint = await createProductsRestorePoint({
+          tgUserId: admin.tgUserId,
+          citySlug: parsedQuery.data.citySlug ?? null,
+          label: `Перед импортом таблицы ${file.filename || "products"}`,
+        });
+
         const result = await importProductsCsv({
           supabase,
           csvText,
@@ -2817,7 +3366,15 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           imageFileNames: useImagePrefix ? imageFileNames : null,
         });
 
-        return reply.code(200).send(ok({ ...result, decodedEncoding: encoding }));
+        const selectedCity = parsedQuery.data.citySlug
+          ? result.cities.find((city) => city.slug.toLowerCase() === parsedQuery.data.citySlug?.toLowerCase())
+          : null;
+        const staffInventoryRows =
+          isSpreadsheet && selectedCity ? await syncStaffInventoryFromWorkbook({ buffer, cityId: selectedCity.id }) : 0;
+
+        return reply.code(200).send(
+          ok({ ...result, decodedEncoding: encoding, staffInventoryRows, restorePoint }),
+        );
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
@@ -2829,7 +3386,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     "/api/admin/upload/items",
     async (request, reply) => {
       try {
-        await requireAdmin(request);
+        const admin = await requireAdmin(request);
 
         const files = await request.files();
         const storageLocation = parseStorageLocationFromBaseUrl(config.productImagesBaseUrl);
@@ -2842,9 +3399,17 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         const saved: Array<{ originalName: string; fileName: string; size: number }> = [];
         const errors: Array<{ originalName: string; message: string }> = [];
         let received = 0;
+        let restorePoint: Awaited<ReturnType<typeof createImagesRestorePoint>> | null = null;
 
         for await (const file of files) {
           received += 1;
+          if (!restorePoint) {
+            restorePoint = await createImagesRestorePoint({
+              tgUserId: admin.tgUserId,
+              itemsDir,
+              label: "Перед загрузкой изображений",
+            });
+          }
           const originalName = file.filename || `file_${Date.now()}`;
           const safeName = sanitizeFileName(originalName) || `file_${Date.now()}`;
           const inferredMime = inferMimeType(safeName);
@@ -2889,6 +3454,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             saved,
             errors,
             baseUrl: config.productImagesBaseUrl ?? null,
+            restorePoint,
           }),
         );
       } catch (e) {

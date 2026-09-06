@@ -42,6 +42,9 @@ export type AppConfig = {
     deliveryUpgradesEnabled: boolean;
   };
   productImagesBaseUrl: string | null;
+  adminHistory: {
+    ownerTgUserId: number;
+  };
   dev: {
     adminTgUserId: number | null;
   };
@@ -109,6 +112,17 @@ function parseOptionalAdminUserId(): number | null {
   const n = Number(raw);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
     throw new Error("Invalid env DEV_ADMIN_TG_USER_ID: expected positive integer");
+  }
+  return n;
+}
+
+function parseAdminHistoryOwnerUserId(): number {
+  // This is the Telegram account that may view and restore admin upload history.
+  // It can be moved to another account without changing application code.
+  const raw = readEnv("ADMIN_HISTORY_OWNER_TG_USER_ID") ?? "1208488286";
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    throw new Error("Invalid env ADMIN_HISTORY_OWNER_TG_USER_ID: expected positive integer");
   }
   return n;
 }
@@ -245,6 +259,9 @@ export const config: AppConfig = (() => {
       deliveryUpgradesEnabled: parseBooleanEnv("DELIVERY_UPGRADES_ENABLED", true),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
+    adminHistory: {
+      ownerTgUserId: parseAdminHistoryOwnerUserId(),
+    },
     dev: {
       adminTgUserId: isDev ? parseOptionalAdminUserId() : null,
     },

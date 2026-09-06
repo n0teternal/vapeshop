@@ -24,6 +24,11 @@ export type TelegramOrderMessage = {
   reply_markup: TelegramReplyMarkup;
 };
 
+export type TelegramStaffOption = {
+  id: number;
+  name: string;
+};
+
 type TelegramOrderActionsView = "main" | "done_confirm" | "cancel_confirm" | "contact_confirm";
 
 type OrderMessageBaseParams = {
@@ -58,6 +63,32 @@ function formatRub(value: number): string {
 
 export function formatOrderPaymentMethodLabel(method: OrderPaymentMethod): string {
   return method === "cash" ? "\u041d\u0430\u043b\u0438\u0447\u043d\u044b\u0435" : "\u041a\u0430\u0440\u0442\u0430";
+}
+
+export function buildStaffSelectionMessage(params: {
+  orderId: string;
+  paymentMethod: OrderPaymentMethod;
+  staff: TelegramStaffOption[];
+}): TelegramOrderMessage {
+  const paymentLabel = formatOrderPaymentMethodLabel(params.paymentMethod);
+  const inline_keyboard = params.staff.map((staff) => [
+    {
+      text: staff.name.slice(0, 48),
+      callback_data: `staff:${params.paymentMethod}:${staff.id.toString(36)}:${params.orderId}`,
+    },
+  ]);
+
+  inline_keyboard.push([
+    {
+      text: "\u2b05 \u041d\u0430\u0437\u0430\u0434",
+      callback_data: `ui:done_confirm:${params.orderId}`,
+    },
+  ]);
+
+  return {
+    text: `\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435, \u043a\u0442\u043e \u0441\u043e\u0432\u0435\u0440\u0448\u0438\u043b \u043f\u0440\u043e\u0434\u0430\u0436\u0443. \u041e\u043f\u043b\u0430\u0442\u0430: <b>${escapeHtml(paymentLabel)}</b>`,
+    reply_markup: { inline_keyboard },
+  };
 }
 
 function statusPrefix(status: OrderStatus): string {

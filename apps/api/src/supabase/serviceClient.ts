@@ -72,6 +72,51 @@ export type Database = {
         };
         Relationships: [];
       };
+      staff_members: {
+        Row: {
+          id: number;
+          name: string;
+          is_active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          name: string;
+          is_active?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          name?: string;
+          is_active?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      staff_inventory: {
+        Row: {
+          id: number;
+          staff_id: number;
+          city_id: number;
+          product_id: string;
+          stock_qty: number;
+        };
+        Insert: {
+          id?: number;
+          staff_id: number;
+          city_id: number;
+          product_id: string;
+          stock_qty?: number;
+        };
+        Update: {
+          id?: number;
+          staff_id?: number;
+          city_id?: number;
+          product_id?: string;
+          stock_qty?: number;
+        };
+        Relationships: [];
+      };
       promo_products: {
         Row: {
           id: number;
@@ -377,6 +422,8 @@ export type Database = {
           notify_message_id: number | null;
           notify_sent_at: string | null;
           notify_targets: Json;
+          seller_id: number | null;
+          payment_method: string | null;
           coupon_id: string | null;
           coupon_discount_amount: number;
           total_before_discount: number | null;
@@ -400,6 +447,8 @@ export type Database = {
           notify_message_id?: number | null;
           notify_sent_at?: string | null;
           notify_targets?: Json;
+          seller_id?: number | null;
+          payment_method?: string | null;
           coupon_id?: string | null;
           coupon_discount_amount?: number;
           total_before_discount?: number | null;
@@ -423,6 +472,8 @@ export type Database = {
           notify_message_id?: number | null;
           notify_sent_at?: string | null;
           notify_targets?: Json;
+          seller_id?: number | null;
+          payment_method?: string | null;
           coupon_id?: string | null;
           coupon_discount_amount?: number;
           total_before_discount?: number | null;
@@ -431,6 +482,45 @@ export type Database = {
           total_after_discount?: number | null;
           edited_at?: string | null;
           edit_session_expires_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      inventory_movements: {
+        Row: {
+          id: number;
+          city_id: number;
+          staff_id: number | null;
+          product_id: string;
+          kind: string;
+          qty: number;
+          related_product_id: string | null;
+          order_id: string | null;
+          note: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          city_id: number;
+          staff_id?: number | null;
+          product_id: string;
+          kind: string;
+          qty: number;
+          related_product_id?: string | null;
+          order_id?: string | null;
+          note?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          city_id?: number;
+          staff_id?: number | null;
+          product_id?: string;
+          kind?: string;
+          qty?: number;
+          related_product_id?: string | null;
+          order_id?: string | null;
+          note?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -463,6 +553,36 @@ export type Database = {
         Row: { tg_user_id: number; role: string };
         Insert: { tg_user_id: number; role?: string };
         Update: { tg_user_id?: number; role?: string };
+        Relationships: [];
+      };
+      admin_change_versions: {
+        Row: {
+          id: string;
+          kind: "products" | "images";
+          city_slug: string | null;
+          label: string;
+          snapshot: Json;
+          created_by_tg_user_id: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          kind: "products" | "images";
+          city_slug?: string | null;
+          label: string;
+          snapshot: Json;
+          created_by_tg_user_id: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          kind?: "products" | "images";
+          city_slug?: string | null;
+          label?: string;
+          snapshot?: Json;
+          created_by_tg_user_id?: number;
+          created_at?: string;
+        };
         Relationships: [];
       };
     };

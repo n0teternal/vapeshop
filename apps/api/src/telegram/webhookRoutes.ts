@@ -4,6 +4,7 @@ import { isHttpError } from "../httpError.js";
 import { cancelOrderAndRestoreInventory } from "../order/cancelOrder.js";
 import { buildCustomerConversationRequestMessage } from "../order/conversationRequest.js";
 import {
+  buildStaffSelectionMessage,
   buildOrderTelegramMessage,
   type CitySlug,
   type OrderPaymentMethod,
@@ -16,6 +17,7 @@ import {
   processReferralRewardForOrderDone,
 } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import { completeOrderWithStaffSale, listActiveStaffForCity } from "../staffInventory/service.js";
 import { answerCallbackQuery, editMessageText, sendMessage } from "./api.js";
 import {
   buildCustomerMainMenuMessage,
@@ -25,7 +27,7 @@ import {
 
 type CallbackStatus = Exclude<OrderStatus, "new">;
 
-type CallbackUiView = "main" | "done_confirm" | "cancel_confirm" | "contact_confirm";
+type CallbackUiView = "main" | "done_confirm" | "cancel_confirm" | "contact_confirm" | "seller_confirm";
 
 type ParsedCallbackQuery = {
   callbackQueryId: string;
@@ -42,8 +44,14 @@ type ParsedStartCommand = {
 };
 
 type ParsedCallbackAction =
-  | { kind: "order_status"; status: CallbackStatus; orderId: string; paymentMethod?: OrderPaymentMethod }
-  | { kind: "order_ui"; view: CallbackUiView; orderId: string }
+  | {
+      kind: "order_status";
+      status: CallbackStatus;
+      orderId: string;
+      paymentMethod?: OrderPaymentMethod;
+      staffId?: number;
+    }
+  | { kind: "order_ui"; view: CallbackUiView; orderId: string; paymentMethod?: OrderPaymentMethod }
   | { kind: "request_conversation"; orderId: string }
   | { kind: "menu"; view: "main" | "orders" | "referral" };
 
@@ -160,6 +168,16 @@ function parseCallbackData(data: string): ParsedCallbackAction | null {
     return { kind: "request_conversation", orderId };
   }
 
+  if (type === "staff" && parts.length === 4) {
+    const paymentMethod = parseOrderPaymentMethod(parts[1]);
+    const staffId = Number.parseInt(parts[2] ?? "", 36);
+    const orderId = parts[3] ?? "";
+    if (!paymentMethod || !Number.isSafeInteger(staffId) || staffId <= 0 || !isUuidV4ish(orderId)) {
+      return null;
+    }
+    return { kind: "order_status", status: "done", orderId, paymentMethod, staffId };
+  }
+
   // Keep this tolerant: Telegram callback_data is just a string and older/newer clients may add segments.
   if (parts.length < 3) return null;
 
@@ -173,7 +191,11 @@ function parseCallbackData(data: string): ParsedCallbackAction | null {
     const orderId = (paymentMethod ? parts.slice(3) : parts.slice(2)).join(":");
     if (!isUuidV4ish(orderId)) return null;
 
-    if (actionRaw === "done" && !paymentMethod) {
+    if (actionRaw === "done" && paymentMethod) {
+      return { kind: "order_ui", view: "seller_confirm", orderId, paymentMethod };
+    }
+
+    if (actionRaw === "done") {
       return { kind: "order_ui", view: "done_confirm", orderId };
     }
 
@@ -444,6 +466,26 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         );
         return reply.code(200).send({ ok: true });
       }
+    } else if (action.kind === "order_status" && action.status === "done") {
+      if (!action.paymentMethod || !action.staffId) {
+        await answerSafe(parsed.callbackQueryId, "Сначала выберите способ оплаты и сотрудника");
+        return reply.code(200).send({ ok: true });
+      }
+
+      try {
+        await completeOrderWithStaffSale({
+          orderId: action.orderId,
+          staffId: action.staffId,
+          paymentMethod: action.paymentMethod,
+        });
+      } catch (e) {
+        request.log.error({ err: e, orderId: action.orderId, staffId: action.staffId }, "Failed to complete staff sale");
+        await answerSafe(
+          parsed.callbackQueryId,
+          isHttpError(e) ? e.message : "Не удалось списать остаток сотрудника",
+        );
+        return reply.code(200).send({ ok: true });
+      }
     } else if (action.kind === "order_status") {
       const { data, error } = await supabase
         .from("orders")
@@ -557,6 +599,49 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         parsed.callbackQueryId,
         action.kind === "order_ui" ? "Ок" : "Статус обновлен",
       );
+      return reply.code(200).send({ ok: true });
+    }
+
+    if (action.kind === "order_ui" && action.view === "seller_confirm") {
+      if (!action.paymentMethod) {
+        await answerSafe(parsed.callbackQueryId, "Не указан способ оплаты");
+        return reply.code(200).send({ ok: true });
+      }
+
+      try {
+        const staff = await listActiveStaffForCity(city.id);
+        if (staff.length === 0) {
+          await answerSafe(parsed.callbackQueryId, "Для этого города ещё не добавлены остатки сотрудников");
+          return reply.code(200).send({ ok: true });
+        }
+
+        const sellerMessage = buildStaffSelectionMessage({
+          orderId: order.id,
+          paymentMethod: action.paymentMethod,
+          staff,
+        });
+        const editTarget =
+          parsed.message ??
+          (order.notify_chat_id !== null && order.notify_message_id !== null
+            ? { chatId: order.notify_chat_id, messageId: order.notify_message_id }
+            : undefined);
+
+        if (editTarget) {
+          await editMessageText({
+            botToken: config.telegram.botToken,
+            chatId: editTarget.chatId,
+            messageId: editTarget.messageId,
+            text: sellerMessage.text,
+            replyMarkup: sellerMessage.reply_markup,
+          });
+        }
+
+        await answerSafe(parsed.callbackQueryId, "Выберите сотрудника");
+      } catch (e) {
+        request.log.error({ err: e, orderId: order.id }, "Failed to show staff selection");
+        await answerSafe(parsed.callbackQueryId, "Не удалось загрузить сотрудников");
+      }
+
       return reply.code(200).send({ ok: true });
     }
 
