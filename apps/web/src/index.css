@@ -211,10 +211,10 @@ textarea {
 }
 
 .loyalty-status--embedded {
-  margin-top: 1rem;
+  margin-top: 0.6rem;
   border: 0;
   border-radius: 0;
-  padding: 1rem 0 0;
+  padding: 0;
   background: transparent;
   box-shadow: none;
 }
@@ -419,8 +419,12 @@ textarea {
 .loyalty-points-summary {
   display: grid;
   gap: 0.3rem;
-  margin-top: 0.1rem;
-  padding: 0 0.25rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgb(60 99 137 / 0.7);
+  border-radius: 0.72rem;
+  background: linear-gradient(135deg, rgb(27 49 73 / 0.88), rgb(15 28 45 / 0.94));
+  box-shadow: inset 0 1px rgb(181 219 255 / 0.07);
   color: #f4f8ff;
   font-size: 0.9rem;
   font-weight: 600;
@@ -451,7 +455,7 @@ textarea {
   width: 100%;
   align-items: center;
   justify-content: space-between;
-  margin: 0.45rem 0 0.75rem;
+  margin: 0.4rem 0 0.5rem;
   padding: 0 0.8rem;
 }
 
