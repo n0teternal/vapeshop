@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 type ProfileStatusBandProps = {
   pointsBalance: number | null;
@@ -64,45 +64,30 @@ export function ProfileStatusBand({
   pointsNextExpiresAt,
 }: ProfileStatusBandProps) {
   const [tierIndex, setTierIndex] = useState(0);
-  const [isFlipping, setIsFlipping] = useState(false);
-  const flipTimersRef = useRef<number[]>([]);
+  const [isChanging, setIsChanging] = useState(false);
   const tier = STATUS_TIERS[tierIndex];
   const isLocked = tierIndex === 0;
   const expiryDate = formatExpiryDate(pointsNextExpiresAt);
 
-  useEffect(
-    () => () => {
-      flipTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-    },
-    [],
-  );
-
   function showNextTier(): void {
-    if (isFlipping) return;
-
-    const showNext = () => {
-      setTierIndex((current) => (current + 1) % STATUS_TIERS.length);
-    };
+    if (isChanging) return;
 
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      showNext();
+      setTierIndex((current) => (current + 1) % STATUS_TIERS.length);
       return;
     }
 
-    setIsFlipping(true);
-    flipTimersRef.current = [
-      window.setTimeout(showNext, 280),
-      window.setTimeout(() => setIsFlipping(false), 560),
-    ];
+    setTierIndex((current) => (current + 1) % STATUS_TIERS.length);
+    setIsChanging(true);
   }
 
   return (
     <section className="loyalty-status loyalty-status--embedded" aria-label="Статус Smoke Diller">
       <button
         type="button"
-        className={`loyalty-band ${tier.className}${isFlipping ? " loyalty-band--flipping" : ""}`}
+        className={`loyalty-band ${tier.className}${isChanging ? " loyalty-band--changing" : ""}`}
         onClick={showNextTier}
-        disabled={isFlipping}
+        onAnimationEnd={() => setIsChanging(false)}
         aria-label={`Статус ${tier.name}. Нажмите, чтобы показать следующий уровень`}
       >
         <span className="loyalty-band__star" aria-hidden="true">
