@@ -309,8 +309,7 @@ export async function listAdminChangeVersions(params: {
     .from("admin_change_versions")
     .select("id,kind,city_slug,label,created_at,created_by_tg_user_id")
     .eq("kind", params.kind)
-    .order("created_at", { ascending: false })
-    .limit(80);
+    .order("created_at", { ascending: false });
   if (params.citySlug) query = query.eq("city_slug", params.citySlug);
   const { data, error } = await query;
   if (error) throw new HttpError(500, "DB", `Failed to load restore history: ${error.message}`);

@@ -100,6 +100,15 @@ type UploadImagesResult = {
   baseUrl: string | null;
 };
 
+type AdminChangeVersion = {
+  id: string;
+  kind: "products" | "images";
+  citySlug: string | null;
+  label: string;
+  createdAt: string;
+  createdByTgUserId: number;
+};
+
 type UploadedImageFile = {
   name: string;
   size: number;
@@ -306,6 +315,130 @@ function formatCityLabel(city: Pick<AdminCity, "name" | "slug">): string {
   return `${city.name} (${city.slug.toUpperCase()})`;
 }
 
+function AdminRestoreHistory({
+  kind,
+  citySlug = null,
+  refreshKey,
+  onRestored,
+}: {
+  kind: "products" | "images";
+  citySlug?: string | null;
+  refreshKey: number;
+  onRestored?: () => void;
+}) {
+  const [items, setItems] = useState<AdminChangeVersion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [unavailable, setUnavailable] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const search = new URLSearchParams({ kind });
+      if (citySlug) search.set("citySlug", citySlug);
+      const data = await apiGet<{ items: AdminChangeVersion[] }>(
+        `/api/admin/change-versions?${search.toString()}`,
+      );
+      setItems(data.items);
+      setUnavailable(false);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 403) {
+        setUnavailable(true);
+        setError(null);
+        return;
+      }
+      setError(e instanceof Error ? e.message : "Не удалось загрузить историю версий");
+    } finally {
+      setLoading(false);
+    }
+  }, [citySlug, kind]);
+
+  useEffect(() => {
+    void load();
+  }, [load, refreshKey]);
+
+  async function restore(item: AdminChangeVersion): Promise<void> {
+    const kindLabel = kind === "products" ? "таблицы и остатки" : "все изображения";
+    const confirmed = window.confirm(
+      `Вернуть ${kindLabel} к состоянию на ${formatDateTime(item.createdAt)}?\n\n` +
+        "Текущее состояние тоже будет сохранено как новая версия.",
+    );
+    if (!confirmed) return;
+
+    setRestoringId(item.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPost(`/api/admin/change-versions/${item.id}/restore`, {});
+      setNotice("Версия восстановлена. Предыдущее текущее состояние сохранено в истории.");
+      await load();
+      onRestored?.();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Не удалось восстановить версию");
+    } finally {
+      setRestoringId(null);
+    }
+  }
+
+  if (unavailable) return null;
+
+  return (
+    <div className="mt-4 rounded-xl border border-sky-400/25 bg-sky-400/5 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">Вернуть всё как было</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Снимок создаётся перед каждой загрузкой. История доступна только владельцу.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="rounded-lg border border-border/70 bg-card/90 px-2 py-1 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:opacity-60"
+          disabled={loading}
+          onClick={() => void load()}
+        >
+          Обновить
+        </button>
+      </div>
+
+      {error ? <div className="mt-3 text-xs text-destructive">{error}</div> : null}
+      {notice ? <div className="mt-3 text-xs text-emerald-300">{notice}</div> : null}
+      {loading ? (
+        <div className="mt-3 text-xs text-muted-foreground">Загрузка истории...</div>
+      ) : items.length === 0 ? (
+        <div className="mt-3 text-xs text-muted-foreground">Версий пока нет.</div>
+      ) : (
+        <div className="mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-card/60 px-2.5 py-2"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-xs font-medium text-foreground">{item.label}</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  {formatDateTime(item.createdAt)}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded-lg bg-sky-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={restoringId !== null}
+                onClick={() => void restore(item)}
+              >
+                {restoringId === item.id ? "Возвращаю..." : "Вернуть"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [file, setFile] = useState<File | null>(null);
   const [useImagePrefix, setUseImagePrefix] = useState(false);
@@ -328,6 +461,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoDownloadError, setPromoDownloadError] = useState<string | null>(null);
   const [promoResult, setPromoResult] = useState<ImportPromoProductsCsvResult | null>(null);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
 
   useEffect(() => {
     return () => {
@@ -362,6 +496,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
         form,
       );
       setResult(res);
+      setHistoryRefresh((value) => value + 1);
 
       if (res.outputXlsxBase64) {
         const binary = atob(res.outputXlsxBase64);
@@ -713,6 +848,12 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
           ) : null}
         </div>
       ) : null}
+
+      <AdminRestoreHistory
+        kind="products"
+        citySlug={city.slug}
+        refreshKey={historyRefresh}
+      />
 
       <div className="mt-5 border-t border-border/70 pt-4">
         <div className="flex items-center justify-between gap-3">
@@ -1352,6 +1493,7 @@ function AdminUploadImages() {
   const [renameDrafts, setRenameDrafts] = useState<Record<string, string>>({});
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const selectedFilesSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
   const selectedCount = selectedFiles.length;
 
@@ -1407,6 +1549,7 @@ function AdminUploadImages() {
 
       const res = await apiUpload<UploadImagesResult>("/api/admin/upload/items", form);
       setResult(res);
+      setHistoryRefresh((value) => value + 1);
       if (res.baseUrl) setBaseUrl(res.baseUrl);
       await loadFiles();
     } catch (e: unknown) {
@@ -1553,6 +1696,12 @@ function AdminUploadImages() {
           ) : null}
         </div>
       ) : null}
+
+      <AdminRestoreHistory
+        kind="images"
+        refreshKey={historyRefresh}
+        onRestored={() => void loadFiles()}
+      />
 
       <div className="mt-4">
         <button
