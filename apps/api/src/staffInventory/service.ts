@@ -1,11 +1,24 @@
 import { HttpError } from "../httpError.js";
 import type { OrderPaymentMethod } from "../order/telegramMessage.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import * as XLSX from "xlsx";
 
 export type StaffMember = {
   id: number;
   name: string;
   isActive: boolean;
+};
+
+export type StaffInventoryLine = {
+  productId: string;
+  title: string;
+  qty: number;
+};
+
+export type IssuableInventoryProduct = {
+  productId: string;
+  title: string;
+  availableQty: number | null;
 };
 
 type StockLine = {
@@ -91,6 +104,293 @@ export async function listActiveStaffForCity(cityId: number): Promise<StaffMembe
   if (error) throw new HttpError(500, "DB", `Failed to load city staff: ${error.message}`);
 
   return (data ?? []).map((staff) => ({ id: staff.id, name: staff.name, isActive: staff.is_active }));
+}
+
+export async function getStaffInventoryLines(params: {
+  cityId: number;
+  staffId: number;
+}): Promise<StaffInventoryLine[]> {
+  const supabase = createServiceSupabaseClient();
+  const { data: inventory, error: inventoryError } = await supabase
+    .from("staff_inventory")
+    .select("product_id,stock_qty")
+    .eq("city_id", params.cityId)
+    .eq("staff_id", params.staffId)
+    .gt("stock_qty", 0)
+    .order("product_id", { ascending: true });
+  if (inventoryError) {
+    throw new HttpError(500, "DB", `Failed to load staff inventory: ${inventoryError.message}`);
+  }
+
+  const productIds = (inventory ?? []).map((row) => row.product_id);
+  if (productIds.length === 0) return [];
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select("id,title")
+    .in("id", productIds);
+  if (productsError) throw new HttpError(500, "DB", `Failed to load products: ${productsError.message}`);
+
+  const titleByProductId = new Map((products ?? []).map((product) => [product.id, product.title]));
+  return (inventory ?? [])
+    .map((row) => ({
+      productId: row.product_id,
+      title: titleByProductId.get(row.product_id) ?? row.product_id,
+      qty: row.stock_qty,
+    }))
+    .sort((left, right) => left.title.localeCompare(right.title, "ru"));
+}
+
+export async function listIssuableInventoryProducts(cityId: number): Promise<IssuableInventoryProduct[]> {
+  const supabase = createServiceSupabaseClient();
+  const [{ data: cityInventory, error: cityInventoryError }, { data: allocations, error: allocationsError }] =
+    await Promise.all([
+      supabase
+        .from("inventory")
+        .select("product_id,stock_qty,in_stock")
+        .eq("city_id", cityId),
+      supabase
+        .from("staff_inventory")
+        .select("product_id,stock_qty")
+        .eq("city_id", cityId),
+    ]);
+  if (cityInventoryError) {
+    throw new HttpError(500, "DB", `Failed to load city inventory: ${cityInventoryError.message}`);
+  }
+  if (allocationsError) {
+    throw new HttpError(500, "DB", `Failed to load staff allocations: ${allocationsError.message}`);
+  }
+
+  const allocatedQtyByProductId = new Map<string, number>();
+  for (const row of allocations ?? []) {
+    allocatedQtyByProductId.set(
+      row.product_id,
+      (allocatedQtyByProductId.get(row.product_id) ?? 0) + row.stock_qty,
+    );
+  }
+  const rows = (cityInventory ?? []).filter((row) => {
+    if (!row.in_stock) return false;
+    if (row.stock_qty === null) return true;
+    return row.stock_qty - (allocatedQtyByProductId.get(row.product_id) ?? 0) > 0;
+  });
+  if (rows.length === 0) return [];
+
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select("id,title,is_active")
+    .in(
+      "id",
+      rows.map((row) => row.product_id),
+    );
+  if (productsError) throw new HttpError(500, "DB", `Failed to load products: ${productsError.message}`);
+  const productById = new Map((products ?? []).map((product) => [product.id, product]));
+
+  return rows
+    .map((row) => {
+      const product = productById.get(row.product_id);
+      return {
+        productId: row.product_id,
+        title: product?.title ?? row.product_id,
+        availableQty:
+          row.stock_qty === null
+            ? null
+            : row.stock_qty - (allocatedQtyByProductId.get(row.product_id) ?? 0),
+        isActive: product?.is_active ?? false,
+      };
+    })
+    .filter((row) => row.isActive)
+    .sort((left, right) => left.title.localeCompare(right.title, "ru"))
+    .map(({ isActive: _isActive, ...row }) => row);
+}
+
+export async function issueStockToStaff(params: {
+  cityId: number;
+  staffId: number;
+  productId: string;
+  qty: number;
+  note?: string | null;
+}): Promise<void> {
+  if (!Number.isInteger(params.qty) || params.qty <= 0) {
+    throw new HttpError(400, "BAD_REQUEST", "Quantity must be a positive integer");
+  }
+
+  const supabase = createServiceSupabaseClient();
+  const [{ data: staff, error: staffError }, { data: cityStock, error: cityStockError }, { data: allocations, error: allocationsError }] =
+    await Promise.all([
+      supabase.from("staff_members").select("id,is_active").eq("id", params.staffId).maybeSingle(),
+      supabase
+        .from("inventory")
+        .select("stock_qty,in_stock")
+        .eq("city_id", params.cityId)
+        .eq("product_id", params.productId)
+        .maybeSingle(),
+      supabase
+        .from("staff_inventory")
+        .select("staff_id,stock_qty")
+        .eq("city_id", params.cityId)
+        .eq("product_id", params.productId),
+    ]);
+  if (staffError) throw new HttpError(500, "DB", `Failed to load staff member: ${staffError.message}`);
+  if (cityStockError) throw new HttpError(500, "DB", `Failed to load city stock: ${cityStockError.message}`);
+  if (allocationsError) throw new HttpError(500, "DB", `Failed to load staff allocations: ${allocationsError.message}`);
+  if (!staff || !staff.is_active) throw new HttpError(400, "STAFF_UNAVAILABLE", "Staff member is unavailable");
+  if (!cityStock || !cityStock.in_stock) {
+    throw new HttpError(400, "OUT_OF_STOCK", "Product is unavailable in this city");
+  }
+
+  const currentStaffQty = (allocations ?? []).find((row) => row.staff_id === params.staffId)?.stock_qty ?? 0;
+  const allocatedTotal = (allocations ?? []).reduce((sum, row) => sum + row.stock_qty, 0);
+  if (cityStock.stock_qty !== null && allocatedTotal + params.qty > cityStock.stock_qty) {
+    throw new HttpError(400, "STAFF_STOCK_EXCEEDS_CITY", "Not enough unallocated city stock");
+  }
+
+  const nextQty = currentStaffQty + params.qty;
+  const { error: upsertError } = await supabase.from("staff_inventory").upsert(
+    {
+      city_id: params.cityId,
+      staff_id: params.staffId,
+      product_id: params.productId,
+      stock_qty: nextQty,
+    },
+    { onConflict: "staff_id,city_id,product_id" },
+  );
+  if (upsertError) {
+    throw new HttpError(500, "DB", `Failed to issue staff stock: ${upsertError.message}`);
+  }
+
+  const { error: movementError } = await supabase.from("inventory_movements").insert({
+    city_id: params.cityId,
+    staff_id: params.staffId,
+    product_id: params.productId,
+    kind: "inbound",
+    qty: params.qty,
+    note: params.note?.trim() || null,
+  });
+  if (!movementError) return;
+
+  if (currentStaffQty === 0) {
+    await supabase
+      .from("staff_inventory")
+      .delete()
+      .eq("city_id", params.cityId)
+      .eq("staff_id", params.staffId)
+      .eq("product_id", params.productId)
+      .eq("stock_qty", nextQty);
+  } else {
+    await supabase
+      .from("staff_inventory")
+      .update({ stock_qty: currentStaffQty })
+      .eq("city_id", params.cityId)
+      .eq("staff_id", params.staffId)
+      .eq("product_id", params.productId)
+      .eq("stock_qty", nextQty);
+  }
+  throw new HttpError(500, "DB", `Failed to record inbound movement: ${movementError.message}`);
+}
+
+export async function exportInventoryMovementsXlsx(): Promise<Buffer> {
+  const supabase = createServiceSupabaseClient();
+  const movements: Array<{
+    id: number;
+    city_id: number;
+    staff_id: number | null;
+    product_id: string;
+    kind: string;
+    qty: number;
+    related_product_id: string | null;
+    order_id: string | null;
+    note: string | null;
+    created_at: string;
+  }> = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("inventory_movements")
+      .select("id,city_id,staff_id,product_id,kind,qty,related_product_id,order_id,note,created_at")
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw new HttpError(500, "DB", `Failed to export movements: ${error.message}`);
+    const page = data ?? [];
+    movements.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  const [citiesResult, staffResult] = await Promise.all([
+    supabase.from("cities").select("id,name,slug"),
+    supabase.from("staff_members").select("id,name"),
+  ]);
+  if (citiesResult.error) throw new HttpError(500, "DB", `Failed to load cities: ${citiesResult.error.message}`);
+  if (staffResult.error) throw new HttpError(500, "DB", `Failed to load staff: ${staffResult.error.message}`);
+
+  const productIds = Array.from(
+    new Set(
+      movements.flatMap((movement) =>
+        movement.related_product_id ? [movement.product_id, movement.related_product_id] : [movement.product_id],
+      ),
+    ),
+  );
+  const productTitleById = new Map<string, string>();
+  for (let index = 0; index < productIds.length; index += 200) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("id,title")
+      .in("id", productIds.slice(index, index + 200));
+    if (error) throw new HttpError(500, "DB", `Failed to load products: ${error.message}`);
+    for (const product of data ?? []) productTitleById.set(product.id, product.title);
+  }
+
+  const cityById = new Map(
+    (citiesResult.data ?? []).map((city) => [city.id, `${city.name} (${city.slug.toUpperCase()})`]),
+  );
+  const staffNameById = new Map((staffResult.data ?? []).map((staff) => [staff.id, staff.name]));
+  const kindLabel: Record<string, string> = {
+    inbound: "Выдача сотруднику",
+    sale: "Продажа",
+    defect: "Брак",
+    replacement: "Замена",
+  };
+  const rows: Array<Array<string | number>> = [
+    [
+      "Дата и время",
+      "Тип",
+      "Город",
+      "Сотрудник",
+      "Товар",
+      "Связанный товар",
+      "Количество",
+      "Заказ",
+      "Комментарий",
+    ],
+  ];
+  for (const movement of movements) {
+    rows.push([
+      movement.created_at,
+      kindLabel[movement.kind] ?? movement.kind,
+      cityById.get(movement.city_id) ?? String(movement.city_id),
+      movement.staff_id === null ? "" : staffNameById.get(movement.staff_id) ?? String(movement.staff_id),
+      productTitleById.get(movement.product_id) ?? movement.product_id,
+      movement.related_product_id
+        ? productTitleById.get(movement.related_product_id) ?? movement.related_product_id
+        : "",
+      movement.qty,
+      movement.order_id ?? "",
+      movement.note ?? "",
+    ]);
+  }
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  sheet["!cols"] = [
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 22 },
+    { wch: 24 },
+    { wch: 38 },
+    { wch: 38 },
+    { wch: 12 },
+    { wch: 38 },
+    { wch: 40 },
+  ];
+  const book = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(book, sheet, "Движения");
+  return XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
 }
 
 export async function completeOrderWithStaffSale(params: {

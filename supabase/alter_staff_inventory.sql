@@ -35,13 +35,20 @@ create table if not exists public.inventory_movements (
   city_id bigint not null references public.cities (id) on delete cascade,
   staff_id bigint references public.staff_members (id) on delete set null,
   product_id uuid not null references public.products (id) on delete restrict,
-  kind text not null check (kind in ('sale', 'defect', 'replacement')),
+  kind text not null check (kind in ('inbound', 'sale', 'defect', 'replacement')),
   qty int not null check (qty > 0),
   related_product_id uuid references public.products (id) on delete restrict,
   order_id uuid references public.orders (id) on delete set null,
   note text null,
   created_at timestamptz not null default now()
 );
+
+alter table public.inventory_movements
+  drop constraint if exists inventory_movements_kind_check;
+
+alter table public.inventory_movements
+  add constraint inventory_movements_kind_check
+  check (kind in ('inbound', 'sale', 'defect', 'replacement'));
 
 create index if not exists staff_inventory_city_staff_product_idx
   on public.staff_inventory (city_id, staff_id, product_id);

@@ -31,6 +31,7 @@ import { processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
   applyStaffInventoryOperation,
+  issueStockToStaff,
   listStaffMembers,
 } from "../staffInventory/service.js";
 import { requireAdmin } from "./requireAdmin.js";
@@ -1905,6 +1906,19 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           if (otherStaffQty + parsed.data.stockQty > cityInventory.stock_qty) {
             throw new HttpError(400, "STAFF_STOCK_EXCEEDS_CITY", "Staff stock cannot exceed city stock");
           }
+        }
+
+        const currentStaffQty =
+          (allocations ?? []).find((row) => row.staff_id === parsed.data.staffId)?.stock_qty ?? 0;
+        if (parsed.data.stockQty > currentStaffQty) {
+          await issueStockToStaff({
+            cityId: city.id,
+            staffId: parsed.data.staffId,
+            productId: parsed.data.productId,
+            qty: parsed.data.stockQty - currentStaffQty,
+            note: "Выдача через админку",
+          });
+          return reply.code(200).send(ok(parsed.data));
         }
 
         const { error: upsertError } = await supabase.from("staff_inventory").upsert(

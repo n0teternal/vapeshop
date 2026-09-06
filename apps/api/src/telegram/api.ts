@@ -64,11 +64,38 @@ async function callTelegram<T>(params: {
   return parsed.result;
 }
 
+async function callTelegramForm<T>(params: {
+  botToken: string;
+  method: string;
+  form: FormData;
+}): Promise<T> {
+  const url = `https://api.telegram.org/bot${params.botToken}/${params.method}`;
+  const res = await fetch(url, {
+    method: "POST",
+    body: params.form,
+  });
+
+  const json = (await res.json().catch(() => null)) as unknown;
+  const parsed = parseTelegramResponse<T>(json);
+  if (!res.ok || parsed.ok === false) {
+    const description =
+      parsed.ok === false && typeof parsed.description === "string"
+        ? parsed.description
+        : "Telegram API error";
+    const code =
+      parsed.ok === false && typeof parsed.error_code === "number"
+        ? parsed.error_code
+        : res.status;
+    throw new Error(`Telegram ${params.method} failed: ${code} ${description}`);
+  }
+  return parsed.result;
+}
+
 export async function sendMessage(params: {
   botToken: string;
   chatId: string;
   text: string;
-  replyMarkup?: TelegramReplyMarkup;
+  replyMarkup?: TelegramReplyMarkup | undefined;
 }): Promise<TelegramMessage> {
   return callTelegram<TelegramMessage>({
     botToken: params.botToken,
@@ -83,12 +110,36 @@ export async function sendMessage(params: {
   });
 }
 
+export async function sendDocument(params: {
+  botToken: string;
+  chatId: string;
+  buffer: Buffer;
+  filename: string;
+  caption?: string;
+}): Promise<TelegramMessage> {
+  const form = new FormData();
+  form.set("chat_id", params.chatId);
+  form.set(
+    "document",
+    new Blob([new Uint8Array(params.buffer)], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    params.filename,
+  );
+  if (params.caption) form.set("caption", params.caption);
+  return callTelegramForm<TelegramMessage>({
+    botToken: params.botToken,
+    method: "sendDocument",
+    form,
+  });
+}
+
 export async function editMessageText(params: {
   botToken: string;
   chatId: number;
   messageId: number;
   text: string;
-  replyMarkup?: TelegramReplyMarkup;
+  replyMarkup?: TelegramReplyMarkup | undefined;
 }): Promise<void> {
   await callTelegram<true>({
     botToken: params.botToken,
