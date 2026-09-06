@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 type ProfileStatusBandProps = {
   pointsBalance: number | null;
@@ -111,11 +111,15 @@ export function ProfileStatusBand({
         aria-label={`Карточка ${tierIndex + 1} из ${STATUS_TIERS.length}`}
       >
         {STATUS_TIERS.map((statusTier, index) => (
-          <span
-            key={statusTier.name}
-            className={index === tierIndex ? "is-active" : undefined}
-            aria-hidden="true"
-          />
+          <Fragment key={statusTier.name}>
+            <span className={index === tierIndex ? "is-active" : undefined} aria-hidden="true" />
+            {index < STATUS_TIERS.length - 1 ? (
+              <span
+                className={`loyalty-points-summary__pager-line${index < tierIndex ? " is-complete" : ""}`}
+                aria-hidden="true"
+              />
+            ) : null}
+          </Fragment>
         ))}
       </div>
 

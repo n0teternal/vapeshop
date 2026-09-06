@@ -456,6 +456,7 @@ textarea {
 }
 
 .loyalty-points-summary__pager span {
+  flex: 0 0 auto;
   width: 0.38rem;
   height: 0.38rem;
   border-radius: 999px;
@@ -465,6 +466,30 @@ textarea {
 .loyalty-points-summary__pager .is-active {
   background: #a5d8ff;
   box-shadow: 0 0 0.35rem rgb(132 194 255 / 0.42);
+}
+
+.loyalty-points-summary__pager .loyalty-points-summary__pager-line {
+  position: relative;
+  flex: 1 1 auto;
+  height: 0.13rem;
+  margin: 0 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #405773;
+}
+
+.loyalty-points-summary__pager-line::after {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #8dcbff;
+  content: "";
+  transition: width 180ms ease-out;
+}
+
+.loyalty-points-summary__pager-line.is-complete::after {
+  width: 100%;
 }
 
 @keyframes loyalty-band-change {
