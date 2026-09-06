@@ -1,5 +1,4 @@
 import { HttpError } from "../httpError.js";
-import { config } from "../config.js";
 import { getMaxPointsDiscountForTotal, spendPointsForOrder } from "../referral/service.js";
 import { releasePromoCodeUsage, reservePromoCode } from "../promoCodes/service.js";
 import {
@@ -18,7 +17,6 @@ import {
 } from "./telegramMessage.js";
 import {
   areDiscountsAllowedForDeliveryMethod,
-  isDeliveryAddressMethod,
 } from "./deliveryMethod.js";
 
 export type CitySlug = "vvo" | "blg";
@@ -390,20 +388,8 @@ export async function createOrder(params: {
     supabase,
     citySlug: params.payload.citySlug,
   });
-  if (
-    config.features.deliveryUpgradesEnabled &&
-    params.payload.citySlug === "blg" &&
-    isDeliveryAddressMethod(params.payload.deliveryMethod) &&
-    deliveryPricingSettings.rules.length > 0 &&
-    !params.payload.deliveryLocation
-  ) {
-    throw new HttpError(
-      400,
-      "DELIVERY_DISTANCE_REQUIRED",
-      "Нажмите поиск рядом с адресом, чтобы посчитать расстояние и доставку.",
-    );
-  }
-
+  // Coordinates are optional: addresses outside the automatic search area, or
+  // addresses that Yandex cannot resolve, are charged at the base tariff.
   const deliveryFee = calculateDeliveryFeeRub({
     citySlug: params.payload.citySlug,
     deliveryMethod: params.payload.deliveryMethod,

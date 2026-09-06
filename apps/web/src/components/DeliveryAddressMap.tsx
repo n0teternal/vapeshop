@@ -305,20 +305,43 @@ function getAddressTailAfterCity(city: CitySlug, rawQuery: string): string | nul
   return parts.slice(cityIndex + 1).join(", ");
 }
 
+function shouldPreferUnscopedAddressSearch(city: CitySlug, rawQuery: string): boolean {
+  const query = normalizeSearchText(rawQuery);
+  const cityLabel = normalizeSearchText(CITY_SEARCH_CONFIGS[city].label);
+  if (query.includes(cityLabel)) return false;
+
+  // Do not replace an explicitly specified nearby settlement with a
+  // same-named address inside the selected city.
+  if (/(?:^|[,;]\s*)(?:г(?:ород)?\.?|пгт|пос(?:[её]лок)?\.?|с(?:ело)?\.?|д(?:еревня)?\.?|ст(?:аница)?\.?)\s+[^,;]+/iu.test(rawQuery)) {
+    return true;
+  }
+
+  return (
+    city === "blg" &&
+    /\b(?:белогорск|чигири|игнатьево|владимировка|верхнеблаговещенское|моховая падь|марково|гродеково|каникурган|усть-ивановка)\b/iu.test(
+      query,
+    )
+  );
+}
+
 function buildAddressSearchQueries(city: CitySlug, rawQuery: string): string[] {
   const query = rawQuery.trim();
   const config = CITY_SEARCH_CONFIGS[city];
   const baseQueries = uniqueStrings([query, getAddressTailAfterCity(city, query) ?? ""]);
 
   const queryVariants = baseQueries.flatMap((value) => buildStreetHouseQueryVariants(value));
-  const scopedQueries = queryVariants.flatMap((value) => [
-    `${config.queryPrefix}, ${value}`,
-    `Россия, ${value}`,
-    `${config.label}, ${value}`,
-    value,
-  ]);
+  const preferUnscoped = shouldPreferUnscopedAddressSearch(city, query);
+  const queries = queryVariants.flatMap((value) => {
+    const scoped = [
+      `${config.queryPrefix}, ${value}`,
+      `Россия, ${value}`,
+      `${config.label}, ${value}`,
+      value,
+    ];
+    return preferUnscoped ? [value, `Россия, ${value}`, ...scoped] : scoped;
+  });
 
-  return uniqueStrings(scopedQueries);
+  return uniqueStrings(queries);
 }
 
 export function DeliveryAddressMap({
@@ -420,12 +443,15 @@ export function DeliveryAddressMap({
 
     const timeoutId = window.setTimeout(() => {
       const config = CITY_SEARCH_CONFIGS[city];
-      const request = `${config.queryPrefix}, ${localAddress.trim()}`;
+      const preferUnscoped = shouldPreferUnscopedAddressSearch(city, localAddress);
+      const request = preferUnscoped
+        ? localAddress.trim()
+        : `${config.queryPrefix}, ${localAddress.trim()}`;
       ymapsApi
         .suggest?.(request, {
-          boundedBy: config.boundedBy,
           provider: "yandex#map",
           results: 5,
+          ...(preferUnscoped ? {} : { boundedBy: config.boundedBy }),
         })
         .then((items) => {
           const nextSuggestions = items
@@ -695,6 +721,12 @@ export function DeliveryAddressMap({
             </span>
           </span>
         </div>
+      ) : null}
+
+      {!loading && localAddress.trim().length > 0 && !restoredSelection ? (
+        <p className="text-xs text-muted-foreground">
+          Если расстояние не определится, заказ можно оформить по базовому тарифу доставки.
+        </p>
       ) : null}
 
     </div>

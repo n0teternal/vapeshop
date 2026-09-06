@@ -130,18 +130,39 @@ function getAddressTailAfterCity(citySlug: CitySlug, rawQuery: string): string |
   return parts.slice(cityIndex + 1).join(", ");
 }
 
+function shouldPreferUnscopedAddressSearch(citySlug: CitySlug, rawQuery: string): boolean {
+  const query = normalizeSearchText(rawQuery);
+  const cityLabel = normalizeSearchText(CITY_GEOCODE_CONFIGS[citySlug].label);
+  if (query.includes(cityLabel)) return false;
+
+  // Do not turn an explicitly specified nearby settlement into a same-named
+  // Blagoveshchensk street. Other locations can be written with a settlement
+  // prefix (for example, "г. Свободный" or "с. Ивановка").
+  if (/(?:^|[,;]\s*)(?:г(?:ород)?\.?|пгт|пос(?:[её]лок)?\.?|с(?:ело)?\.?|д(?:еревня)?\.?|ст(?:аница)?\.?)\s+[^,;]+/iu.test(rawQuery)) {
+    return true;
+  }
+
+  return (
+    citySlug === "blg" &&
+    /\b(?:белогорск|чигири|игнатьево|владимировка|верхнеблаговещенское|моховая падь|марково|гродеково|каникурган|усть-ивановка)\b/iu.test(
+      query,
+    )
+  );
+}
+
 function buildGeocodeQueries(citySlug: CitySlug, address: string): string[] {
   const query = address.trim();
   const cityConfig = CITY_GEOCODE_CONFIGS[citySlug];
   const baseQueries = uniqueStrings([query, getAddressTailAfterCity(citySlug, query) ?? ""]);
   const queryVariants = baseQueries.flatMap((value) => buildStreetHouseQueryVariants(value));
+  const preferUnscoped = shouldPreferUnscopedAddressSearch(citySlug, query);
 
   return uniqueStrings(
-    queryVariants.flatMap((value) => [
-      `${cityConfig.queryPrefix}, ${value}`,
-      `Россия, ${value}`,
-      value,
-    ]),
+    queryVariants.flatMap((value) => {
+      const scoped = `${cityConfig.queryPrefix}, ${value}`;
+      const countryScoped = `Россия, ${value}`;
+      return preferUnscoped ? [value, countryScoped, scoped] : [scoped, countryScoped, value];
+    }),
   );
 }
 
@@ -149,6 +170,11 @@ function buildSuggestQueries(citySlug: CitySlug, address: string): string[] {
   const query = address.trim();
   const cityConfig = CITY_GEOCODE_CONFIGS[citySlug];
   const tail = getAddressTailAfterCity(citySlug, query);
+  const preferUnscoped = shouldPreferUnscopedAddressSearch(citySlug, query);
+
+  if (preferUnscoped) {
+    return uniqueStrings([query, `Россия, ${query}`]);
+  }
 
   return uniqueStrings([
     tail ?? "",
@@ -368,6 +394,7 @@ async function requestYandexSuggest(params: {
     lon: number;
   };
   requireKey?: boolean;
+  restrictToCity?: boolean;
 }): Promise<YandexSuggestResult[]> {
   if (!config.yandex.geosuggestApiKey) {
     if (params.requireKey) {
@@ -390,9 +417,11 @@ async function requestYandexSuggest(params: {
   url.searchParams.set("print_address", "1");
   url.searchParams.set("types", "house");
   url.searchParams.set("countries", "ru");
-  url.searchParams.set("ll", cityConfig.ll);
-  url.searchParams.set("spn", cityConfig.spn);
-  url.searchParams.set("strict_bounds", "1");
+  if (params.restrictToCity !== false) {
+    url.searchParams.set("ll", cityConfig.ll);
+    url.searchParams.set("spn", cityConfig.spn);
+    url.searchParams.set("strict_bounds", "1");
+  }
   if (params.origin) {
     url.searchParams.set("ull", `${params.origin.lon},${params.origin.lat}`);
   }
@@ -501,12 +530,14 @@ export async function geocodeDeliveryAddress(params: {
 
   const queries = buildGeocodeQueries(params.citySlug, trimmedAddress);
   const suggestQueries = buildSuggestQueries(params.citySlug, trimmedAddress);
+  const preferUnscoped = shouldPreferUnscopedAddressSearch(params.citySlug, trimmedAddress);
   const seenSuggestUris = new Set<string>();
 
   for (const query of suggestQueries) {
     const suggestions = await requestYandexSuggest({
       citySlug: params.citySlug,
       query,
+      restrictToCity: !preferUnscoped,
     });
 
     for (const suggestion of suggestions) {
@@ -521,22 +552,16 @@ export async function geocodeDeliveryAddress(params: {
     }
   }
 
-  for (const query of queries) {
-    const restricted = await requestYandexGeocode({
-      citySlug: params.citySlug,
-      query,
-      restrictToCity: true,
-    });
-    if (restricted) return restricted;
-  }
-
-  for (const query of queries) {
-    const unrestricted = await requestYandexGeocode({
-      citySlug: params.citySlug,
-      query,
-      restrictToCity: false,
-    });
-    if (unrestricted) return unrestricted;
+  const restrictModes = preferUnscoped ? [false, true] : [true, false];
+  for (const restrictToCity of restrictModes) {
+    for (const query of queries) {
+      const result = await requestYandexGeocode({
+        citySlug: params.citySlug,
+        query,
+        restrictToCity,
+      });
+      if (result) return result;
+    }
   }
 
   throw new HttpError(
