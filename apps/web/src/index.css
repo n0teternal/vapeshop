@@ -213,7 +213,6 @@ textarea {
 .loyalty-status--embedded {
   margin-top: 1rem;
   border: 0;
-  border-top: 1px solid rgb(78 124 166 / 0.35);
   border-radius: 0;
   padding: 1rem 0 0;
   background: transparent;
@@ -235,16 +234,6 @@ textarea {
   text-align: left;
   box-shadow: 0 0.7rem 1.45rem rgb(2 10 21 / 0.36), inset 0 1px rgb(184 222 255 / 0.09);
   transition: transform 140ms ease, filter 140ms ease;
-}
-
-.loyalty-band::before {
-  position: absolute;
-  inset: 0;
-  background:
-    repeating-linear-gradient(-45deg, rgb(175 214 255 / 0.055) 0 1px, transparent 1px 5px),
-    linear-gradient(105deg, transparent 34%, rgb(143 201 255 / 0.09) 51%, transparent 66%);
-  content: "";
-  pointer-events: none;
 }
 
 .loyalty-band:hover {
@@ -351,12 +340,16 @@ textarea {
   color: #e6ba84;
 }
 
+.loyalty-band--locked .loyalty-band__cashback-rate {
+  color: rgb(190 202 214 / 0.56);
+}
+
 .loyalty-band--silver .loyalty-band__cashback-rate {
   color: #dbe9f7;
 }
 
 .loyalty-band--gold .loyalty-band__cashback-rate {
-  color: #a5d8ff;
+  color: #f0ca66;
 }
 
 .loyalty-band__progress-copy {
@@ -428,7 +421,6 @@ textarea {
   gap: 0.3rem;
   margin-top: 0.8rem;
   padding: 0.75rem 0.25rem 0;
-  border-top: 1px solid rgb(106 155 201 / 0.2);
   color: #8fa4bc;
   font-size: 0.9rem;
   line-height: 1.25;
@@ -457,12 +449,23 @@ textarea {
   color: #dbe8f6;
 }
 
-.loyalty-points-summary__hint {
-  margin: 0.35rem 0 0;
-  color: #596878;
-  font-size: 0.68rem;
-  letter-spacing: 0.035em;
-  text-transform: uppercase;
+.loyalty-points-summary__pager {
+  display: flex;
+  justify-content: center;
+  gap: 0.38rem;
+  margin: 0.5rem auto 0;
+}
+
+.loyalty-points-summary__pager span {
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 999px;
+  background: #506984;
+}
+
+.loyalty-points-summary__pager .is-active {
+  background: #a5d8ff;
+  box-shadow: 0 0 0.35rem rgb(132 194 255 / 0.42);
 }
 
 @keyframes loyalty-band-change {
