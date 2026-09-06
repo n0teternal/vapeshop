@@ -134,6 +134,44 @@ function parseUuid(value: string): boolean {
   );
 }
 
+function isNumericIdPlaceholder(value: string): boolean {
+  return /^\d+$/.test(value.trim());
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String(error.message)
+        : String(error);
+
+  return /fetch failed|network|timeout|econnreset|eai_again|enotfound|socket hang up/i.test(message);
+}
+
+async function retryTransientSupabaseQuery<T extends { error: unknown }>(
+  query: () => PromiseLike<T>,
+): Promise<T> {
+  const delaysMs = [250, 750];
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const result = await query();
+      if (!result.error || !isTransientNetworkError(result.error) || attempt === delaysMs.length) {
+        return result;
+      }
+    } catch (error) {
+      if (!isTransientNetworkError(error) || attempt === delaysMs.length) {
+        throw error;
+      }
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, delaysMs[attempt] ?? 0);
+    });
+  }
+}
+
 function hasFileExtension(value: string): boolean {
   return /\.[a-z0-9]{2,10}$/i.test(value);
 }
@@ -232,7 +270,9 @@ async function fetchExistingProductIds(
 ): Promise<Set<string>> {
   const existing = new Set<string>();
   for (const part of chunk(ids, 500)) {
-    const { data, error } = await supabase.from("products").select("id").in("id", part);
+    const { data, error } = await retryTransientSupabaseQuery(() =>
+      supabase.from("products").select("id").in("id", part),
+    );
     if (error) throw new Error(`Failed to query products: ${error.message}`);
     for (const row of data ?? []) {
       existing.add(row.id);
@@ -364,12 +404,16 @@ async function fetchExistingProductUsageByCity(
       { data: inventory, error: inventoryError },
       { data: orderItems, error: orderItemsError },
     ] = await Promise.all([
-      supabase.from("products").select("id").in("id", part),
-      supabase.from("inventory").select("product_id,city_id").in("product_id", part),
-      supabase
-        .from("order_items")
-        .select("product_id,orders!inner(city_id)")
-        .in("product_id", part),
+      retryTransientSupabaseQuery(() => supabase.from("products").select("id").in("id", part)),
+      retryTransientSupabaseQuery(() =>
+        supabase.from("inventory").select("product_id,city_id").in("product_id", part),
+      ),
+      retryTransientSupabaseQuery(() =>
+        supabase
+          .from("order_items")
+          .select("product_id,orders!inner(city_id)")
+          .in("product_id", part),
+      ),
     ]);
 
     if (productsError) throw new Error(`Failed to query products: ${productsError.message}`);
@@ -545,7 +589,7 @@ export async function importProductsCsv(params: {
     const rowMessages: string[] = [];
 
     let id = (record["id"] ?? "").trim();
-    if (id.length === 0) {
+    if (id.length === 0 || isNumericIdPlaceholder(id)) {
       id = crypto.randomUUID();
       record["id"] = id;
       generatedIds = true;

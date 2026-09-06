@@ -651,6 +651,11 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
             inventory deleted={result.sync.inventoryDeleted} products deleted=
             {result.sync.productsDeleted} archived={result.sync.productsArchived}
           </div>
+          {result.generatedIds ? (
+            <div className="text-xs text-muted-foreground">
+              Для новых строк созданы UUID. Скачайте файл с ними перед следующим импортом.
+            </div>
+          ) : null}
           {downloadUrl ? (
             <div>
               <a
@@ -658,7 +663,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
                 download={downloadName}
                 className="text-sm font-semibold text-[#66a3ff] hover:text-[#8fb9ff]"
               >
-                Download XLSX with generated IDs
+                Скачать XLSX с созданными UUID
               </a>
             </div>
           ) : null}

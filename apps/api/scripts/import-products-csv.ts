@@ -219,6 +219,44 @@ function parseUuid(value: string): boolean {
   );
 }
 
+function isNumericIdPlaceholder(value: string): boolean {
+  return /^\d+$/.test(value.trim());
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String(error.message)
+        : String(error);
+
+  return /fetch failed|network|timeout|econnreset|eai_again|enotfound|socket hang up/i.test(message);
+}
+
+async function retryTransientSupabaseQuery<T extends { error: unknown }>(
+  query: () => PromiseLike<T>,
+): Promise<T> {
+  const delaysMs = [250, 750];
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const result = await query();
+      if (!result.error || !isTransientNetworkError(result.error) || attempt === delaysMs.length) {
+        return result;
+      }
+    } catch (error) {
+      if (!isTransientNetworkError(error) || attempt === delaysMs.length) {
+        throw error;
+      }
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, delaysMs[attempt] ?? 0);
+    });
+  }
+}
+
 const TRUE_BOOL_VALUES = new Set([
   "true",
   "1",
@@ -329,7 +367,9 @@ async function fetchExistingProductIds(
 ): Promise<Set<string>> {
   const existing = new Set<string>();
   for (const part of chunk(ids, 500)) {
-    const { data, error } = await supabase.from("products").select("id").in("id", part);
+    const { data, error } = await retryTransientSupabaseQuery(() =>
+      supabase.from("products").select("id").in("id", part),
+    );
     if (error) throw new Error(`Failed to query products: ${error.message}`);
     for (const row of data ?? []) {
       const id = (row as { id?: unknown }).id;
@@ -426,7 +466,7 @@ async function main(): Promise<void> {
 
     let id = getCell(record, "id");
     let generatedId = false;
-    if (id.length === 0) {
+    if (id.length === 0 || isNumericIdPlaceholder(id)) {
       id = crypto.randomUUID();
       record["id"] = id;
       generatedId = true;
