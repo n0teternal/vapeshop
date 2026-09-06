@@ -233,15 +233,14 @@ textarea {
   padding: 1.25rem;
   color: #e7e0d4;
   text-align: left;
+  box-shadow: 0 0.75rem 1.5rem rgb(0 0 0 / 0.24), inset 0 1px rgb(255 255 255 / 0.12);
   transition: transform 140ms ease, filter 140ms ease;
 }
 
 .loyalty-band::before {
   position: absolute;
   inset: 0;
-  background:
-    repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.05) 0 1px, transparent 1px 5px),
-    linear-gradient(100deg, transparent 42%, rgb(255 239 204 / 0.06) 50%, transparent 58%);
+  background: linear-gradient(118deg, rgb(255 255 255 / 0.15), transparent 31%, transparent 71%, rgb(255 255 255 / 0.05));
   content: "";
   pointer-events: none;
 }
@@ -264,36 +263,40 @@ textarea {
 }
 
 .loyalty-band--locked {
-  border-color: #615b4e;
-  color: #d0c8ba;
+  border-color: #756751;
+  color: #eee4d3;
   background:
-    radial-gradient(circle at 86% 12%, rgb(206 181 113 / 0.12), transparent 34%),
-    linear-gradient(135deg, #3a3831 0%, #292721 58%, #1e1d19 100%);
+    radial-gradient(circle at 92% 7%, rgb(214 184 105 / 0.2), transparent 35%),
+    linear-gradient(135deg, #4a4337 0%, #302b24 54%, #1c1a17 100%);
 }
 
 .loyalty-band--bronze {
-  border-color: #a67b49;
-  color: #2c1a0b;
+  border-color: #efbe80;
+  color: #301606;
   background:
-    radial-gradient(circle at 88% 12%, rgb(255 229 185 / 0.25), transparent 35%),
-    linear-gradient(135deg, #aa7d4b 0%, #81562e 56%, #593718 100%);
+    radial-gradient(circle at 91% 5%, rgb(255 242 216 / 0.48), transparent 34%),
+    radial-gradient(circle at 4% 96%, rgb(74 31 4 / 0.26), transparent 47%),
+    linear-gradient(135deg, #dda66b 0%, #a25b29 47%, #52270e 100%);
+  box-shadow: 0 0.8rem 1.65rem rgb(35 14 2 / 0.34), inset 0 1px rgb(255 249 231 / 0.36);
 }
 
 .loyalty-band--silver {
-  border-color: #c9cbcd;
-  color: #25262a;
+  border-color: #f4f4ee;
+  color: #1e252e;
   background:
-    radial-gradient(circle at 89% 10%, rgb(255 255 255 / 0.56), transparent 35%),
-    linear-gradient(135deg, #dedfe1 0%, #bbbfc4 54%, #92979f 100%);
+    radial-gradient(circle at 91% 5%, rgb(255 255 255 / 0.9), transparent 35%),
+    linear-gradient(135deg, #f3f3ef 0%, #c7cbd2 47%, #767d89 100%);
+  box-shadow: 0 0.8rem 1.65rem rgb(8 14 23 / 0.3), inset 0 1px rgb(255 255 255 / 0.75);
 }
 
 .loyalty-band--gold {
-  border-color: #98792d;
-  color: #e7ca72;
+  border-color: #e0b53c;
+  color: #f6db88;
   background:
-    radial-gradient(circle at 89% 10%, rgb(240 203 101 / 0.2), transparent 33%),
-    linear-gradient(115deg, rgb(192 148 37 / 0.13), transparent 48%),
-    linear-gradient(135deg, #342a12 0%, #18140a 56%, #0c0b08 100%);
+    radial-gradient(circle at 91% 6%, rgb(255 225 133 / 0.32), transparent 34%),
+    linear-gradient(112deg, rgb(220 170 41 / 0.27), transparent 42%),
+    linear-gradient(135deg, #3a2b0b 0%, #171108 57%, #060605 100%);
+  box-shadow: 0 0.8rem 1.75rem rgb(0 0 0 / 0.45), inset 0 1px rgb(255 231 157 / 0.22);
 }
 
 .loyalty-band__title,
@@ -326,7 +329,7 @@ textarea {
   align-items: baseline;
   gap: 0.38rem;
   margin-top: 0.55rem;
-  color: #a7ddff;
+  color: #dfc98e;
   font-family: "Sora", "Manrope", sans-serif;
   font-weight: 700;
   line-height: 1;
@@ -348,15 +351,15 @@ textarea {
 }
 
 .loyalty-band--bronze .loyalty-band__cashback-rate {
-  color: #251506;
+  color: #351705;
 }
 
 .loyalty-band--silver .loyalty-band__cashback-rate {
-  color: #25262b;
+  color: #252c35;
 }
 
 .loyalty-band--gold .loyalty-band__cashback-rate {
-  color: #dfc06a;
+  color: #ffe19a;
 }
 
 .loyalty-band__progress-copy {
@@ -369,22 +372,22 @@ textarea {
 }
 
 .loyalty-band__progress-copy {
-  color: #c8c3b8;
+  color: #ddd0b9;
 }
 
 .loyalty-band--bronze .loyalty-band__progress-copy,
 .loyalty-band--bronze .loyalty-band__star {
-  color: #462a12;
+  color: #54250c;
 }
 
 .loyalty-band--silver .loyalty-band__progress-copy,
 .loyalty-band--silver .loyalty-band__star {
-  color: #4a4b50;
+  color: #3c4653;
 }
 
 .loyalty-band--gold .loyalty-band__progress-copy,
 .loyalty-band--gold .loyalty-band__star {
-  color: #dabe6a;
+  color: #f0ce72;
 }
 
 .loyalty-band__progress {
@@ -404,15 +407,15 @@ textarea {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #c8954e, #e0bb72);
+  background: linear-gradient(90deg, #ac9153, #f0d58c);
 }
 
 .loyalty-band--silver .loyalty-band__progress {
-  background: rgb(49 51 56 / 0.24);
+  background: rgb(35 42 52 / 0.3);
 }
 
 .loyalty-band--silver .loyalty-band__progress > span {
-  background: linear-gradient(90deg, #5d6168, #858a94);
+  background: linear-gradient(90deg, #465260, #eef0f0);
 }
 
 .loyalty-band--gold .loyalty-band__progress {
@@ -420,7 +423,7 @@ textarea {
 }
 
 .loyalty-band--gold .loyalty-band__progress > span {
-  background: linear-gradient(90deg, #9c741b, #f0cf6f);
+  background: linear-gradient(90deg, #a27514, #ffe08a);
 }
 
 .loyalty-points-summary {
