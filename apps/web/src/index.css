@@ -265,7 +265,8 @@ textarea {
   border-color: #365c84;
   color: #deebf8;
   background:
-    radial-gradient(circle at 90% 8%, rgb(98 165 226 / 0.14), transparent 35%),
+    radial-gradient(ellipse 74% 92% at 100% 0%, rgb(230 186 132 / 0.22), transparent 62%),
+    radial-gradient(ellipse 66% 80% at 0% 115%, rgb(230 186 132 / 0.08), transparent 68%),
     linear-gradient(135deg, #27425f 0%, #1a2e46 58%, #111f32 100%);
 }
 
@@ -273,7 +274,8 @@ textarea {
   border-color: #365c84;
   color: #deebf8;
   background:
-    radial-gradient(circle at 90% 8%, rgb(98 165 226 / 0.16), transparent 35%),
+    radial-gradient(ellipse 74% 92% at 100% 0%, rgb(219 233 247 / 0.2), transparent 62%),
+    radial-gradient(ellipse 66% 80% at 0% 115%, rgb(219 233 247 / 0.07), transparent 68%),
     linear-gradient(135deg, #294660 0%, #1b314a 58%, #122139 100%);
 }
 
@@ -281,7 +283,8 @@ textarea {
   border-color: #365c84;
   color: #deebf8;
   background:
-    radial-gradient(circle at 90% 8%, rgb(98 165 226 / 0.18), transparent 35%),
+    radial-gradient(ellipse 74% 92% at 100% 0%, rgb(240 202 102 / 0.22), transparent 62%),
+    radial-gradient(ellipse 66% 80% at 0% 115%, rgb(240 202 102 / 0.08), transparent 68%),
     linear-gradient(135deg, #243f5d 0%, #182d45 58%, #101e31 100%);
 }
 
