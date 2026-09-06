@@ -221,6 +221,7 @@ textarea {
 
 .loyalty-band {
   position: relative;
+  isolation: isolate;
   display: flex;
   min-height: 10.4rem;
   width: 100%;
@@ -262,30 +263,58 @@ textarea {
 }
 
 .loyalty-band--bronze {
+  --loyalty-tier-accent: 230 186 132;
+
   border-color: #365c84;
   color: #deebf8;
   background:
-    radial-gradient(ellipse 74% 92% at 100% 0%, rgb(230 186 132 / 0.22), transparent 62%),
-    radial-gradient(ellipse 66% 80% at 0% 115%, rgb(230 186 132 / 0.08), transparent 68%),
+    radial-gradient(ellipse 64% 110% at -20% 50%, rgb(var(--loyalty-tier-accent) / 0.22), transparent 70%),
+    radial-gradient(ellipse 64% 110% at 120% 50%, rgb(var(--loyalty-tier-accent) / 0.34), transparent 70%),
+    radial-gradient(ellipse 110% 64% at 50% -25%, rgb(var(--loyalty-tier-accent) / 0.18), transparent 70%),
+    radial-gradient(ellipse 110% 64% at 50% 125%, rgb(var(--loyalty-tier-accent) / 0.16), transparent 70%),
     linear-gradient(135deg, #27425f 0%, #1a2e46 58%, #111f32 100%);
 }
 
 .loyalty-band--silver {
+  --loyalty-tier-accent: 219 233 247;
+
   border-color: #365c84;
   color: #deebf8;
   background:
-    radial-gradient(ellipse 74% 92% at 100% 0%, rgb(219 233 247 / 0.2), transparent 62%),
-    radial-gradient(ellipse 66% 80% at 0% 115%, rgb(219 233 247 / 0.07), transparent 68%),
+    radial-gradient(ellipse 64% 110% at -20% 50%, rgb(var(--loyalty-tier-accent) / 0.18), transparent 70%),
+    radial-gradient(ellipse 64% 110% at 120% 50%, rgb(var(--loyalty-tier-accent) / 0.28), transparent 70%),
+    radial-gradient(ellipse 110% 64% at 50% -25%, rgb(var(--loyalty-tier-accent) / 0.15), transparent 70%),
+    radial-gradient(ellipse 110% 64% at 50% 125%, rgb(var(--loyalty-tier-accent) / 0.13), transparent 70%),
     linear-gradient(135deg, #294660 0%, #1b314a 58%, #122139 100%);
 }
 
 .loyalty-band--gold {
+  --loyalty-tier-accent: 240 202 102;
+
   border-color: #365c84;
   color: #deebf8;
   background:
-    radial-gradient(ellipse 74% 92% at 100% 0%, rgb(240 202 102 / 0.22), transparent 62%),
-    radial-gradient(ellipse 66% 80% at 0% 115%, rgb(240 202 102 / 0.08), transparent 68%),
+    radial-gradient(ellipse 64% 110% at -20% 50%, rgb(var(--loyalty-tier-accent) / 0.21), transparent 70%),
+    radial-gradient(ellipse 64% 110% at 120% 50%, rgb(var(--loyalty-tier-accent) / 0.34), transparent 70%),
+    radial-gradient(ellipse 110% 64% at 50% -25%, rgb(var(--loyalty-tier-accent) / 0.18), transparent 70%),
+    radial-gradient(ellipse 110% 64% at 50% 125%, rgb(var(--loyalty-tier-accent) / 0.16), transparent 70%),
     linear-gradient(135deg, #243f5d 0%, #182d45 58%, #101e31 100%);
+}
+
+.loyalty-band--bronze::before,
+.loyalty-band--silver::before,
+.loyalty-band--gold::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  content: "";
+  background-image: radial-gradient(circle, rgb(var(--loyalty-tier-accent) / 0.34) 0 0.8px, transparent 1.8px);
+  background-position: 1px 2px;
+  background-size: 17px 17px;
+  opacity: 0.72;
+  -webkit-mask-image: radial-gradient(ellipse 68% 96% at 45% 49%, #000 0 28%, transparent 82%);
+  mask-image: radial-gradient(ellipse 68% 96% at 45% 49%, #000 0 28%, transparent 82%);
 }
 
 .loyalty-band__title,
