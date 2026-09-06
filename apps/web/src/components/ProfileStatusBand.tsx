@@ -105,6 +105,20 @@ export function ProfileStatusBand({
         </span>
       </button>
 
+      <div
+        className="loyalty-points-summary__pager"
+        role="img"
+        aria-label={`Карточка ${tierIndex + 1} из ${STATUS_TIERS.length}`}
+      >
+        {STATUS_TIERS.map((statusTier, index) => (
+          <span
+            key={statusTier.name}
+            className={index === tierIndex ? "is-active" : undefined}
+            aria-hidden="true"
+          />
+        ))}
+      </div>
+
       <div className="loyalty-points-summary">
         <div className="loyalty-points-summary__row">
           <span>Баланс баллов</span>
@@ -113,19 +127,6 @@ export function ProfileStatusBand({
         <div className="loyalty-points-summary__row loyalty-points-summary__expiry">
           <span>{expiryDate ? "Сгорят, если не заказать до" : "Баллы пока не сгорают"}</span>
           {expiryDate ? <strong>{expiryDate}</strong> : null}
-        </div>
-        <div
-          className="loyalty-points-summary__pager"
-          role="img"
-          aria-label={`Карточка ${tierIndex + 1} из ${STATUS_TIERS.length}`}
-        >
-          {STATUS_TIERS.map((statusTier, index) => (
-            <span
-              key={statusTier.name}
-              className={index === tierIndex ? "is-active" : undefined}
-              aria-hidden="true"
-            />
-          ))}
         </div>
       </div>
     </section>
