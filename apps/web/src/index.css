@@ -264,36 +264,36 @@ textarea {
 }
 
 .loyalty-band--locked {
-  border-color: #5e5a51;
-  color: #c3c0b8;
+  border-color: #615b4e;
+  color: #d0c8ba;
   background:
-    radial-gradient(circle at 84% 15%, rgb(166 150 107 / 0.11), transparent 32%),
-    linear-gradient(135deg, #34332f 0%, #23231f 100%);
+    radial-gradient(circle at 86% 12%, rgb(206 181 113 / 0.12), transparent 34%),
+    linear-gradient(135deg, #3a3831 0%, #292721 58%, #1e1d19 100%);
 }
 
 .loyalty-band--bronze {
-  border-color: #9b6c35;
-  color: #311d0c;
+  border-color: #a67b49;
+  color: #2c1a0b;
   background:
-    radial-gradient(circle at 88% 12%, rgb(255 222 166 / 0.36), transparent 34%),
-    linear-gradient(135deg, #c7965c 0%, #9b6734 54%, #70451f 100%);
+    radial-gradient(circle at 88% 12%, rgb(255 229 185 / 0.25), transparent 35%),
+    linear-gradient(135deg, #aa7d4b 0%, #81562e 56%, #593718 100%);
 }
 
 .loyalty-band--silver {
-  border-color: #c7c9ca;
-  color: #2c2d31;
+  border-color: #c9cbcd;
+  color: #25262a;
   background:
-    radial-gradient(circle at 89% 10%, rgb(255 255 255 / 0.72), transparent 34%),
-    linear-gradient(135deg, #eceef1 0%, #c8cbd0 52%, #a7abb3 100%);
+    radial-gradient(circle at 89% 10%, rgb(255 255 255 / 0.56), transparent 35%),
+    linear-gradient(135deg, #dedfe1 0%, #bbbfc4 54%, #92979f 100%);
 }
 
 .loyalty-band--gold {
-  border-color: #896916;
-  color: #e6ca75;
+  border-color: #98792d;
+  color: #e7ca72;
   background:
-    radial-gradient(circle at 89% 10%, rgb(237 199 81 / 0.28), transparent 32%),
-    linear-gradient(115deg, rgb(192 148 37 / 0.19), transparent 48%),
-    linear-gradient(135deg, #29210c 0%, #111008 57%, #060604 100%);
+    radial-gradient(circle at 89% 10%, rgb(240 203 101 / 0.2), transparent 33%),
+    linear-gradient(115deg, rgb(192 148 37 / 0.13), transparent 48%),
+    linear-gradient(135deg, #342a12 0%, #18140a 56%, #0c0b08 100%);
 }
 
 .loyalty-band__title,
@@ -450,11 +450,11 @@ textarea {
 }
 
 .loyalty-points-summary__expiry {
-  color: #72869d;
+  color: #8fa4bc;
 }
 
 .loyalty-points-summary__expiry strong {
-  color: #b9c8da;
+  color: #dbe8f6;
 }
 
 .loyalty-points-summary__hint {
