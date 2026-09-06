@@ -1332,11 +1332,11 @@ function AdminStaffInventoryManager() {
         <div className="mt-1 text-xs text-muted-foreground">
           Эти операции меняют склад, но не создают заказ и не попадают в выручку.
         </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
+        <div className="mt-3 grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2">
           <select
             value={operationKind}
             onChange={(event) => setOperationKind(event.target.value as "defect" | "replacement")}
-            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+            className="min-w-0 w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
           >
             <option value="defect">Брак — списать товар</option>
             <option value="replacement">Замена — выдать новый товар</option>
@@ -1344,7 +1344,7 @@ function AdminStaffInventoryManager() {
           <select
             value={operationStaffId}
             onChange={(event) => setOperationStaffId(event.target.value)}
-            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+            className="min-w-0 w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
           >
             <option value="">Кто проводит операцию</option>
             {activeStaff.map((member) => (
@@ -1356,7 +1356,7 @@ function AdminStaffInventoryManager() {
           <select
             value={operationProductId}
             onChange={(event) => setOperationProductId(event.target.value)}
-            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+            className="min-w-0 w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
           >
             <option value="">{operationKind === "defect" ? "Какой товар списать" : "Какой новый товар выдать"}</option>
             {(snapshot?.products ?? []).map((product) => (
@@ -1369,7 +1369,7 @@ function AdminStaffInventoryManager() {
             <select
               value={returnedProductId}
               onChange={(event) => setReturnedProductId(event.target.value)}
-              className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+              className="min-w-0 w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
             >
               <option value="">Какой товар вернули как брак</option>
               {(snapshot?.products ?? []).map((product) => (
@@ -1384,7 +1384,7 @@ function AdminStaffInventoryManager() {
               onChange={(event) => setOperationQty(event.target.value)}
               inputMode="numeric"
               placeholder="Количество"
-              className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+              className="min-w-0 w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
             />
           )}
           {operationKind === "replacement" ? (
@@ -1393,14 +1393,14 @@ function AdminStaffInventoryManager() {
               onChange={(event) => setOperationQty(event.target.value)}
               inputMode="numeric"
               placeholder="Количество"
-              className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+              className="min-w-0 w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
             />
           ) : null}
           <input
             value={operationNote}
             onChange={(event) => setOperationNote(event.target.value)}
             placeholder="Комментарий (необязательно)"
-            className="rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
+            className="min-w-0 w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm"
           />
         </div>
         <button
