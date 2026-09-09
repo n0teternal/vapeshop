@@ -3,6 +3,8 @@ import type { OrderPaymentMethod } from "../order/telegramMessage.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import * as XLSX from "xlsx";
 
+const PRODUCT_ID_QUERY_CHUNK_SIZE = 100;
+
 export type StaffMember = {
   id: number;
   name: string;
@@ -20,6 +22,32 @@ export type IssuableInventoryProduct = {
   title: string;
   availableQty: number | null;
 };
+
+type ProductSummary = {
+  id: string;
+  title: string;
+  is_active: boolean;
+};
+
+async function loadProductSummaries(params: {
+  supabase: ReturnType<typeof createServiceSupabaseClient>;
+  productIds: string[];
+}): Promise<ProductSummary[]> {
+  const productIds = Array.from(new Set(params.productIds));
+  const products: ProductSummary[] = [];
+
+  for (let index = 0; index < productIds.length; index += PRODUCT_ID_QUERY_CHUNK_SIZE) {
+    const { data, error } = await params.supabase
+      .from("products")
+      .select("id,title,is_active")
+      .in("id", productIds.slice(index, index + PRODUCT_ID_QUERY_CHUNK_SIZE));
+
+    if (error) throw new HttpError(500, "DB", `Failed to load products: ${error.message}`);
+    products.push(...((data ?? []) as ProductSummary[]));
+  }
+
+  return products;
+}
 
 type StockLine = {
   productId: string;
@@ -124,13 +152,9 @@ export async function getStaffInventoryLines(params: {
 
   const productIds = (inventory ?? []).map((row) => row.product_id);
   if (productIds.length === 0) return [];
-  const { data: products, error: productsError } = await supabase
-    .from("products")
-    .select("id,title")
-    .in("id", productIds);
-  if (productsError) throw new HttpError(500, "DB", `Failed to load products: ${productsError.message}`);
+  const products = await loadProductSummaries({ supabase, productIds });
 
-  const titleByProductId = new Map((products ?? []).map((product) => [product.id, product.title]));
+  const titleByProductId = new Map(products.map((product) => [product.id, product.title]));
   return (inventory ?? [])
     .map((row) => ({
       productId: row.product_id,
@@ -174,15 +198,11 @@ export async function listIssuableInventoryProducts(cityId: number): Promise<Iss
   });
   if (rows.length === 0) return [];
 
-  const { data: products, error: productsError } = await supabase
-    .from("products")
-    .select("id,title,is_active")
-    .in(
-      "id",
-      rows.map((row) => row.product_id),
-    );
-  if (productsError) throw new HttpError(500, "DB", `Failed to load products: ${productsError.message}`);
-  const productById = new Map((products ?? []).map((product) => [product.id, product]));
+  const products = await loadProductSummaries({
+    supabase,
+    productIds: rows.map((row) => row.product_id),
+  });
+  const productById = new Map(products.map((product) => [product.id, product]));
 
   return rows
     .map((row) => {
