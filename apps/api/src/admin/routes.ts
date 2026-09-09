@@ -388,7 +388,17 @@ async function syncStaffInventoryFromWorkbook(params: {
     const totalStaffQty =
       (importedQtyByProductId.get(productId) ?? 0) + (retainedQtyByProductId.get(productId) ?? 0);
     if (totalStaffQty > cityQty) {
-      throw new HttpError(400, "STAFF_STOCK_EXCEEDS_CITY", "Staff stock cannot exceed city stock");
+      // The workbook records staff stock separately. Keep the city total large enough to cover it
+      // so later staff sales cannot make the shared city balance negative.
+      const { error } = await supabase
+        .from("inventory")
+        .update({ stock_qty: totalStaffQty, in_stock: totalStaffQty > 0 })
+        .eq("city_id", params.cityId)
+        .eq("product_id", productId);
+      if (error) {
+        throw new HttpError(500, "DB", `Failed to align city stock with staff stock: ${error.message}`);
+      }
+      cityQtyByProductId.set(productId, totalStaffQty);
     }
   }
 
