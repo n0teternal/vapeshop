@@ -3353,7 +3353,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const imageFileNames = new Set<string>();
-        if (useImagePrefix) {
+        if (config.productImagesBaseUrl) {
           const localFiles = await listLocalItemFiles(itemsDir);
           for (const file of localFiles) {
             imageFileNames.add(file.name);
@@ -3378,9 +3378,10 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           supabase,
           csvText,
           citySlug: parsedQuery.data.citySlug ?? null,
-          imageBaseUrl: useImagePrefix ? config.productImagesBaseUrl : null,
+          imageBaseUrl: config.productImagesBaseUrl,
+          allowBareImageFileNames: useImagePrefix,
           imageItemsDir: useImagePrefix ? itemsDir : null,
-          imageFileNames: useImagePrefix ? imageFileNames : null,
+          imageFileNames: config.productImagesBaseUrl ? imageFileNames : null,
         });
 
         const selectedCity = parsedQuery.data.citySlug

@@ -12,6 +12,8 @@ export type CsvRowError = {
   messages: string[];
 };
 
+export type CsvRowWarning = CsvRowError;
+
 export type ImportProductsCsvResult = {
   delimiter: ";" | "," | "\t";
   cities: Array<{ id: number; slug: string; name: string }>;
@@ -34,6 +36,7 @@ export type ImportProductsCsvResult = {
   generatedIds: boolean;
   outputXlsxBase64: string | null;
   errors: CsvRowError[];
+  warnings: CsvRowWarning[];
 };
 
 function detectDelimiter(text: string): ";" | "," | "\t" {
@@ -176,6 +179,47 @@ function hasFileExtension(value: string): boolean {
   return /\.[a-z0-9]{2,10}$/i.test(value);
 }
 
+function getImageFileNameUnderBase(imageUrl: URL, imageBaseUrl: string): string | null {
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(imageBaseUrl);
+  } catch {
+    return null;
+  }
+
+  if (imageUrl.origin !== baseUrl.origin || !imageUrl.pathname.startsWith(baseUrl.pathname)) {
+    return null;
+  }
+
+  const rawRelative = imageUrl.pathname.slice(baseUrl.pathname.length);
+  try {
+    return decodeURIComponent(rawRelative).replace(/^\/+/, "");
+  } catch {
+    return rawRelative.replace(/^\/+/, "");
+  }
+}
+
+function isUsableExistingImageUrl(params: {
+  imageUrl: string | null;
+  imageBaseUrl: string | null;
+  imageFileNames: Set<string> | null;
+}): boolean {
+  if (!params.imageUrl) return false;
+
+  let parsedImageUrl: URL;
+  try {
+    parsedImageUrl = new URL(params.imageUrl);
+  } catch {
+    return false;
+  }
+
+  if (parsedImageUrl.protocol !== "http:" && parsedImageUrl.protocol !== "https:") return false;
+  if (!params.imageBaseUrl || !params.imageFileNames) return true;
+
+  const fileName = getImageFileNameUnderBase(parsedImageUrl, params.imageBaseUrl);
+  return fileName === null || params.imageFileNames.has(fileName.toLowerCase());
+}
+
 const TRUE_BOOL_VALUES = new Set([
   "true",
   "1",
@@ -268,18 +312,22 @@ function chunk<T>(items: T[], size: number): T[][] {
 // produce URLs that some proxies reject before they reach PostgREST.
 const PRODUCT_ID_QUERY_CHUNK_SIZE = 100;
 
-async function fetchExistingProductIds(
+type ExistingProduct = {
+  imageUrl: string | null;
+};
+
+async function fetchExistingProducts(
   supabase: SupabaseClient<Database>,
   ids: string[],
-): Promise<Set<string>> {
-  const existing = new Set<string>();
+): Promise<Map<string, ExistingProduct>> {
+  const existing = new Map<string, ExistingProduct>();
   for (const part of chunk(ids, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
     const { data, error } = await retryTransientSupabaseQuery(() =>
-      supabase.from("products").select("id").in("id", part),
+      supabase.from("products").select("id,image_url").in("id", part),
     );
     if (error) throw new Error(`Failed to query products: ${error.message}`);
     for (const row of data ?? []) {
-      existing.add(row.id);
+      existing.set(row.id, { imageUrl: row.image_url });
     }
   }
   return existing;
@@ -459,6 +507,7 @@ export async function importProductsCsv(params: {
   dryRun?: boolean;
   citySlug?: string | null;
   imageBaseUrl?: string | null;
+  allowBareImageFileNames?: boolean;
   imageItemsDir?: string | null;
   imageFileNames?: Iterable<string> | null;
 }): Promise<ImportProductsCsvResult> {
@@ -563,6 +612,7 @@ export async function importProductsCsv(params: {
     base_price: number;
     image_url: string | null;
     is_active: boolean;
+    missingImageFileName: string | null;
   }> = [];
   const parsedInventory: Array<{
     product_id: string;
@@ -572,6 +622,7 @@ export async function importProductsCsv(params: {
     price_override: number | null;
   }> = [];
   const errors: CsvRowError[] = [];
+  const warnings: CsvRowWarning[] = [];
 
   let generatedIds = false;
 
@@ -617,6 +668,7 @@ export async function importProductsCsv(params: {
 
     const imageUrlRaw = (record["image_url"] ?? "").trim();
     let image_url: string | null = imageUrlRaw.length > 0 ? imageUrlRaw : null;
+    let missingImageFileName: string | null = null;
     if (image_url) {
       let parsedImageUrl: URL | null = null;
       try {
@@ -659,37 +711,36 @@ export async function importProductsCsv(params: {
         let fileNameForBase: string | null = null;
 
         if (parsedImageUrl) {
-          let baseUrl: URL | null = null;
-          try {
-            baseUrl = new URL(normalizedImageBaseUrl);
-          } catch {
-            baseUrl = null;
-          }
-
-          if (
-            baseUrl &&
-            parsedImageUrl.origin === baseUrl.origin &&
-            parsedImageUrl.pathname.startsWith(baseUrl.pathname)
-          ) {
-            const rawRelative = parsedImageUrl.pathname.slice(baseUrl.pathname.length);
-            try {
-              fileNameForBase = decodeURIComponent(rawRelative).replace(/^\/+/, "");
-            } catch {
-              fileNameForBase = rawRelative.replace(/^\/+/, "");
-            }
-          }
-        } else {
+          fileNameForBase = getImageFileNameUnderBase(parsedImageUrl, normalizedImageBaseUrl);
+        } else if (params.allowBareImageFileNames === true) {
           fileNameForBase = image_url;
         }
 
         if (fileNameForBase) {
           const resolvedFileName = resolveFileNameExtension(fileNameForBase);
-          const encodedName = resolvedFileName
-            .split("/")
-            .filter((part) => part.length > 0)
-            .map((part) => encodeURIComponent(part))
-            .join("/");
-          image_url = `${normalizedImageBaseUrl}${encodedName}`;
+          if (
+            normalizedImageFileNames &&
+            !normalizedImageFileNames.has(resolvedFileName.toLowerCase())
+          ) {
+            // Keep the row in the import: skipping it would make city sync remove its inventory.
+            missingImageFileName = resolvedFileName;
+            image_url = null;
+            warnings.push({
+              rowNum,
+              id: id.length > 0 ? id : null,
+              title: title.length > 0 ? title : null,
+              messages: [
+                `image file is missing from storage: ${resolvedFileName}; a valid current photo will be kept when available`,
+              ],
+            });
+          } else {
+            const encodedName = resolvedFileName
+              .split("/")
+              .filter((part) => part.length > 0)
+              .map((part) => encodeURIComponent(part))
+              .join("/");
+            image_url = `${normalizedImageBaseUrl}${encodedName}`;
+          }
         } else if (!parsedImageUrl) {
           rowMessages.push(`image_url is not a valid URL (got: ${image_url})`);
         }
@@ -782,6 +833,7 @@ export async function importProductsCsv(params: {
       base_price,
       image_url,
       is_active,
+      missingImageFileName,
     });
     parsedInventory.push(...invRows);
   }
@@ -826,11 +878,26 @@ export async function importProductsCsv(params: {
     }
   }
 
-  const existingIds = await fetchExistingProductIds(
+  const existingProducts = await fetchExistingProducts(
     params.supabase,
     parsedProducts.map((p) => p.id),
   );
-  const inserted = parsedProducts.filter((p) => !existingIds.has(p.id)).length;
+  for (const product of parsedProducts) {
+    if (!product.missingImageFileName) continue;
+
+    const existingImageUrl = existingProducts.get(product.id)?.imageUrl ?? null;
+    if (
+      isUsableExistingImageUrl({
+        imageUrl: existingImageUrl,
+        imageBaseUrl: normalizedImageBaseUrl,
+        imageFileNames: normalizedImageFileNames,
+      })
+    ) {
+      product.image_url = existingImageUrl;
+    }
+  }
+
+  const inserted = parsedProducts.filter((p) => !existingProducts.has(p.id)).length;
   const updated = parsedProducts.length - inserted;
   const sync = {
     citySlug: targetCity?.slug ?? null,
@@ -858,7 +925,9 @@ export async function importProductsCsv(params: {
     }
 
     for (const part of chunk(parsedProducts, 200)) {
-      const payload = part.map(({ rowNum: _rowNum, ...product }) => product);
+      const payload = part.map(
+        ({ rowNum: _rowNum, missingImageFileName: _missingImageFileName, ...product }) => product,
+      );
       const { error } = await params.supabase.from("products").upsert(payload, { onConflict: "id" });
       if (error) throw new Error(`Failed to upsert products: ${error.message}`);
     }
@@ -945,5 +1014,6 @@ export async function importProductsCsv(params: {
     generatedIds,
     outputXlsxBase64,
     errors,
+    warnings,
   };
 }

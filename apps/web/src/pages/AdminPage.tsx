@@ -78,6 +78,12 @@ type ImportProductsCsvResult = {
     title: string | null;
     messages: string[];
   }>;
+  warnings: Array<{
+    rowNum: number;
+    id: string | null;
+    title: string | null;
+    messages: string[];
+  }>;
 };
 
 type ImportPromoProductsCsvResult = {
@@ -842,6 +848,30 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
                 ))}
                 {result.errors.length > 20 ? (
                   <div className="text-muted-foreground">...and {result.errors.length - 20} more</div>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+
+          {result.warnings.length > 0 ? (
+            <details className="rounded-xl border border-amber-400/35 bg-amber-400/10 px-3 py-2">
+              <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                Image warnings ({result.warnings.length})
+              </summary>
+              <div className="mt-2 space-y-2 text-xs text-foreground/80">
+                {result.warnings.slice(0, 20).map((warning) => (
+                  <div key={`image-warning-${warning.rowNum}`}>
+                    <div className="font-semibold">
+                      row {warning.rowNum}
+                      {warning.title ? ` (${warning.title})` : ""}
+                    </div>
+                    <div className="text-foreground/80">{warning.messages.join("; ")}</div>
+                  </div>
+                ))}
+                {result.warnings.length > 20 ? (
+                  <div className="text-muted-foreground">
+                    ...and {result.warnings.length - 20} more
+                  </div>
                 ) : null}
               </div>
             </details>
