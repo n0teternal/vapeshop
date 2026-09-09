@@ -203,7 +203,7 @@ function getImageFileNameUnderBase(imageUrl: URL, imageBaseUrl: string): string 
 function isUsableExistingImageUrl(params: {
   imageUrl: string | null;
   imageBaseUrl: string | null;
-  imageFileNames: Set<string> | null;
+  imageFileNames: Map<string, string> | null;
 }): boolean {
   if (!params.imageUrl) return false;
 
@@ -515,7 +515,7 @@ export async function importProductsCsv(params: {
   const dryRun = params.dryRun === true;
   const imageBaseUrlRaw = params.imageBaseUrl?.trim() ?? "";
   const normalizedImageFileNames = params.imageFileNames
-    ? new Set(Array.from(params.imageFileNames, (x) => x.toLowerCase()))
+    ? new Map(Array.from(params.imageFileNames, (name) => [name.toLowerCase(), name]))
     : null;
   let normalizedImageBaseUrl: string | null = null;
   if (imageBaseUrlRaw) {
@@ -683,15 +683,18 @@ export async function importProductsCsv(params: {
 
       const resolveFileNameExtension = (inputName: string): string => {
         const trimmed = inputName.trim().replace(/^\/+/, "");
-        if (!trimmed || hasFileExtension(trimmed)) return trimmed;
+        if (!trimmed) return trimmed;
+
+        const exactStoredName = normalizedImageFileNames?.get(trimmed.toLowerCase());
+        if (exactStoredName) return exactStoredName;
+        if (hasFileExtension(trimmed)) return trimmed;
 
         const variants = [".webp", ".jpg", ".jpeg", ".png"];
         if (normalizedImageFileNames) {
           for (const ext of variants) {
             const candidate = trimmed + ext;
-            if (normalizedImageFileNames.has(candidate.toLowerCase())) {
-              return candidate;
-            }
+            const storedName = normalizedImageFileNames.get(candidate.toLowerCase());
+            if (storedName) return storedName;
           }
         }
 
