@@ -135,6 +135,9 @@ type ImportedStaffInventoryRow = {
   stockQty: number;
 };
 
+// PostgREST serializes `.in()` values into the URL, so a whole workbook does not fit in one query.
+const STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE = 100;
+
 function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
   const book = XLSX.read(buffer, { type: "buffer" });
   const staffRows: ImportedStaffInventoryRow[] = [];
@@ -182,34 +185,56 @@ async function syncStaffInventoryFromWorkbook(params: {
   const supabase = createServiceSupabaseClient();
   const staffIds = Array.from(new Set(rows.map((row) => row.staffId)));
   const productIds = Array.from(new Set(rows.map((row) => row.productId)));
-  const [{ data: staff, error: staffError }, { data: cityInventory, error: cityInventoryError }, { data: currentAllocations, error: allocationsError }] =
-    await Promise.all([
+  const productIdChunks = chunk(productIds, STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE);
+  const [staffResult, cityInventoryResults, allocationResults] = await Promise.all([
       supabase.from("staff_members").select("id").in("id", staffIds),
-      supabase
-        .from("inventory")
-        .select("product_id,stock_qty")
-        .eq("city_id", params.cityId)
-        .in("product_id", productIds),
-      supabase
-        .from("staff_inventory")
-        .select("staff_id,product_id,stock_qty")
-        .eq("city_id", params.cityId)
-        .in("product_id", productIds),
+      Promise.all(
+        productIdChunks.map((productIdChunk) =>
+          supabase
+            .from("inventory")
+            .select("product_id,stock_qty")
+            .eq("city_id", params.cityId)
+            .in("product_id", productIdChunk),
+        ),
+      ),
+      Promise.all(
+        productIdChunks.map((productIdChunk) =>
+          supabase
+            .from("staff_inventory")
+            .select("staff_id,product_id,stock_qty")
+            .eq("city_id", params.cityId)
+            .in("product_id", productIdChunk),
+        ),
+      ),
     ]);
 
-  if (staffError) throw new HttpError(500, "DB", `Failed to load staff: ${staffError.message}`);
-  if (cityInventoryError) {
-    throw new HttpError(500, "DB", `Failed to load city inventory: ${cityInventoryError.message}`);
-  }
-  if (allocationsError) {
-    throw new HttpError(500, "DB", `Failed to load staff inventory: ${allocationsError.message}`);
+  if (staffResult.error) throw new HttpError(500, "DB", `Failed to load staff: ${staffResult.error.message}`);
+
+  const cityInventory = [] as Array<{ product_id: string; stock_qty: number | null }>;
+  for (const result of cityInventoryResults) {
+    if (result.error) {
+      throw new HttpError(500, "DB", `Failed to load city inventory: ${result.error.message}`);
+    }
+    cityInventory.push(...(result.data ?? []));
   }
 
-  if ((staff ?? []).length !== staffIds.length) {
+  const currentAllocations = [] as Array<{
+    staff_id: number;
+    product_id: string;
+    stock_qty: number;
+  }>;
+  for (const result of allocationResults) {
+    if (result.error) {
+      throw new HttpError(500, "DB", `Failed to load staff inventory: ${result.error.message}`);
+    }
+    currentAllocations.push(...(result.data ?? []));
+  }
+
+  if ((staffResult.data ?? []).length !== staffIds.length) {
     throw new HttpError(400, "BAD_REQUEST", "Workbook references an unknown staff member");
   }
 
-  const cityQtyByProductId = new Map((cityInventory ?? []).map((row) => [row.product_id, row.stock_qty]));
+  const cityQtyByProductId = new Map(cityInventory.map((row) => [row.product_id, row.stock_qty]));
   for (const productId of productIds) {
     if (!cityQtyByProductId.has(productId)) {
       throw new HttpError(400, "BAD_REQUEST", "Workbook references a product missing from city inventory");
@@ -221,7 +246,7 @@ async function syncStaffInventoryFromWorkbook(params: {
     importedQtyByProductId.set(row.productId, (importedQtyByProductId.get(row.productId) ?? 0) + row.stockQty);
   }
   const retainedQtyByProductId = new Map<string, number>();
-  for (const allocation of currentAllocations ?? []) {
+  for (const allocation of currentAllocations) {
     if (staffIds.includes(allocation.staff_id)) continue;
     retainedQtyByProductId.set(
       allocation.product_id,
