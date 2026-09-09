@@ -264,12 +264,16 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+// Supabase encodes `.in()` filters into the request URL. UUID batches of 500
+// produce URLs that some proxies reject before they reach PostgREST.
+const PRODUCT_ID_QUERY_CHUNK_SIZE = 100;
+
 async function fetchExistingProductIds(
   supabase: SupabaseClient<Database>,
   ids: string[],
 ): Promise<Set<string>> {
   const existing = new Set<string>();
-  for (const part of chunk(ids, 500)) {
+  for (const part of chunk(ids, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
     const { data, error } = await retryTransientSupabaseQuery(() =>
       supabase.from("products").select("id").in("id", part),
     );
@@ -319,7 +323,7 @@ async function fetchProductIdsWithInventory(
 ): Promise<Set<string>> {
   const productIds = new Set<string>();
 
-  for (const part of chunk(ids, 500)) {
+  for (const part of chunk(ids, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
     const { data, error } = await supabase
       .from("inventory")
       .select("product_id")
@@ -343,7 +347,7 @@ async function fetchProductIdsWithOrderItems(
 ): Promise<Set<string>> {
   const productIds = new Set<string>();
 
-  for (const part of chunk(ids, 500)) {
+  for (const part of chunk(ids, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
     const { data, error } = await supabase
       .from("order_items")
       .select("product_id")
@@ -398,7 +402,7 @@ async function fetchExistingProductUsageByCity(
 ): Promise<Map<string, ExistingProductUsage>> {
   const usageByProductId = new Map<string, ExistingProductUsage>();
 
-  for (const part of chunk(ids, 500)) {
+  for (const part of chunk(ids, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
     const [
       { data: products, error: productsError },
       { data: inventory, error: inventoryError },
@@ -837,7 +841,10 @@ export async function importProductsCsv(params: {
 
   if (!dryRun) {
     if (targetCity && detachedSourceProductIds.size > 0) {
-      for (const part of chunk(Array.from(detachedSourceProductIds), 500)) {
+      for (const part of chunk(
+        Array.from(detachedSourceProductIds),
+        PRODUCT_ID_QUERY_CHUNK_SIZE,
+      )) {
         const { error } = await params.supabase
           .from("inventory")
           .delete()
@@ -870,7 +877,7 @@ export async function importProductsCsv(params: {
       );
 
       if (obsoleteProductIds.length > 0) {
-        for (const part of chunk(obsoleteProductIds, 500)) {
+        for (const part of chunk(obsoleteProductIds, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
           const { error } = await params.supabase
             .from("inventory")
             .delete()
@@ -897,13 +904,13 @@ export async function importProductsCsv(params: {
           idsWithOrderItems.has(productId),
         );
 
-        for (const part of chunk(deletableProductIds, 500)) {
+        for (const part of chunk(deletableProductIds, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
           const { error } = await params.supabase.from("products").delete().in("id", part);
           if (error) throw new Error(`Failed to delete obsolete products: ${error.message}`);
         }
         sync.productsDeleted = deletableProductIds.length;
 
-        for (const part of chunk(archivableProductIds, 500)) {
+        for (const part of chunk(archivableProductIds, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
           const { error } = await params.supabase
             .from("products")
             .update({ is_active: false })
