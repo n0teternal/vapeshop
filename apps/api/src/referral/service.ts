@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import { config } from "../config.js";
 import { HttpError } from "../httpError.js";
+import {
+  CASHBACK_TIERS,
+  calculateCashbackEligibleAmount,
+  calculateOrderCashback,
+  type CashbackTier,
+} from "../loyalty/cashback.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { getBotUsername } from "../telegram/api.js";
 
@@ -13,6 +19,7 @@ const POINTS_BALANCE_PAGE_SIZE = 1000;
 const REFERRAL_INVITER_BONUS_KIND = "referral_inviter_bonus";
 const REFERRAL_INVITEE_BONUS_KIND = "referral_invitee_bonus";
 const ORDER_POINTS_SPEND_KIND = "order_points_spend";
+const ORDER_CASHBACK_KIND = "order_cashback";
 
 let cachedBotUsername: string | null | undefined;
 
@@ -56,6 +63,21 @@ type LoyaltyTransactionRow = {
   created_at: string;
 };
 
+type CashbackOrderRow = {
+  id: string;
+  status: string;
+  tg_user_id: number;
+  tg_username: string | null;
+  promotion_discount_amount: unknown;
+  coupon_discount_amount: unknown;
+  discount_amount: unknown;
+};
+
+type CashbackOrderItemRow = {
+  qty: unknown;
+  unit_price: unknown;
+};
+
 export type ReferralInviteeStatus =
   | "joined_no_order"
   | "first_order_created_not_paid"
@@ -73,6 +95,7 @@ export type ReferralOverview = {
   };
   pointsBalance: number;
   pointsNextExpiresAt: string | null;
+  cashbackTiers: CashbackTier[];
   pointsHistory: Array<{
     id: number;
     deltaPoints: number;
@@ -681,6 +704,7 @@ export async function getReferralOverview(params: {
     },
     pointsBalance: points.balance,
     pointsNextExpiresAt: points.nextExpiresAt,
+    cashbackTiers: [...CASHBACK_TIERS],
     pointsHistory: ((historyRows ?? []) as LoyaltyTransactionRow[]).map((row) => ({
       id: row.id,
       deltaPoints: row.delta_points,
@@ -712,6 +736,97 @@ export async function getReferralOverview(params: {
       hasMore,
     },
   };
+}
+
+export async function processOrderCashbackForOrderDone(params: {
+  orderId: string;
+}): Promise<{ awarded: boolean; points: number }> {
+  const supabase = createServiceSupabaseClient();
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .select(
+      "id,status,tg_user_id,tg_username,promotion_discount_amount,coupon_discount_amount,discount_amount",
+    )
+    .eq("id", params.orderId)
+    .maybeSingle();
+
+  if (orderError) {
+    throw new HttpError(500, "DB", `Failed to load order for cashback: ${orderError.message}`);
+  }
+  if (!order || order.status !== "done") return { awarded: false, points: 0 };
+
+  const cashbackOrder = order as CashbackOrderRow;
+  const { data: orderItems, error: orderItemsError } = await supabase
+    .from("order_items")
+    .select("qty,unit_price")
+    .eq("order_id", cashbackOrder.id);
+
+  if (orderItemsError) {
+    throw new HttpError(500, "DB", `Failed to load order items for cashback: ${orderItemsError.message}`);
+  }
+
+  const itemsSubtotal = (orderItems ?? []).reduce((sum, row) => {
+    const item = row as CashbackOrderItemRow;
+    const qty = Math.max(0, Math.trunc(numberFromUnknown(item.qty)));
+    const unitPrice = Math.max(0, numberFromUnknown(item.unit_price));
+    return sum + qty * unitPrice;
+  }, 0);
+  const promotionDiscount = Math.max(
+    0,
+    numberFromUnknown(cashbackOrder.promotion_discount_amount ?? 0),
+  );
+  const couponDiscount = Math.max(0, numberFromUnknown(cashbackOrder.coupon_discount_amount ?? 0));
+  const pointsDiscount = Math.max(0, numberFromUnknown(cashbackOrder.discount_amount ?? 0));
+  const cashback = calculateOrderCashback(
+    calculateCashbackEligibleAmount({
+      itemsSubtotalRub: itemsSubtotal,
+      promotionDiscountRub: promotionDiscount,
+      couponDiscountRub: couponDiscount,
+      pointsDiscountRub: pointsDiscount,
+    }),
+  );
+
+  if (!cashback.tier || cashback.points <= 0) {
+    return { awarded: false, points: 0 };
+  }
+
+  // A customer profile is normally created when the Mini App opens. Keep the
+  // completion flow resilient for orders created through an older client.
+  await ensureCustomerProfile({
+    tgUserId: cashbackOrder.tg_user_id,
+    tgUsername: cashbackOrder.tg_username,
+  });
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from("loyalty_transactions")
+    .select("id")
+    .eq("tg_user_id", cashbackOrder.tg_user_id)
+    .eq("kind", ORDER_CASHBACK_KIND)
+    .eq("order_id", cashbackOrder.id)
+    .limit(1);
+
+  if (existingError) {
+    throw new HttpError(500, "DB", `Failed to check order cashback: ${existingError.message}`);
+  }
+  if ((existingRows ?? []).length > 0) {
+    return { awarded: false, points: 0 };
+  }
+
+  const { error: insertError } = await supabase.from("loyalty_transactions").insert({
+    tg_user_id: cashbackOrder.tg_user_id,
+    delta_points: cashback.points,
+    kind: ORDER_CASHBACK_KIND,
+    order_id: cashbackOrder.id,
+    created_at: new Date().toISOString(),
+  });
+
+  if (insertError) {
+    const errorCode = (insertError as { code?: string } | null)?.code ?? "";
+    if (errorCode === "23505") return { awarded: false, points: 0 };
+    throw new HttpError(500, "DB", `Failed to add cashback: ${insertError.message}`);
+  }
+
+  return { awarded: true, points: cashback.points };
 }
 
 export async function processReferralRewardForOrderDone(params: {

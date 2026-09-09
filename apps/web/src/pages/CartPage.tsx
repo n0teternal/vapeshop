@@ -27,6 +27,10 @@ import {
   type DeliveryPricingRule,
 } from "../lib/deliveryPricingCache";
 import {
+  calculateCashbackProjection,
+  type CashbackTier,
+} from "../lib/cashback";
+import {
   getOrderEditRemainingMs,
   useAppState,
   type CartItem,
@@ -61,6 +65,7 @@ type OrderApiError = {
 
 type ReferralOverviewBalance = {
   pointsBalance: number;
+  cashbackTiers?: CashbackTier[];
   rewardPoints?: {
     pointsExpireAfterMonths?: number;
     pointsMaxSpendPercent?: number;
@@ -635,6 +640,7 @@ export function CartPage() {
   const [pointsMaxSpendPercent, setPointsMaxSpendPercent] = useState(
     DEFAULT_POINTS_MAX_SPEND_PERCENT,
   );
+  const [cashbackTiers, setCashbackTiers] = useState<CashbackTier[]>([]);
   const [activePromotionRules, setActivePromotionRules] = useState<ActivePromotionRule[]>([]);
   const [couponCode, setCouponCode] = useState("");
   const [couponPreview, setCouponPreview] = useState<CouponPreviewResponse | null>(null);
@@ -829,6 +835,14 @@ export function CartPage() {
       ? maxPointsToSpend
       : 0;
   const totalToPay = Math.max(0, totalAfterCouponDiscount - pointsToSpend);
+  const cashbackProjection = useMemo(
+    () =>
+      calculateCashbackProjection(
+        Math.max(0, itemsAfterCouponDiscount - pointsToSpend),
+        cashbackTiers,
+      ),
+    [cashbackTiers, itemsAfterCouponDiscount, pointsToSpend],
+  );
   const checkoutHasDiscount = discountsAllowed && totalToPay < total;
   const checkoutButtonLabel = submitting
     ? orderEditSession
@@ -859,6 +873,19 @@ export function CartPage() {
         "/api/referrals/overview?limit=1&offset=0",
       );
       setPointsBalance(Math.max(0, Math.trunc(data.pointsBalance)));
+      setCashbackTiers(
+        Array.isArray(data.cashbackTiers)
+          ? data.cashbackTiers.filter(
+              (tier) =>
+                typeof tier?.id === "string" &&
+                typeof tier.name === "string" &&
+                Number.isFinite(tier.minOrderTotalRub) &&
+                Number.isFinite(tier.ratePercent) &&
+                tier.minOrderTotalRub > 0 &&
+                tier.ratePercent > 0,
+            )
+          : [],
+      );
 
       const nextExpireAfterMonths = data.rewardPoints?.pointsExpireAfterMonths;
       if (
@@ -887,6 +914,7 @@ export function CartPage() {
         ) {
           setPointsBalance(0);
           setPointsEnabled(false);
+          setCashbackTiers([]);
           return;
         }
         setPointsError(e.message);
@@ -1880,6 +1908,15 @@ export function CartPage() {
                 ) : null}
               </div>
             )
+          ) : null}
+
+          {!orderEditSession && cashbackProjection.points > 0 ? (
+            <div className="rounded-md border border-emerald-500/35 bg-emerald-500/10 p-3 text-sm text-emerald-500">
+              После получения заказа начислим +{formatPriceRub(cashbackProjection.points)} кэшбека
+              {cashbackProjection.tier
+                ? ` (${cashbackProjection.tier.ratePercent}%)`
+                : ""}.
+            </div>
           ) : null}
 
           {submitError ? (

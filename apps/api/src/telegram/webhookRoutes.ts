@@ -14,6 +14,7 @@ import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import {
   bootstrapReferralProfile,
   getCustomerReferralShare,
+  processOrderCashbackForOrderDone,
   processReferralRewardForOrderDone,
 } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
@@ -1100,6 +1101,12 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         await processReferralRewardForOrderDone({ orderId: order.id });
       } catch (e) {
         request.log.error({ err: e, orderId: order.id }, "Failed to process referral reward");
+      }
+
+      try {
+        await processOrderCashbackForOrderDone({ orderId: order.id });
+      } catch (e) {
+        request.log.error({ err: e, orderId: order.id }, "Failed to process order cashback");
       }
     }
 

@@ -27,7 +27,10 @@ import {
   PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
   PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE,
 } from "../promotions/rules.js";
-import { processReferralRewardForOrderDone } from "../referral/service.js";
+import {
+  processOrderCashbackForOrderDone,
+  processReferralRewardForOrderDone,
+} from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
   applyStaffInventoryOperation,
@@ -3864,6 +3867,12 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             await processReferralRewardForOrderDone({ orderId: data.id });
           } catch (e) {
             request.log.error({ err: e, orderId: data.id }, "Failed to process referral reward");
+          }
+
+          try {
+            await processOrderCashbackForOrderDone({ orderId: data.id });
+          } catch (e) {
+            request.log.error({ err: e, orderId: data.id }, "Failed to process order cashback");
           }
         }
 

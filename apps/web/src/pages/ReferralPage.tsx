@@ -100,6 +100,7 @@ function inviteeAvatarLetter(row: ReferralOverview["referrals"][number]): string
 function pointsKindLabel(kind: string): string {
   if (kind === "referral_inviter_bonus") return "Бонус за приглашенного";
   if (kind === "referral_invitee_bonus") return "Бонус за первый заказ";
+  if (kind === "order_cashback") return "Кэшбек за заказ";
   if (kind === "order_points_spend") return "Списание баллов";
   return kind;
 }

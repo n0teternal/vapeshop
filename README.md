@@ -114,6 +114,7 @@ Dashboard → **SQL Editor** → выполните:
 Dashboard → **SQL Editor** → выполните:
 - SQL рефералок (profiles/referrals/coupons + поля в orders)
 - `supabase/alter_referrals_loyalty.sql` (ledger баллов + индексы + `tg_username`)
+- `supabase/alter_cashback.sql` (защита от повторного начисления кэшбека за один заказ)
 - `supabase/alter_promo_products.sql` (admin-only промо-товары по городам: старая/новая цена)
 - `supabase/alter_promotion_rules.sql` (правила автоматических скидок и типы акций)
 

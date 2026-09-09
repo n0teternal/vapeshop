@@ -26,6 +26,12 @@ create unique index if not exists loyalty_order_points_spend_unique_idx
   where order_id is not null
     and kind = 'order_points_spend';
 
+-- Prevent duplicate cashback credits when an order completion event is retried.
+create unique index if not exists loyalty_order_cashback_unique_idx
+  on public.loyalty_transactions (tg_user_id, order_id)
+  where order_id is not null
+    and kind = 'order_cashback';
+
 create index if not exists loyalty_transactions_user_created_idx
   on public.loyalty_transactions (tg_user_id, created_at desc);
 
