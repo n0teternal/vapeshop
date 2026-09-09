@@ -133,6 +133,14 @@ type ImportedStaffInventoryRow = {
   staffId: number;
   productId: string;
   stockQty: number;
+  product: {
+    title: string;
+    description: string | null;
+    categorySlug: string;
+    basePrice: number;
+    imageUrl: string | null;
+    isActive: boolean;
+  };
 };
 
 // PostgREST serializes `.in()` values into the URL, so a whole workbook does not fit in one query.
@@ -157,6 +165,12 @@ function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
       const productId = String(row.id ?? "").trim();
       const stockQtyRaw = String(row.staff_stock_qty ?? "").trim();
       const stockQty = stockQtyRaw.length === 0 ? 0 : Number(stockQtyRaw);
+      const title = String(row.title ?? "").trim();
+      const descriptionRaw = String(row.description ?? "").trim();
+      const categorySlug = String(row.category_slug ?? "other").trim() || "other";
+      const basePrice = Number(String(row.base_price ?? "").trim());
+      const imageUrlRaw = String(row.image_url ?? "").trim();
+      const isActive = !["false", "0", "no"].includes(String(row.is_active ?? "true").trim().toLowerCase());
 
       if (!Number.isSafeInteger(staffId) || staffId <= 0) {
         throw new HttpError(400, "BAD_REQUEST", `Invalid staff_id in sheet ${sheetName}`);
@@ -168,7 +182,19 @@ function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
         throw new HttpError(400, "BAD_REQUEST", `Invalid staff_stock_qty in sheet ${sheetName}`);
       }
 
-      staffRows.push({ staffId, productId, stockQty });
+      staffRows.push({
+        staffId,
+        productId,
+        stockQty,
+        product: {
+          title,
+          description: descriptionRaw || null,
+          categorySlug,
+          basePrice,
+          imageUrl: imageUrlRaw || null,
+          isActive,
+        },
+      });
     }
   }
 
@@ -243,11 +269,96 @@ async function syncStaffInventoryFromWorkbook(params: {
     (row) => !cityQtyByProductId.has(row.productId) && row.stockQty > 0,
   );
   if (missingRowsWithStock.length > 0) {
-    throw new HttpError(
-      400,
-      "BAD_REQUEST",
-      "Workbook references a product with staff stock that is missing from city inventory",
+    const missingProductIds = Array.from(
+      new Set(missingRowsWithStock.map((row) => row.productId)),
     );
+    const existingProductIds = new Set<string>();
+    for (const productIdChunk of chunk(
+      missingProductIds,
+      STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE,
+    )) {
+      const { data, error } = await supabase
+        .from("products")
+        .select("id")
+        .in("id", productIdChunk);
+      if (error) throw new HttpError(500, "DB", `Failed to load missing products: ${error.message}`);
+      for (const product of data ?? []) existingProductIds.add(product.id);
+    }
+
+    const sourceRowByProductId = new Map<string, ImportedStaffInventoryRow>();
+    for (const row of missingRowsWithStock) {
+      if (!sourceRowByProductId.has(row.productId)) sourceRowByProductId.set(row.productId, row);
+    }
+
+    const productsToRestore = missingProductIds
+      .filter((productId) => !existingProductIds.has(productId))
+      .map((productId) => {
+        const source = sourceRowByProductId.get(productId);
+        if (!source) throw new HttpError(500, "DB", "Missing staff product source row");
+        const product = source.product;
+        if (
+          product.title.length === 0 ||
+          !Number.isFinite(product.basePrice) ||
+          product.basePrice < 0 ||
+          !/^[a-z0-9][a-z0-9_-]*$/i.test(product.categorySlug)
+        ) {
+          throw new HttpError(
+            400,
+            "BAD_REQUEST",
+            `Cannot restore product ${productId} from staff sheet`,
+          );
+        }
+        return {
+          id: productId,
+          title: product.title,
+          description: product.description,
+          category_slug: product.categorySlug,
+          base_price: product.basePrice,
+          image_url: product.imageUrl,
+          is_active: product.isActive,
+        };
+      });
+    if (productsToRestore.length > 0) {
+      const { error } = await supabase.from("products").upsert(productsToRestore, { onConflict: "id" });
+      if (error) throw new HttpError(500, "DB", `Failed to restore staff products: ${error.message}`);
+    }
+
+    const importedQtyByMissingProductId = new Map<string, number>();
+    for (const row of missingRowsWithStock) {
+      importedQtyByMissingProductId.set(
+        row.productId,
+        (importedQtyByMissingProductId.get(row.productId) ?? 0) + row.stockQty,
+      );
+    }
+    const retainedQtyByMissingProductId = new Map<string, number>();
+    for (const allocation of currentAllocations) {
+      if (!importedQtyByMissingProductId.has(allocation.product_id)) continue;
+      if (staffIds.includes(allocation.staff_id)) continue;
+      retainedQtyByMissingProductId.set(
+        allocation.product_id,
+        (retainedQtyByMissingProductId.get(allocation.product_id) ?? 0) + allocation.stock_qty,
+      );
+    }
+
+    const restoredInventory = missingProductIds.map((productId) => {
+      const stockQty =
+        (importedQtyByMissingProductId.get(productId) ?? 0) +
+        (retainedQtyByMissingProductId.get(productId) ?? 0);
+      cityQtyByProductId.set(productId, stockQty);
+      return {
+        city_id: params.cityId,
+        product_id: productId,
+        in_stock: stockQty > 0,
+        stock_qty: stockQty,
+        price_override: null,
+      };
+    });
+    const { error: restoreInventoryError } = await supabase
+      .from("inventory")
+      .upsert(restoredInventory, { onConflict: "product_id,city_id" });
+    if (restoreInventoryError) {
+      throw new HttpError(500, "DB", `Failed to restore city inventory: ${restoreInventoryError.message}`);
+    }
   }
 
   // Staff sheets include every product. Zero rows for products already removed from the city are stale
