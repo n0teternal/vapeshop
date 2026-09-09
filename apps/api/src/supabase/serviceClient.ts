@@ -3,6 +3,46 @@ import { config } from "../config.js";
 
 type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
+const SUPABASE_READ_RETRY_DELAYS_MS = [250, 750] as const;
+
+function isTransientNetworkError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String(error.message)
+        : String(error);
+
+  return /fetch failed|network|timeout|econnreset|eai_again|enotfound|socket hang up/i.test(message);
+}
+
+async function fetchSupabaseReadWithRetry(
+  ...args: Parameters<typeof fetch>
+): Promise<Response> {
+  const [input, init] = args;
+  const method = (
+    init?.method ??
+    (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
+  ).toUpperCase();
+
+  // Retrying writes could duplicate an order or stock operation, so only reads retry.
+  if (method !== "GET" && method !== "HEAD") return fetch(...args);
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await fetch(...args);
+    } catch (error) {
+      if (!isTransientNetworkError(error) || attempt === SUPABASE_READ_RETRY_DELAYS_MS.length) {
+        throw error;
+      }
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, SUPABASE_READ_RETRY_DELAYS_MS[attempt] ?? 0);
+      });
+    }
+  }
+}
+
 export type Database = {
   public: {
     Tables: {
@@ -599,6 +639,7 @@ export function createServiceSupabaseClient(): SupabaseClient<Database> {
   if (serviceClient) return serviceClient;
   serviceClient = createClient<Database>(config.supabase.url, config.supabase.serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: fetchSupabaseReadWithRetry },
   });
   return serviceClient;
 }
