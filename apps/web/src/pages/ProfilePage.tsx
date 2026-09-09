@@ -78,7 +78,7 @@ export function ProfilePage() {
   }, []);
 
   const tgUser = webApp.initDataUnsafe?.user;
-  const shouldShowLoyaltyStatus = isTelegram && typeof tgUser?.id === "number";
+  const shouldShowLoyaltyStatus = tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
   const canManageDeliveryPricing =
     isTelegram && tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
 
