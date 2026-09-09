@@ -71,6 +71,7 @@ type ImportProductsCsvResult = {
     productsArchived: number;
   };
   generatedIds: boolean;
+  productIdRemap: Record<string, string>;
   outputXlsxBase64: string | null;
   errors: Array<{
     rowNum: number;

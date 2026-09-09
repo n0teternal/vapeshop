@@ -178,8 +178,12 @@ function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
 async function syncStaffInventoryFromWorkbook(params: {
   buffer: Buffer;
   cityId: number;
+  productIdRemap: Readonly<Record<string, string>>;
 }): Promise<number> {
-  const rows = readStaffInventorySheets(params.buffer);
+  const rows = readStaffInventorySheets(params.buffer).map((row) => ({
+    ...row,
+    productId: params.productIdRemap[row.productId] ?? row.productId,
+  }));
   if (rows.length === 0) return 0;
 
   const supabase = createServiceSupabaseClient();
@@ -235,18 +239,31 @@ async function syncStaffInventoryFromWorkbook(params: {
   }
 
   const cityQtyByProductId = new Map(cityInventory.map((row) => [row.product_id, row.stock_qty]));
-  for (const productId of productIds) {
-    if (!cityQtyByProductId.has(productId)) {
-      throw new HttpError(400, "BAD_REQUEST", "Workbook references a product missing from city inventory");
-    }
+  const missingRowsWithStock = rows.filter(
+    (row) => !cityQtyByProductId.has(row.productId) && row.stockQty > 0,
+  );
+  if (missingRowsWithStock.length > 0) {
+    throw new HttpError(
+      400,
+      "BAD_REQUEST",
+      "Workbook references a product with staff stock that is missing from city inventory",
+    );
   }
 
+  // Staff sheets include every product. Zero rows for products already removed from the city are stale
+  // bookkeeping entries and must not block a catalog import.
+  const rowsWithCityInventory = rows.filter((row) => cityQtyByProductId.has(row.productId));
+  const productIdsWithCityInventory = Array.from(
+    new Set(rowsWithCityInventory.map((row) => row.productId)),
+  );
+
   const importedQtyByProductId = new Map<string, number>();
-  for (const row of rows) {
+  for (const row of rowsWithCityInventory) {
     importedQtyByProductId.set(row.productId, (importedQtyByProductId.get(row.productId) ?? 0) + row.stockQty);
   }
   const retainedQtyByProductId = new Map<string, number>();
   for (const allocation of currentAllocations) {
+    if (!cityQtyByProductId.has(allocation.product_id)) continue;
     if (staffIds.includes(allocation.staff_id)) continue;
     retainedQtyByProductId.set(
       allocation.product_id,
@@ -254,7 +271,7 @@ async function syncStaffInventoryFromWorkbook(params: {
     );
   }
 
-  for (const productId of productIds) {
+  for (const productId of productIdsWithCityInventory) {
     const cityQty = cityQtyByProductId.get(productId);
     if (cityQty === null || cityQty === undefined) continue;
     const totalStaffQty =
@@ -265,7 +282,7 @@ async function syncStaffInventoryFromWorkbook(params: {
   }
 
   const { error: upsertError } = await supabase.from("staff_inventory").upsert(
-    rows.map((row) => ({
+    rowsWithCityInventory.map((row) => ({
       city_id: params.cityId,
       staff_id: row.staffId,
       product_id: row.productId,
@@ -277,7 +294,7 @@ async function syncStaffInventoryFromWorkbook(params: {
     throw new HttpError(500, "DB", `Failed to import staff inventory: ${upsertError.message}`);
   }
 
-  return rows.length;
+  return rowsWithCityInventory.length;
 }
 
 function sanitizeFileName(filename: string): string {
@@ -3413,7 +3430,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           ? result.cities.find((city) => city.slug.toLowerCase() === parsedQuery.data.citySlug?.toLowerCase())
           : null;
         const staffInventoryRows =
-          isSpreadsheet && selectedCity ? await syncStaffInventoryFromWorkbook({ buffer, cityId: selectedCity.id }) : 0;
+          isSpreadsheet && selectedCity
+            ? await syncStaffInventoryFromWorkbook({
+                buffer,
+                cityId: selectedCity.id,
+                productIdRemap: result.productIdRemap,
+              })
+            : 0;
 
         return reply.code(200).send(
           ok({ ...result, decodedEncoding: encoding, staffInventoryRows, restorePoint }),

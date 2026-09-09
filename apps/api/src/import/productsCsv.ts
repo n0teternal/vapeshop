@@ -34,6 +34,7 @@ export type ImportProductsCsvResult = {
     productsArchived: number;
   };
   generatedIds: boolean;
+  productIdRemap: Record<string, string>;
   outputXlsxBase64: string | null;
   errors: CsvRowError[];
   warnings: CsvRowWarning[];
@@ -844,6 +845,7 @@ export async function importProductsCsv(params: {
 
   const inputRecordByRowNum = new Map(inputRecords.map((item) => [item.rowNum, item.record]));
   const detachedSourceProductIds = new Set<string>();
+  const productIdRemap: Record<string, string> = {};
 
   if (targetCity) {
     const usageByProductId = await fetchExistingProductUsageByCity(
@@ -862,6 +864,7 @@ export async function importProductsCsv(params: {
       const nextProductId = crypto.randomUUID();
 
       product.id = nextProductId;
+      productIdRemap[sourceProductId] = nextProductId;
       const sourceRecord = inputRecordByRowNum.get(product.rowNum);
       if (sourceRecord) {
         sourceRecord["id"] = nextProductId;
@@ -1012,6 +1015,7 @@ export async function importProductsCsv(params: {
     inventoryRows: parsedInventory.length,
     sync,
     generatedIds,
+    productIdRemap,
     outputXlsxBase64,
     errors,
     warnings,
