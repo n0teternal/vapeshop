@@ -91,12 +91,17 @@ export function ProfileStatusBand({
   }
 
   const isLocked = safeTierIndex === 0;
+  const cardClassName = tierClassName(safeTierIndex, displayTiers.length);
+  const statusClassName = cardClassName.replace("loyalty-band", "loyalty-status");
 
   return (
-    <section className="loyalty-status loyalty-status--embedded" aria-label="Кэшбек Smoke Diller">
+    <section
+      className={`loyalty-status loyalty-status--embedded ${statusClassName}`}
+      aria-label="Кэшбек Smoke Diller"
+    >
       <button
         type="button"
-        className={`loyalty-band ${tierClassName(safeTierIndex, displayTiers.length)}${isChanging ? " loyalty-band--changing" : ""}`}
+        className={`loyalty-band ${cardClassName}${isChanging ? " loyalty-band--changing" : ""}`}
         onClick={showNextTier}
         onAnimationEnd={() => setIsChanging(false)}
         aria-label={

@@ -217,6 +217,35 @@ textarea {
   padding: 0;
   background: transparent;
   box-shadow: none;
+  --loyalty-pager-track: #405773;
+  --loyalty-pager-dot: #506984;
+  --loyalty-pager-active: #a5d8ff;
+  --loyalty-pager-fill: #8dcbff;
+  --loyalty-pager-glow: rgb(132 194 255 / 0.42);
+}
+
+.loyalty-status--bronze {
+  --loyalty-pager-track: #49321f;
+  --loyalty-pager-dot: #6d5035;
+  --loyalty-pager-active: #ee9e4b;
+  --loyalty-pager-fill: #e49a4b;
+  --loyalty-pager-glow: rgb(238 158 75 / 0.42);
+}
+
+.loyalty-status--silver {
+  --loyalty-pager-track: #3f4755;
+  --loyalty-pager-dot: #647084;
+  --loyalty-pager-active: #dce4ef;
+  --loyalty-pager-fill: #b9c5d6;
+  --loyalty-pager-glow: rgb(220 228 239 / 0.38);
+}
+
+.loyalty-status--gold {
+  --loyalty-pager-track: #4f4318;
+  --loyalty-pager-dot: #76672e;
+  --loyalty-pager-active: #f2c550;
+  --loyalty-pager-fill: #e1b448;
+  --loyalty-pager-glow: rgb(242 197 80 / 0.42);
 }
 
 .loyalty-band {
@@ -234,12 +263,7 @@ textarea {
   color: #deebf8;
   text-align: left;
   box-shadow: 0 0.7rem 1.45rem rgb(2 10 21 / 0.36), inset 0 1px rgb(184 222 255 / 0.09);
-  transition: transform 140ms ease, filter 140ms ease;
-}
-
-.loyalty-band:hover {
-  filter: brightness(1.07);
-  transform: translateY(-1px);
+  transition: box-shadow 140ms ease;
 }
 
 .loyalty-band--changing,
@@ -475,12 +499,13 @@ textarea {
   width: 0.38rem;
   height: 0.38rem;
   border-radius: 999px;
-  background: #506984;
+  background-color: var(--loyalty-pager-dot);
+  transition: background-color 220ms ease, box-shadow 220ms ease;
 }
 
 .loyalty-points-summary__pager .is-active {
-  background: #a5d8ff;
-  box-shadow: 0 0 0.35rem rgb(132 194 255 / 0.42);
+  background-color: var(--loyalty-pager-active);
+  box-shadow: 0 0 0.35rem var(--loyalty-pager-glow);
 }
 
 .loyalty-points-summary__pager .loyalty-points-summary__pager-line {
@@ -490,7 +515,7 @@ textarea {
   margin: 0 0.55rem;
   overflow: hidden;
   border-radius: 999px;
-  background: #405773;
+  background-color: var(--loyalty-pager-track);
 }
 
 .loyalty-points-summary__pager-line::after {
@@ -498,9 +523,9 @@ textarea {
   width: 0;
   height: 100%;
   border-radius: inherit;
-  background: #8dcbff;
+  background-color: var(--loyalty-pager-fill);
   content: "";
-  transition: width 180ms ease-out;
+  transition: width 180ms ease-out, background-color 220ms ease;
 }
 
 .loyalty-points-summary__pager-line.is-complete::after {
