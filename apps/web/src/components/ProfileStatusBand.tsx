@@ -125,7 +125,7 @@ export function ProfileStatusBand({
         {displayTiers.map((statusTier, index) => (
           <Fragment key={statusTier.id}>
             <span className={index === safeTierIndex ? "is-active" : undefined} aria-hidden="true" />
-            {index < sortedTiers.length - 1 ? (
+            {index < displayTiers.length - 1 ? (
               <span
                 className={`loyalty-points-summary__pager-line${index < safeTierIndex ? " is-complete" : ""}`}
                 aria-hidden="true"

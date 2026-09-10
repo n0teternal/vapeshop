@@ -263,58 +263,33 @@ textarea {
 }
 
 .loyalty-band--bronze {
-  --loyalty-tier-accent: 230 186 132;
-
-  border-color: #365c84;
-  color: #deebf8;
+  border-color: #70461d;
+  color: #f7f0e8;
   background:
-    radial-gradient(ellipse 64% 110% at -20% 50%, rgb(var(--loyalty-tier-accent) / 0.22), transparent 70%),
-    radial-gradient(ellipse 64% 110% at 120% 50%, rgb(var(--loyalty-tier-accent) / 0.34), transparent 70%),
-    radial-gradient(ellipse 110% 64% at 50% -25%, rgb(var(--loyalty-tier-accent) / 0.18), transparent 70%),
-    radial-gradient(ellipse 110% 64% at 50% 125%, rgb(var(--loyalty-tier-accent) / 0.16), transparent 70%),
-    linear-gradient(135deg, #27425f 0%, #1a2e46 58%, #111f32 100%);
+    radial-gradient(ellipse 85% 130% at 0% 0%, rgb(153 83 28 / 0.2), transparent 72%),
+    linear-gradient(135deg, #25180f 0%, #15100d 58%, #0d0d0d 100%);
 }
 
 .loyalty-band--silver {
-  --loyalty-tier-accent: 219 233 247;
-
-  border-color: #365c84;
-  color: #deebf8;
+  border-color: #545c6b;
+  color: #f3f5f8;
   background:
-    radial-gradient(ellipse 64% 110% at -20% 50%, rgb(var(--loyalty-tier-accent) / 0.18), transparent 70%),
-    radial-gradient(ellipse 64% 110% at 120% 50%, rgb(var(--loyalty-tier-accent) / 0.28), transparent 70%),
-    radial-gradient(ellipse 110% 64% at 50% -25%, rgb(var(--loyalty-tier-accent) / 0.15), transparent 70%),
-    radial-gradient(ellipse 110% 64% at 50% 125%, rgb(var(--loyalty-tier-accent) / 0.13), transparent 70%),
-    linear-gradient(135deg, #294660 0%, #1b314a 58%, #122139 100%);
+    radial-gradient(ellipse 90% 130% at 0% 0%, rgb(149 164 185 / 0.18), transparent 72%),
+    linear-gradient(135deg, #242a34 0%, #171b22 58%, #101216 100%);
 }
 
 .loyalty-band--gold {
-  --loyalty-tier-accent: 240 202 102;
-
-  border-color: #365c84;
-  color: #deebf8;
+  border-color: #735c17;
+  color: #fff8df;
   background:
-    radial-gradient(ellipse 64% 110% at -20% 50%, rgb(var(--loyalty-tier-accent) / 0.21), transparent 70%),
-    radial-gradient(ellipse 64% 110% at 120% 50%, rgb(var(--loyalty-tier-accent) / 0.34), transparent 70%),
-    radial-gradient(ellipse 110% 64% at 50% -25%, rgb(var(--loyalty-tier-accent) / 0.18), transparent 70%),
-    radial-gradient(ellipse 110% 64% at 50% 125%, rgb(var(--loyalty-tier-accent) / 0.16), transparent 70%),
-    linear-gradient(135deg, #243f5d 0%, #182d45 58%, #101e31 100%);
+    radial-gradient(ellipse 85% 130% at 100% 0%, rgb(178 133 33 / 0.22), transparent 74%),
+    linear-gradient(135deg, #1c190b 0%, #100f0a 58%, #090909 100%);
 }
 
 .loyalty-band--bronze::before,
 .loyalty-band--silver::before,
 .loyalty-band--gold::before {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  content: "";
-  background-image: radial-gradient(circle, rgb(var(--loyalty-tier-accent) / 0.34) 0 0.8px, transparent 1.8px);
-  background-position: 1px 2px;
-  background-size: 17px 17px;
-  opacity: 0.72;
-  -webkit-mask-image: radial-gradient(ellipse 68% 96% at 45% 49%, #000 0 28%, transparent 82%);
-  mask-image: radial-gradient(ellipse 68% 96% at 45% 49%, #000 0 28%, transparent 82%);
+  content: none;
 }
 
 .loyalty-band__title,
@@ -369,7 +344,7 @@ textarea {
 }
 
 .loyalty-band--bronze .loyalty-band__cashback-rate {
-  color: #e6ba84;
+  color: #ee9e4b;
 }
 
 .loyalty-band--locked .loyalty-band__cashback-rate {
@@ -377,11 +352,11 @@ textarea {
 }
 
 .loyalty-band--silver .loyalty-band__cashback-rate {
-  color: #dbe9f7;
+  color: #f1f3f6;
 }
 
 .loyalty-band--gold .loyalty-band__cashback-rate {
-  color: #f0ca66;
+  color: #f4c44f;
 }
 
 .loyalty-band__progress-copy {
@@ -399,17 +374,17 @@ textarea {
 
 .loyalty-band--bronze .loyalty-band__progress-copy,
 .loyalty-band--bronze .loyalty-band__star {
-  color: #b5d6f3;
+  color: #e9a256;
 }
 
 .loyalty-band--silver .loyalty-band__progress-copy,
 .loyalty-band--silver .loyalty-band__star {
-  color: #b5d6f3;
+  color: #dde3ec;
 }
 
 .loyalty-band--gold .loyalty-band__progress-copy,
 .loyalty-band--gold .loyalty-band__star {
-  color: #b5d6f3;
+  color: #efc14d;
 }
 
 .loyalty-band__progress {
@@ -433,19 +408,27 @@ textarea {
 }
 
 .loyalty-band--silver .loyalty-band__progress {
-  background: rgb(5 15 29 / 0.68);
+  background: rgb(5 7 11 / 0.72);
 }
 
 .loyalty-band--silver .loyalty-band__progress > span {
-  background: linear-gradient(90deg, #5771e9, #87bfff);
+  background: linear-gradient(90deg, #aab5c6, #eef2f8);
 }
 
 .loyalty-band--gold .loyalty-band__progress {
-  background: rgb(5 15 29 / 0.68);
+  background: rgb(9 8 4 / 0.76);
 }
 
 .loyalty-band--gold .loyalty-band__progress > span {
-  background: linear-gradient(90deg, #5771e9, #87bfff);
+  background: linear-gradient(90deg, #c18b1e, #f5d774);
+}
+
+.loyalty-band--bronze .loyalty-band__progress {
+  background: rgb(17 11 7 / 0.78);
+}
+
+.loyalty-band--bronze .loyalty-band__progress > span {
+  background: linear-gradient(90deg, #d98537, #f0b05d);
 }
 
 .loyalty-points-summary {
