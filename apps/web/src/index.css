@@ -422,6 +422,11 @@ textarea {
   margin-top: 0.45rem;
 }
 
+.loyalty-band__progress.is-complete {
+  outline: 1px solid rgb(255 255 255 / 0.9);
+  outline-offset: 1px;
+}
+
 .loyalty-band__progress > span {
   display: block;
   height: 100%;

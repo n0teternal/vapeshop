@@ -44,29 +44,46 @@ function resolveTierIndex(cashbackLevel: number | null): number {
   return 0;
 }
 
-function getProgress(monthlySpent: number | null, tierIndex: number): { label: string; value: number } {
-  if (monthlySpent === null) return { label: "Загружаем статус…", value: 0 };
+function getProgress(
+  monthlySpent: number | null,
+  tierIndex: number,
+  currentTierIndex: number,
+): { label: string; value: number; isComplete: boolean } {
+  if (monthlySpent === null) {
+    return { label: "Загружаем статус…", value: 0, isComplete: false };
+  }
 
   const spent = Math.max(0, monthlySpent);
+  const isComplete = tierIndex < currentTierIndex || (tierIndex === 3 && currentTierIndex === 3);
+  const isFutureTier = tierIndex > currentTierIndex;
   if (tierIndex === 0) {
     return {
       label: `До 3% осталось ${formatRub(Math.max(0, 3_000 - spent))}`,
-      value: Math.min(100, (spent / 3_000) * 100),
+      value: isComplete ? 100 : Math.min(100, (spent / 3_000) * 100),
+      isComplete,
     };
   }
   if (tierIndex === 1) {
     return {
       label: `До 5% осталось ${formatRub(Math.max(0, 5_000 - spent))}`,
-      value: Math.min(100, ((spent - 3_000) / 2_000) * 100),
+      value: isComplete ? 100 : isFutureTier ? 0 : Math.min(100, ((spent - 3_000) / 2_000) * 100),
+      isComplete,
     };
   }
   if (tierIndex === 2) {
     return {
       label: `До 7% осталось ${formatRub(Math.max(0, 10_000 - spent))}`,
-      value: Math.min(100, ((spent - 5_000) / 5_000) * 100),
+      value: isComplete ? 100 : isFutureTier ? 0 : Math.min(100, ((spent - 5_000) / 5_000) * 100),
+      isComplete,
     };
   }
-  return { label: "Максимальный статус", value: 100 };
+  return isComplete
+    ? { label: "Максимальный статус", value: 100, isComplete: true }
+    : {
+      label: `До 7% осталось ${formatRub(Math.max(0, 10_000 - spent))}`,
+      value: 0,
+      isComplete: false,
+    };
 }
 
 export function ProfileStatusBand({
@@ -80,16 +97,9 @@ export function ProfileStatusBand({
   const [isChanging, setIsChanging] = useState(false);
   const tierIndex = previewTierIndex ?? currentTierIndex;
   const tier = STATUS_TIERS[tierIndex];
-  const currentTier = STATUS_TIERS[currentTierIndex];
   const isLocked = tierIndex === 0;
   const expiryDate = formatExpiryDate(pointsNextExpiresAt);
-  const currentProgress = getProgress(monthlySpent, currentTierIndex);
-  const progress = previewTierIndex === null
-    ? currentProgress
-    : {
-      label: `Просмотр ${tier.cashbackRate}. Ваш текущий уровень: ${currentTier.cashbackRate}`,
-      value: currentProgress.value,
-    };
+  const progress = getProgress(monthlySpent, tierIndex, currentTierIndex);
   const statusClassName = tier.className.replace("loyalty-band", "loyalty-status");
 
   function showNextTier(): void {
@@ -115,11 +125,7 @@ export function ProfileStatusBand({
         className={`loyalty-band ${tier.className}${isChanging ? " loyalty-band--changing" : ""}`}
         onClick={showNextTier}
         onAnimationEnd={() => setIsChanging(false)}
-        aria-label={
-          previewTierIndex === null
-            ? `Ваш статус ${tier.name}: ${tier.cashbackRate}. Нажмите, чтобы посмотреть уровни.`
-            : `Просмотр уровня ${tier.name}: ${tier.cashbackRate}. Ваш текущий уровень: ${currentTier.name}.`
-        }
+        aria-label={`Уровень ${tier.name}: ${tier.cashbackRate}. Нажмите, чтобы посмотреть уровни.`}
       >
         <span className="loyalty-band__star" aria-hidden="true">
           {isLocked ? "☆" : "★"}
@@ -130,7 +136,7 @@ export function ProfileStatusBand({
           <span className="loyalty-band__cashback-label">кэшбека</span>
         </span>
         <span className="loyalty-band__progress-copy">{progress.label}</span>
-        <span className="loyalty-band__progress" aria-hidden="true">
+        <span className={`loyalty-band__progress${progress.isComplete ? " is-complete" : ""}`} aria-hidden="true">
           <span style={{ width: `${Math.max(0, progress.value)}%` }} />
         </span>
       </button>
