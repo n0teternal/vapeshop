@@ -315,6 +315,7 @@ export type Database = {
           referral_bound_at: string | null;
           tg_username: string | null;
           total_spent: number;
+          monthly_spent: number;
           bonus_points: number;
           current_cashback_level: number;
           last_order_date: string | null;
@@ -331,6 +332,7 @@ export type Database = {
           referral_bound_at?: string | null;
           tg_username?: string | null;
           total_spent?: number;
+          monthly_spent?: number;
           bonus_points?: number;
           current_cashback_level?: number;
           last_order_date?: string | null;
@@ -347,6 +349,7 @@ export type Database = {
           referral_bound_at?: string | null;
           tg_username?: string | null;
           total_spent?: number;
+          monthly_spent?: number;
           bonus_points?: number;
           current_cashback_level?: number;
           last_order_date?: string | null;
@@ -496,6 +499,7 @@ export type Database = {
           total_after_discount: number | null;
           edited_at: string | null;
           edit_session_expires_at: string | null;
+          completed_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -521,6 +525,7 @@ export type Database = {
           total_after_discount?: number | null;
           edited_at?: string | null;
           edit_session_expires_at?: string | null;
+          completed_at?: string | null;
           created_at?: string;
         };
         Update: {
@@ -546,6 +551,7 @@ export type Database = {
           total_after_discount?: number | null;
           edited_at?: string | null;
           edit_session_expires_at?: string | null;
+          completed_at?: string | null;
           created_at?: string;
         };
         Relationships: [];

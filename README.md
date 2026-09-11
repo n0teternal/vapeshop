@@ -116,6 +116,7 @@ Dashboard → **SQL Editor** → выполните:
 - SQL рефералок (profiles/referrals/coupons + поля в orders)
 - `supabase/alter_referrals_loyalty.sql` (ledger баллов + индексы + `tg_username`)
 - `supabase/alter_loyalty_program.sql` (кэшбек 3/5/7%, баланс, сгорание через 60 дней и атомарные операции)
+- `supabase/alter_loyalty_monthly_tiers.sql` (скользящие 30 дней для уровней и удержание статуса заказом раз в 60 дней)
 - `supabase/alter_promo_products.sql` (admin-only промо-товары по городам: старая/новая цена)
 - `supabase/alter_promotion_rules.sql` (правила автоматических скидок и типы акций)
 
@@ -126,7 +127,7 @@ Dashboard → **SQL Editor** → выполните:
 - запрос `POST /api/internal/loyalty/retention` с заголовком `Authorization: Bearer <LOYALTY_CRON_SECRET>`;
 - отдельная cron-команда `pnpm -C apps/api loyalty:retention` в окружении с теми же переменными API.
 
-Задача отправляет напоминания за 15 и за 1 день, а в день истечения технически обнуляет баланс. Повторный запуск безопасен: уведомления и сгорание не дублируются.
+Задача отправляет напоминания за 15 и за 1 день, а в день истечения технически обнуляет баланс и статус. Повторный запуск безопасен: уведомления и сгорание не дублируются.
 
 ## Storage (product images)
 

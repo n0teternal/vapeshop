@@ -24,7 +24,7 @@ type AdminMe = {
 type LoyaltyBalanceOverview = {
   pointsBalance: number;
   pointsNextExpiresAt: string | null;
-  totalSpent: number;
+  monthlySpent: number;
   cashbackLevel: number;
 };
 
@@ -301,7 +301,7 @@ export function ProfilePage() {
               <ProfileStatusBand
                 pointsBalance={loyaltyBalance?.pointsBalance ?? null}
                 pointsNextExpiresAt={loyaltyBalance?.pointsNextExpiresAt ?? null}
-                totalSpent={loyaltyBalance?.totalSpent ?? null}
+              monthlySpent={loyaltyBalance?.monthlySpent ?? null}
                 cashbackLevel={loyaltyBalance?.cashbackLevel ?? null}
               />
           ) : null}

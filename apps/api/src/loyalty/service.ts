@@ -10,10 +10,12 @@ export const MANUAL_POINTS_CREDIT_KIND = "manual_credit";
 export const MANUAL_POINTS_DEBIT_KIND = "manual_debit";
 
 const LOYALTY_PAGE_SIZE = 1_000;
+const LOYALTY_STATUS_RETENTION_MS = 60 * 86_400_000;
 
 type LoyaltyProfileRow = {
   tg_user_id: number;
   total_spent: unknown;
+  monthly_spent: unknown;
   bonus_points: unknown;
   current_cashback_level: unknown;
   last_order_date: string | null;
@@ -24,6 +26,7 @@ type LoyaltyProfileRow = {
 
 export type LoyaltySummary = {
   totalSpent: number;
+  monthlySpent: number;
   pointsBalance: number;
   cashbackLevel: number;
   lastOrderDate: string | null;
@@ -62,6 +65,7 @@ function parseDateMs(value: string | null, field: string): number | null {
 function mapProfile(row: LoyaltyProfileRow): LoyaltySummary {
   return {
     totalSpent: Math.max(0, asFiniteNumber(row.total_spent, "customer_profiles.total_spent")),
+    monthlySpent: Math.max(0, asFiniteNumber(row.monthly_spent, "customer_profiles.monthly_spent")),
     pointsBalance: Math.max(0, asInt(row.bonus_points, "customer_profiles.bonus_points")),
     cashbackLevel: Math.max(0, asInt(row.current_cashback_level, "customer_profiles.current_cashback_level")),
     lastOrderDate: row.last_order_date,
@@ -81,7 +85,8 @@ function isMissingLoyaltySchema(error: unknown): boolean {
     code === "42883" ||
     message.includes("loyalty_") ||
     message.includes("bonus_points") ||
-    message.includes("total_spent")
+    message.includes("total_spent") ||
+    message.includes("monthly_spent")
   );
 }
 
@@ -90,7 +95,7 @@ function schemaError(action: string, error: { message: string }): HttpError {
     return new HttpError(
       500,
       "DB_SCHEMA_OUTDATED",
-      "Loyalty schema is outdated. Run supabase/alter_loyalty_program.sql in Supabase SQL Editor.",
+      "Loyalty schema is outdated. Run the loyalty migrations in Supabase SQL Editor.",
     );
   }
   return new HttpError(500, "DB", `${action}: ${error.message}`);
@@ -101,7 +106,7 @@ async function loadProfile(tgUserId: number): Promise<LoyaltyProfileRow | null> 
   const { data, error } = await supabase
     .from("customer_profiles")
     .select(
-      "tg_user_id,total_spent,bonus_points,current_cashback_level,last_order_date,loyalty_expires_at,loyalty_notice_45_sent_at,loyalty_notice_59_sent_at",
+      "tg_user_id,total_spent,monthly_spent,bonus_points,current_cashback_level,last_order_date,loyalty_expires_at,loyalty_notice_45_sent_at,loyalty_notice_59_sent_at",
     )
     .eq("tg_user_id", tgUserId)
     .maybeSingle();
@@ -113,7 +118,12 @@ async function loadProfile(tgUserId: number): Promise<LoyaltyProfileRow | null> 
 async function expireIfDue(profile: LoyaltyProfileRow): Promise<LoyaltyProfileRow> {
   const expiresAtMs = parseDateMs(profile.loyalty_expires_at, "customer_profiles.loyalty_expires_at");
   const balance = Math.max(0, asInt(profile.bonus_points, "customer_profiles.bonus_points"));
-  if (!expiresAtMs || expiresAtMs > Date.now() || balance <= 0) return profile;
+  const lastOrderMs = parseDateMs(profile.last_order_date, "customer_profiles.last_order_date");
+  const hasExpiredPoints = Boolean(expiresAtMs && expiresAtMs <= Date.now() && balance > 0);
+  const hasExpiredStatus =
+    Math.max(0, asInt(profile.current_cashback_level, "customer_profiles.current_cashback_level")) > 0 &&
+    (!lastOrderMs || lastOrderMs + LOYALTY_STATUS_RETENTION_MS <= Date.now());
+  if (!hasExpiredPoints && !hasExpiredStatus) return profile;
 
   await expireLoyaltyPoints(profile.tg_user_id);
   return (await loadProfile(profile.tg_user_id)) ?? profile;
@@ -124,6 +134,7 @@ export async function getLoyaltySummary(tgUserId: number): Promise<LoyaltySummar
   if (!profile) {
     return {
       totalSpent: 0,
+      monthlySpent: 0,
       pointsBalance: 0,
       cashbackLevel: 0,
       lastOrderDate: null,
@@ -297,10 +308,9 @@ async function loadExpiryCandidates(): Promise<LoyaltyProfileRow[]> {
     const { data, error } = await supabase
       .from("customer_profiles")
       .select(
-        "tg_user_id,total_spent,bonus_points,current_cashback_level,last_order_date,loyalty_expires_at,loyalty_notice_45_sent_at,loyalty_notice_59_sent_at",
+        "tg_user_id,total_spent,monthly_spent,bonus_points,current_cashback_level,last_order_date,loyalty_expires_at,loyalty_notice_45_sent_at,loyalty_notice_59_sent_at",
       )
-      .gt("bonus_points", 0)
-      .not("loyalty_expires_at", "is", null)
+      .or("bonus_points.gt.0,current_cashback_level.gt.0")
       .order("loyalty_expires_at", { ascending: true })
       .range(offset, offset + LOYALTY_PAGE_SIZE - 1);
     if (error) throw schemaError("Failed to load loyalty expiry candidates", error);
@@ -325,19 +335,30 @@ export async function runLoyaltyRetentionSweep(now = new Date()): Promise<Loyalt
   };
 
   for (const row of rows) {
-    const expiresAt = row.loyalty_expires_at;
-    if (!expiresAt) continue;
+    const pointsExpiresAt = row.loyalty_expires_at;
+    const lastOrderMs = parseDateMs(row.last_order_date, "customer_profiles.last_order_date");
+    const statusExpiresAt = lastOrderMs
+      ? new Date(lastOrderMs + LOYALTY_STATUS_RETENTION_MS).toISOString()
+      : null;
 
     try {
-      const daysUntilExpiry = calendarDaysUntil(expiresAt, now);
-      if (daysUntilExpiry <= 0) {
-        const expired = await expireLoyaltyPoints(row.tg_user_id);
-        if (expired > 0) result.expired += 1;
+      const pointsDaysUntilExpiry = pointsExpiresAt
+        ? calendarDaysUntil(pointsExpiresAt, now)
+        : null;
+      const statusDaysUntilExpiry = statusExpiresAt
+        ? calendarDaysUntil(statusExpiresAt, now)
+        : null;
+      if (
+        (pointsDaysUntilExpiry !== null && pointsDaysUntilExpiry <= 0) ||
+        (statusDaysUntilExpiry !== null && statusDaysUntilExpiry <= 0)
+      ) {
+        await expireLoyaltyPoints(row.tg_user_id);
+        result.expired += 1;
         continue;
       }
 
       const balance = Math.max(0, asInt(row.bonus_points, "customer_profiles.bonus_points"));
-      if (daysUntilExpiry === 15 && !row.loyalty_notice_45_sent_at) {
+      if (pointsExpiresAt && pointsDaysUntilExpiry === 15 && !row.loyalty_notice_45_sent_at) {
         await sendMessage({
           botToken: config.telegram.botToken,
           chatId: String(row.tg_user_id),
@@ -346,12 +367,12 @@ export async function runLoyaltyRetentionSweep(now = new Date()): Promise<Loyalt
         await markReminderSent({
           tgUserId: row.tg_user_id,
           field: "loyalty_notice_45_sent_at",
-          expiresAt,
+          expiresAt: pointsExpiresAt,
         });
         result.reminded15Days += 1;
       }
 
-      if (daysUntilExpiry === 1 && !row.loyalty_notice_59_sent_at) {
+      if (pointsExpiresAt && pointsDaysUntilExpiry === 1 && !row.loyalty_notice_59_sent_at) {
         await sendMessage({
           botToken: config.telegram.botToken,
           chatId: String(row.tg_user_id),
@@ -360,7 +381,7 @@ export async function runLoyaltyRetentionSweep(now = new Date()): Promise<Loyalt
         await markReminderSent({
           tgUserId: row.tg_user_id,
           field: "loyalty_notice_59_sent_at",
-          expiresAt,
+          expiresAt: pointsExpiresAt,
         });
         result.reminded1Day += 1;
       }

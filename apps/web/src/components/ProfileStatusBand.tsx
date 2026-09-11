@@ -3,7 +3,7 @@ import { Fragment, useState } from "react";
 type ProfileStatusBandProps = {
   pointsBalance: number | null;
   pointsNextExpiresAt: string | null;
-  totalSpent: number | null;
+  monthlySpent: number | null;
   cashbackLevel: number | null;
 };
 
@@ -44,10 +44,10 @@ function resolveTierIndex(cashbackLevel: number | null): number {
   return 0;
 }
 
-function getProgress(totalSpent: number | null, tierIndex: number): { label: string; value: number } {
-  if (totalSpent === null) return { label: "Загружаем статус…", value: 0 };
+function getProgress(monthlySpent: number | null, tierIndex: number): { label: string; value: number } {
+  if (monthlySpent === null) return { label: "Загружаем статус…", value: 0 };
 
-  const spent = Math.max(0, totalSpent);
+  const spent = Math.max(0, monthlySpent);
   if (tierIndex === 0) {
     return {
       label: `До 3% осталось ${formatRub(Math.max(0, 3_000 - spent))}`,
@@ -72,7 +72,7 @@ function getProgress(totalSpent: number | null, tierIndex: number): { label: str
 export function ProfileStatusBand({
   pointsBalance,
   pointsNextExpiresAt,
-  totalSpent,
+  monthlySpent,
   cashbackLevel,
 }: ProfileStatusBandProps) {
   const currentTierIndex = resolveTierIndex(cashbackLevel);
@@ -83,7 +83,7 @@ export function ProfileStatusBand({
   const currentTier = STATUS_TIERS[currentTierIndex];
   const isLocked = tierIndex === 0;
   const expiryDate = formatExpiryDate(pointsNextExpiresAt);
-  const currentProgress = getProgress(totalSpent, currentTierIndex);
+  const currentProgress = getProgress(monthlySpent, currentTierIndex);
   const progress = previewTierIndex === null
     ? currentProgress
     : {

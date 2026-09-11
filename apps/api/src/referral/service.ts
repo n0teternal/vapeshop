@@ -79,6 +79,7 @@ export type ReferralOverview = {
   pointsBalance: number;
   pointsNextExpiresAt: string | null;
   totalSpent: number;
+  monthlySpent: number;
   cashbackLevel: number;
   pointsHistory: Array<{
     id: number;
@@ -533,6 +534,7 @@ export async function getReferralOverview(params: {
     pointsBalance: points.pointsBalance,
     pointsNextExpiresAt: points.pointsNextExpiresAt,
     totalSpent: points.totalSpent,
+    monthlySpent: points.monthlySpent,
     cashbackLevel: points.cashbackLevel,
     pointsHistory: ((historyRows ?? []) as LoyaltyTransactionRow[]).map((row) => ({
       id: row.id,
