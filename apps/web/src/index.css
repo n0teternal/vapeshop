@@ -250,7 +250,6 @@ textarea {
 
 .loyalty-band {
   position: relative;
-  isolation: isolate;
   display: flex;
   min-height: 10.4rem;
   width: 100%;
@@ -315,7 +314,6 @@ textarea {
 .loyalty-band--gold::before {
   content: none;
 }
-
 .loyalty-band__title,
 .loyalty-band__cashback-rate,
 .loyalty-band__progress-copy,

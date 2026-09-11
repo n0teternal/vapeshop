@@ -46,6 +46,7 @@ import {
   syncFinalOrderTelegramState,
 } from "./order/telegramFinalStatus.js";
 import { HttpError, isHttpError } from "./httpError.js";
+import { runLoyaltyRetentionSweep } from "./loyalty/service.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { requireAdmin } from "./admin/requireAdmin.js";
 import {
@@ -591,6 +592,34 @@ await registerTelegramWebhookRoutes(app);
 
 app.get("/health", async () => {
   return { ok: true };
+});
+
+app.post<{
+  Reply: ApiSuccess<Awaited<ReturnType<typeof runLoyaltyRetentionSweep>>> | ErrorResponse;
+}>("/api/internal/loyalty/retention", async (request, reply) => {
+  try {
+    const configuredSecret = config.loyalty.cronSecret;
+    const authorization = getHeaderString(request.headers.authorization)?.trim() ?? "";
+    const bearerToken = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+    const suppliedSecret =
+      getHeaderString(request.headers["x-loyalty-cron-secret"])?.trim() ?? bearerToken;
+
+    if (!configuredSecret || suppliedSecret !== configuredSecret) {
+      throw new HttpError(401, "UNAUTHORIZED", "Invalid loyalty cron secret");
+    }
+
+    return reply.code(200).send(ok(await runLoyaltyRetentionSweep()));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+    request.log.error({ err: e }, "Loyalty retention sweep failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
 });
 
 app.get<{

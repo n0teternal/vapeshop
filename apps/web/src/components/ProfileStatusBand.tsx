@@ -1,138 +1,118 @@
-import { Fragment, useState } from "react";
-import type { CashbackTier } from "../lib/cashback";
+import { Fragment } from "react";
 
 type ProfileStatusBandProps = {
   pointsBalance: number | null;
   pointsNextExpiresAt: string | null;
-  cashbackTiers: CashbackTier[];
+  totalSpent: number | null;
+  cashbackLevel: number | null;
 };
 
-function formatPointsBalance(value: number | null): string {
-  if (value === null) return "-";
-  return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
-}
+type StatusTier = {
+  name: string;
+  cashbackRate: string;
+  className: string;
+};
 
-function formatRub(value: number): string {
-  return new Intl.NumberFormat("ru-RU").format(value);
+const STATUS_TIERS: StatusTier[] = [
+  { name: "Пока без кэшбека", cashbackRate: "0%", className: "loyalty-band--locked" },
+  { name: "Базовый", cashbackRate: "3%", className: "loyalty-band--bronze" },
+  { name: "Продвинутый", cashbackRate: "5%", className: "loyalty-band--silver" },
+  { name: "VIP", cashbackRate: "7%", className: "loyalty-band--gold" },
+];
+
+function formatPointsBalance(value: number | null): string {
+  if (value === null) return "—";
+  return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
 }
 
 function formatExpiryDate(value: string | null): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "numeric",
-    month: "long",
-  }).format(date);
+  return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(date);
 }
 
-function tierClassName(index: number, total: number): string {
-  if (index === 0) return "loyalty-band--locked";
-  if (index === total - 1) return "loyalty-band--gold";
-  if (index === 2) return "loyalty-band--silver";
-  return "loyalty-band--bronze";
+function formatRub(value: number): string {
+  return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)} ₽`;
 }
 
-type DisplayTier = {
-  id: string;
-  name: string;
-  ratePercent: number;
-  minOrderTotalRub: number;
-  progressLabel: string;
-  progress: number;
-};
+function resolveTierIndex(cashbackLevel: number | null): number {
+  if (cashbackLevel === null) return 0;
+  if (cashbackLevel >= 7) return 3;
+  if (cashbackLevel >= 5) return 2;
+  if (cashbackLevel >= 3) return 1;
+  return 0;
+}
+
+function getProgress(totalSpent: number | null, tierIndex: number): { label: string; value: number } {
+  if (totalSpent === null) return { label: "Загружаем статус…", value: 0 };
+
+  const spent = Math.max(0, totalSpent);
+  if (tierIndex === 0) {
+    return {
+      label: `До 3% осталось ${formatRub(Math.max(0, 3_000 - spent))}`,
+      value: Math.min(100, (spent / 3_000) * 100),
+    };
+  }
+  if (tierIndex === 1) {
+    return {
+      label: `До 5% осталось ${formatRub(Math.max(0, 5_000 - spent))}`,
+      value: Math.min(100, ((spent - 3_000) / 2_000) * 100),
+    };
+  }
+  if (tierIndex === 2) {
+    return {
+      label: `До 7% осталось ${formatRub(Math.max(0, 10_000 - spent))}`,
+      value: Math.min(100, ((spent - 5_000) / 5_000) * 100),
+    };
+  }
+  return { label: "Максимальный статус", value: 100 };
+}
 
 export function ProfileStatusBand({
   pointsBalance,
   pointsNextExpiresAt,
-  cashbackTiers,
+  totalSpent,
+  cashbackLevel,
 }: ProfileStatusBandProps) {
-  const [tierIndex, setTierIndex] = useState(0);
-  const [isChanging, setIsChanging] = useState(false);
-  const sortedTiers = [...cashbackTiers].sort(
-    (left, right) => left.minOrderTotalRub - right.minOrderTotalRub,
-  );
-  const displayTiers: DisplayTier[] = [
-    {
-      id: "locked",
-      name: "Пока без кэшбека",
-      ratePercent: 0,
-      minOrderTotalRub: 0,
-      progressLabel:
-        sortedTiers.length > 0
-          ? `До ${sortedTiers[0].ratePercent}% - заказ от ${formatRub(sortedTiers[0].minOrderTotalRub)} ₽`
-          : "Условия кэшбека загружаются",
-      progress: 0,
-    },
-    ...sortedTiers.map((tier, index) => {
-      const nextTier = sortedTiers[index + 1];
-      return {
-        ...tier,
-        progressLabel: nextTier
-          ? `До ${nextTier.ratePercent}% - заказ от ${formatRub(nextTier.minOrderTotalRub)} ₽`
-          : "Максимальный кэшбек",
-        progress: Math.round(((index + 1) / sortedTiers.length) * 100),
-      };
-    }),
-  ];
-  const safeTierIndex = Math.min(tierIndex, Math.max(0, displayTiers.length - 1));
-  const tier = displayTiers[safeTierIndex] ?? null;
+  const tierIndex = resolveTierIndex(cashbackLevel);
+  const tier = STATUS_TIERS[tierIndex];
+  const isLocked = tierIndex === 0;
   const expiryDate = formatExpiryDate(pointsNextExpiresAt);
-
-  if (!tier || sortedTiers.length === 0) return null;
-
-  function showNextTier(): void {
-    if (isChanging) return;
-
-    setTierIndex((current) => (current + 1) % displayTiers.length);
-    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setIsChanging(true);
-    }
-  }
-
-  const isLocked = safeTierIndex === 0;
-  const cardClassName = tierClassName(safeTierIndex, displayTiers.length);
-  const statusClassName = cardClassName.replace("loyalty-band", "loyalty-status");
+  const progress = getProgress(totalSpent, tierIndex);
+  const statusClassName = tier.className.replace("loyalty-band", "loyalty-status");
 
   return (
     <section
       className={`loyalty-status loyalty-status--embedded ${statusClassName}`}
-      aria-label="Кэшбек Smoke Diller"
+      aria-label="Статус Smoke Diller"
     >
-      <button
-        type="button"
-        className={`loyalty-band ${cardClassName}${isChanging ? " loyalty-band--changing" : ""}`}
-        onClick={showNextTier}
-        onAnimationEnd={() => setIsChanging(false)}
-        aria-label={
-          isLocked
-            ? `${tier.name}. ${tier.progressLabel}`
-            : `Уровень кэшбека ${tier.name}: ${tier.ratePercent}% от заказа ${formatRub(tier.minOrderTotalRub)} ₽`
-        }
-      >
-        <span className="loyalty-band__star" aria-hidden="true">{isLocked ? "☆" : "★"}</span>
+      <div className={`loyalty-band ${tier.className}`} aria-label={`Статус ${tier.name}`}>
+        <span className="loyalty-band__star" aria-hidden="true">
+          {isLocked ? "☆" : "★"}
+        </span>
         <span className="loyalty-band__title">{tier.name}</span>
         <span className="loyalty-band__cashback-rate">
-          <span className="loyalty-band__cashback-value">{tier.ratePercent}%</span>
+          <span className="loyalty-band__cashback-value">{tier.cashbackRate}</span>
           <span className="loyalty-band__cashback-label">кэшбека</span>
         </span>
-        <span className="loyalty-band__progress-copy">{tier.progressLabel}</span>
+        <span className="loyalty-band__progress-copy">{progress.label}</span>
         <span className="loyalty-band__progress" aria-hidden="true">
-          <span style={{ width: `${tier.progress}%` }} />
+          <span style={{ width: `${Math.max(0, progress.value)}%` }} />
         </span>
-      </button>
+      </div>
 
       <div
         className="loyalty-points-summary__pager"
         role="img"
-        aria-label={`Карточка ${safeTierIndex + 1} из ${displayTiers.length}`}
+        aria-label={`Карточка ${tierIndex + 1} из ${STATUS_TIERS.length}`}
       >
-        {displayTiers.map((statusTier, index) => (
-          <Fragment key={statusTier.id}>
-            <span className={index === safeTierIndex ? "is-active" : undefined} aria-hidden="true" />
-            {index < displayTiers.length - 1 ? (
+        {STATUS_TIERS.map((statusTier, index) => (
+          <Fragment key={statusTier.name}>
+            <span className={index === tierIndex ? "is-active" : undefined} aria-hidden="true" />
+            {index < STATUS_TIERS.length - 1 ? (
               <span
-                className={`loyalty-points-summary__pager-line${index < safeTierIndex ? " is-complete" : ""}`}
+                className={`loyalty-points-summary__pager-line${index < tierIndex ? " is-complete" : ""}`}
                 aria-hidden="true"
               />
             ) : null}

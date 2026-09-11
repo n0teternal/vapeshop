@@ -2,11 +2,11 @@ import crypto from "node:crypto";
 import { config } from "../config.js";
 import { HttpError } from "../httpError.js";
 import {
-  CASHBACK_TIERS,
-  calculateCashbackEligibleAmount,
-  calculateOrderCashback,
-  type CashbackTier,
-} from "../loyalty/cashback.js";
+  applyLoyaltyPointsTransaction,
+  getLoyaltySummary,
+  getPointsBalance as getProgramPointsBalance,
+  spendPointsForOrder as spendProgramPointsForOrder,
+} from "../loyalty/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import { getBotUsername } from "../telegram/api.js";
 
@@ -14,12 +14,9 @@ const REFERRAL_CODE_PREFIX = "ref_";
 const REFERRAL_CODE_LENGTH = 8;
 const REFERRALS_MAX_PAGE_LIMIT = 100;
 const POINTS_HISTORY_LIMIT = 30;
-const POINTS_BALANCE_PAGE_SIZE = 1000;
 
 const REFERRAL_INVITER_BONUS_KIND = "referral_inviter_bonus";
 const REFERRAL_INVITEE_BONUS_KIND = "referral_invitee_bonus";
-const ORDER_POINTS_SPEND_KIND = "order_points_spend";
-const ORDER_CASHBACK_KIND = "order_cashback";
 
 let cachedBotUsername: string | null | undefined;
 
@@ -60,22 +57,8 @@ type LoyaltyTransactionRow = {
   kind: string;
   order_id: string | null;
   referral_id: number | null;
+  comment: string | null;
   created_at: string;
-};
-
-type CashbackOrderRow = {
-  id: string;
-  status: string;
-  tg_user_id: number;
-  tg_username: string | null;
-  promotion_discount_amount: unknown;
-  coupon_discount_amount: unknown;
-  discount_amount: unknown;
-};
-
-type CashbackOrderItemRow = {
-  qty: unknown;
-  unit_price: unknown;
 };
 
 export type ReferralInviteeStatus =
@@ -90,18 +73,20 @@ export type ReferralOverview = {
     inviter: number;
     invitee: number;
     minFirstOrderTotalRub: number;
-    pointsExpireAfterMonths: number;
+    pointsExpireAfterDays: number;
     pointsMaxSpendPercent: number;
   };
   pointsBalance: number;
   pointsNextExpiresAt: string | null;
-  cashbackTiers: CashbackTier[];
+  totalSpent: number;
+  cashbackLevel: number;
   pointsHistory: Array<{
     id: number;
     deltaPoints: number;
     kind: string;
     orderId: string | null;
     referralId: number | null;
+    comment: string | null;
     createdAt: string;
     expiresAt: string | null;
   }>;
@@ -179,111 +164,6 @@ function numberFromUnknown(value: unknown): number {
   }
 
   return parsed;
-}
-
-function parseTimestampMs(value: string, fieldName: string): number {
-  const ms = new Date(value).getTime();
-  if (!Number.isFinite(ms)) {
-    throw new HttpError(500, "DB", `Invalid timestamp ${fieldName}: ${value}`);
-  }
-  return ms;
-}
-
-function addUtcMonths(date: Date, months: number): Date {
-  const target = new Date(
-    Date.UTC(
-      date.getUTCFullYear(),
-      date.getUTCMonth() + months,
-      1,
-      date.getUTCHours(),
-      date.getUTCMinutes(),
-      date.getUTCSeconds(),
-      date.getUTCMilliseconds(),
-    ),
-  );
-  const lastDayOfTargetMonth = new Date(
-    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
-  ).getUTCDate();
-
-  target.setUTCDate(Math.min(date.getUTCDate(), lastDayOfTargetMonth));
-  return target;
-}
-
-function getPointsExpiresAt(createdAt: string): Date {
-  return addUtcMonths(
-    new Date(parseTimestampMs(createdAt, "loyalty_transactions.created_at")),
-    config.referrals.pointsExpireAfterMonths,
-  );
-}
-
-function getPointsExpiresAtIso(row: Pick<LoyaltyTransactionRow, "delta_points" | "created_at">): string | null {
-  if (row.delta_points <= 0) return null;
-  return getPointsExpiresAt(row.created_at).toISOString();
-}
-
-type AvailablePointsSummary = {
-  balance: number;
-  nextExpiresAt: string | null;
-};
-
-function calculateAvailablePointsSummary(params: {
-  rows: LoyaltyTransactionRow[];
-  nowMs: number;
-}): AvailablePointsSummary {
-  const sortedRows = [...params.rows].sort((left, right) => {
-    const leftMs = parseTimestampMs(left.created_at, "loyalty_transactions.created_at");
-    const rightMs = parseTimestampMs(right.created_at, "loyalty_transactions.created_at");
-    return leftMs - rightMs || left.id - right.id;
-  });
-  const credits: Array<{ remaining: number; expiresAtMs: number }> = [];
-
-  for (const row of sortedRows) {
-    const rowMs = parseTimestampMs(row.created_at, "loyalty_transactions.created_at");
-
-    for (const credit of credits) {
-      if (credit.expiresAtMs <= rowMs) {
-        credit.remaining = 0;
-      }
-    }
-
-    const delta = Number(row.delta_points);
-    if (!Number.isFinite(delta)) {
-      throw new HttpError(500, "DB", `Invalid numeric value: ${String(row.delta_points)}`);
-    }
-
-    const points = Math.trunc(delta);
-    if (points > 0) {
-      credits.push({
-        remaining: points,
-        expiresAtMs: getPointsExpiresAt(row.created_at).getTime(),
-      });
-      continue;
-    }
-
-    if (points >= 0) continue;
-
-    let pointsToAllocate = Math.abs(points);
-    for (const credit of credits) {
-      if (pointsToAllocate <= 0) break;
-      if (credit.remaining <= 0 || credit.expiresAtMs <= rowMs) continue;
-
-      const used = Math.min(credit.remaining, pointsToAllocate);
-      credit.remaining -= used;
-      pointsToAllocate -= used;
-    }
-  }
-
-  const availableCredits = credits.filter(
-    (credit) => credit.remaining > 0 && credit.expiresAtMs > params.nowMs,
-  );
-
-  return {
-    balance: availableCredits.reduce((total, credit) => total + credit.remaining, 0),
-    nextExpiresAt:
-      availableCredits.length > 0
-        ? new Date(Math.min(...availableCredits.map((credit) => credit.expiresAtMs))).toISOString()
-        : null,
-  };
 }
 
 export function getMaxPointsDiscountForTotal(totalRub: number): number {
@@ -526,39 +406,8 @@ export async function getCustomerReferralShare(params: {
   };
 }
 
-async function getAvailablePointsSummary(tgUserId: number): Promise<AvailablePointsSummary> {
-  const supabase = createServiceSupabaseClient();
-  let offset = 0;
-  const rows: LoyaltyTransactionRow[] = [];
-
-  for (;;) {
-    const { data, error } = await supabase
-      .from("loyalty_transactions")
-      .select("id,delta_points,kind,order_id,referral_id,created_at")
-      .eq("tg_user_id", tgUserId)
-      .order("created_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(offset, offset + POINTS_BALANCE_PAGE_SIZE - 1);
-
-    if (error) {
-      throw new HttpError(500, "DB", `Failed to load points balance: ${error.message}`);
-    }
-
-    const pageRows = (data ?? []) as LoyaltyTransactionRow[];
-    rows.push(...pageRows);
-
-    if (pageRows.length < POINTS_BALANCE_PAGE_SIZE) break;
-    offset += pageRows.length;
-  }
-
-  return calculateAvailablePointsSummary({
-    rows,
-    nowMs: Date.now(),
-  });
-}
-
 export async function getPointsBalance(tgUserId: number): Promise<number> {
-  return (await getAvailablePointsSummary(tgUserId)).balance;
+  return getProgramPointsBalance(tgUserId);
 }
 
 export async function spendPointsForOrder(params: {
@@ -566,28 +415,7 @@ export async function spendPointsForOrder(params: {
   orderId: string;
   pointsToSpend: number;
 }): Promise<number> {
-  const requested = Math.max(0, Math.trunc(params.pointsToSpend));
-  if (requested <= 0) return 0;
-
-  const balance = await getPointsBalance(params.tgUserId);
-  if (balance < requested) {
-    throw new HttpError(400, "NOT_ENOUGH_POINTS", "Not enough points");
-  }
-
-  const supabase = createServiceSupabaseClient();
-  const { error } = await supabase.from("loyalty_transactions").insert({
-    tg_user_id: params.tgUserId,
-    delta_points: -requested,
-    kind: ORDER_POINTS_SPEND_KIND,
-    order_id: params.orderId,
-    created_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    throw new HttpError(500, "DB", `Failed to spend points: ${error.message}`);
-  }
-
-  return requested;
+  return spendProgramPointsForOrder(params);
 }
 
 function mapInviteeStatus(params: {
@@ -625,11 +453,11 @@ export async function getReferralOverview(params: {
     await Promise.all([
       supabase
         .from("loyalty_transactions")
-        .select("id,delta_points,kind,order_id,referral_id,created_at")
+        .select("id,delta_points,kind,order_id,referral_id,comment,created_at")
         .eq("tg_user_id", params.tgUserId)
         .order("created_at", { ascending: false })
         .limit(POINTS_HISTORY_LIMIT),
-      getAvailablePointsSummary(params.tgUserId),
+      getLoyaltySummary(params.tgUserId),
       supabase
         .from("referrals")
         .select("id,inviter_tg_user_id,invitee_tg_user_id,status,qualified_order_id,rewarded_at,created_at")
@@ -699,20 +527,22 @@ export async function getReferralOverview(params: {
       inviter: config.referrals.pointsInviter,
       invitee: config.referrals.pointsInvitee,
       minFirstOrderTotalRub: config.referrals.minFirstOrderTotalRub,
-      pointsExpireAfterMonths: config.referrals.pointsExpireAfterMonths,
+      pointsExpireAfterDays: config.loyalty.expirationDays,
       pointsMaxSpendPercent: config.referrals.pointsMaxSpendPercent,
     },
-    pointsBalance: points.balance,
-    pointsNextExpiresAt: points.nextExpiresAt,
-    cashbackTiers: [...CASHBACK_TIERS],
+    pointsBalance: points.pointsBalance,
+    pointsNextExpiresAt: points.pointsNextExpiresAt,
+    totalSpent: points.totalSpent,
+    cashbackLevel: points.cashbackLevel,
     pointsHistory: ((historyRows ?? []) as LoyaltyTransactionRow[]).map((row) => ({
       id: row.id,
       deltaPoints: row.delta_points,
       kind: row.kind,
       orderId: row.order_id,
       referralId: row.referral_id,
+      comment: row.comment,
       createdAt: row.created_at,
-      expiresAt: getPointsExpiresAtIso(row),
+      expiresAt: row.delta_points > 0 ? points.pointsNextExpiresAt : null,
     })),
     referrals: referralRows.map((row) => {
       const firstOrder = firstOrderByInviteeId.get(row.invitee_tg_user_id) ?? null;
@@ -736,97 +566,6 @@ export async function getReferralOverview(params: {
       hasMore,
     },
   };
-}
-
-export async function processOrderCashbackForOrderDone(params: {
-  orderId: string;
-}): Promise<{ awarded: boolean; points: number }> {
-  const supabase = createServiceSupabaseClient();
-  const { data: order, error: orderError } = await supabase
-    .from("orders")
-    .select(
-      "id,status,tg_user_id,tg_username,promotion_discount_amount,coupon_discount_amount,discount_amount",
-    )
-    .eq("id", params.orderId)
-    .maybeSingle();
-
-  if (orderError) {
-    throw new HttpError(500, "DB", `Failed to load order for cashback: ${orderError.message}`);
-  }
-  if (!order || order.status !== "done") return { awarded: false, points: 0 };
-
-  const cashbackOrder = order as CashbackOrderRow;
-  const { data: orderItems, error: orderItemsError } = await supabase
-    .from("order_items")
-    .select("qty,unit_price")
-    .eq("order_id", cashbackOrder.id);
-
-  if (orderItemsError) {
-    throw new HttpError(500, "DB", `Failed to load order items for cashback: ${orderItemsError.message}`);
-  }
-
-  const itemsSubtotal = (orderItems ?? []).reduce((sum, row) => {
-    const item = row as CashbackOrderItemRow;
-    const qty = Math.max(0, Math.trunc(numberFromUnknown(item.qty)));
-    const unitPrice = Math.max(0, numberFromUnknown(item.unit_price));
-    return sum + qty * unitPrice;
-  }, 0);
-  const promotionDiscount = Math.max(
-    0,
-    numberFromUnknown(cashbackOrder.promotion_discount_amount ?? 0),
-  );
-  const couponDiscount = Math.max(0, numberFromUnknown(cashbackOrder.coupon_discount_amount ?? 0));
-  const pointsDiscount = Math.max(0, numberFromUnknown(cashbackOrder.discount_amount ?? 0));
-  const cashback = calculateOrderCashback(
-    calculateCashbackEligibleAmount({
-      itemsSubtotalRub: itemsSubtotal,
-      promotionDiscountRub: promotionDiscount,
-      couponDiscountRub: couponDiscount,
-      pointsDiscountRub: pointsDiscount,
-    }),
-  );
-
-  if (!cashback.tier || cashback.points <= 0) {
-    return { awarded: false, points: 0 };
-  }
-
-  // A customer profile is normally created when the Mini App opens. Keep the
-  // completion flow resilient for orders created through an older client.
-  await ensureCustomerProfile({
-    tgUserId: cashbackOrder.tg_user_id,
-    tgUsername: cashbackOrder.tg_username,
-  });
-
-  const { data: existingRows, error: existingError } = await supabase
-    .from("loyalty_transactions")
-    .select("id")
-    .eq("tg_user_id", cashbackOrder.tg_user_id)
-    .eq("kind", ORDER_CASHBACK_KIND)
-    .eq("order_id", cashbackOrder.id)
-    .limit(1);
-
-  if (existingError) {
-    throw new HttpError(500, "DB", `Failed to check order cashback: ${existingError.message}`);
-  }
-  if ((existingRows ?? []).length > 0) {
-    return { awarded: false, points: 0 };
-  }
-
-  const { error: insertError } = await supabase.from("loyalty_transactions").insert({
-    tg_user_id: cashbackOrder.tg_user_id,
-    delta_points: cashback.points,
-    kind: ORDER_CASHBACK_KIND,
-    order_id: cashbackOrder.id,
-    created_at: new Date().toISOString(),
-  });
-
-  if (insertError) {
-    const errorCode = (insertError as { code?: string } | null)?.code ?? "";
-    if (errorCode === "23505") return { awarded: false, points: 0 };
-    throw new HttpError(500, "DB", `Failed to add cashback: ${insertError.message}`);
-  }
-
-  return { awarded: true, points: cashback.points };
 }
 
 export async function processReferralRewardForOrderDone(params: {
@@ -879,34 +618,22 @@ export async function processReferralRewardForOrderDone(params: {
   if (firstOrder.status !== "done") return { awarded: false };
 
   const nowIso = new Date().toISOString();
-  const txRows = [
-    {
-      tg_user_id: referral.inviter_tg_user_id,
-      delta_points: config.referrals.pointsInviter,
-      kind: REFERRAL_INVITER_BONUS_KIND,
-      referral_id: referral.id,
-      order_id: order.id,
-      created_at: nowIso,
-    },
-    {
-      tg_user_id: referral.invitee_tg_user_id,
-      delta_points: config.referrals.pointsInvitee,
-      kind: REFERRAL_INVITEE_BONUS_KIND,
-      referral_id: referral.id,
-      order_id: order.id,
-      created_at: nowIso,
-    },
-  ];
-
-  const { error: txError } = await supabase.from("loyalty_transactions").insert(txRows);
-
-  if (txError) {
-    const duplicateCode = (txError as { code?: string } | null)?.code ?? "";
-    // Idempotency: if bonus rows already exist, keep going and just sync referral status below.
-    if (duplicateCode !== "23505") {
-      throw new HttpError(500, "DB", `Failed to insert loyalty transactions: ${txError.message}`);
-    }
-  }
+  await applyLoyaltyPointsTransaction({
+    tgUserId: referral.inviter_tg_user_id,
+    deltaPoints: config.referrals.pointsInviter,
+    kind: REFERRAL_INVITER_BONUS_KIND,
+    orderId: order.id,
+    referralId: referral.id,
+    comment: "Referral reward for a first completed order",
+  });
+  await applyLoyaltyPointsTransaction({
+    tgUserId: referral.invitee_tg_user_id,
+    deltaPoints: config.referrals.pointsInvitee,
+    kind: REFERRAL_INVITEE_BONUS_KIND,
+    orderId: order.id,
+    referralId: referral.id,
+    comment: "Referral reward for a first completed order",
+  });
 
   const { error: referralUpdateError } = await supabase
     .from("referrals")

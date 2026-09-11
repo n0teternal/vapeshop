@@ -6,6 +6,13 @@ import XlsxPopulate from "xlsx-populate";
 import { z } from "zod";
 import { config } from "../config.js";
 import { HttpError, isHttpError } from "../httpError.js";
+import {
+  applyLoyaltyPointsTransaction,
+  getLoyaltySummary,
+  MANUAL_POINTS_CREDIT_KIND,
+  MANUAL_POINTS_DEBIT_KIND,
+  processOrderCashback,
+} from "../loyalty/service.js";
 import { decodeCsvBuffer } from "../import/decodeCsvBuffer.js";
 import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import { parseOrderComment } from "../order/orderComment.js";
@@ -27,10 +34,7 @@ import {
   PROMOTION_TYPE_BUY_2_GET_3_CHEAPEST_FREE,
   PROMOTION_TYPE_BUY_POD_GET_LIQUID_CHEAPEST_FREE,
 } from "../promotions/rules.js";
-import {
-  processOrderCashbackForOrderDone,
-  processReferralRewardForOrderDone,
-} from "../referral/service.js";
+import { processReferralRewardForOrderDone } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
   applyStaffInventoryOperation,
@@ -3987,6 +3991,89 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // Customer-card data and a command-style manual adjustment endpoint. Keeping
+  // the mutation here means the same admin authorization is used whether a
+  // future UI card or an internal tool invokes it.
+  app.get<{ Params: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/loyalty/:tgUserId",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const params = z.object({ tgUserId: z.coerce.number().int().positive() }).safeParse(request.params);
+        if (!params.success) throw new HttpError(400, "BAD_REQUEST", "Invalid Telegram user id");
+
+        const supabase = createServiceSupabaseClient();
+        const [summary, historyResult] = await Promise.all([
+          getLoyaltySummary(params.data.tgUserId),
+          supabase
+            .from("loyalty_transactions")
+            .select("id,delta_points,kind,order_id,referral_id,comment,created_at")
+            .eq("tg_user_id", params.data.tgUserId)
+            .order("created_at", { ascending: false })
+            .limit(30),
+        ]);
+        if (historyResult.error) {
+          throw new HttpError(500, "DB", `Failed to load loyalty history: ${historyResult.error.message}`);
+        }
+
+        return reply.code(200).send(
+          ok({
+            ...summary,
+            history: (historyResult.data ?? []).map((row) => ({
+              id: row.id,
+              deltaPoints: toNumber(row.delta_points, "loyalty_transactions.delta_points"),
+              kind: row.kind,
+              orderId: row.order_id,
+              referralId: row.referral_id,
+              comment: row.comment,
+              createdAt: row.created_at,
+            })),
+          }),
+        );
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.post<{ Params: unknown; Body: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
+    "/api/admin/loyalty/:tgUserId/points",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const params = z.object({ tgUserId: z.coerce.number().int().positive() }).safeParse(request.params);
+        const body = z
+          .object({
+            deltaPoints: z.number().int().refine((value) => value !== 0, "deltaPoints must not be zero"),
+            comment: z.string().trim().min(1).max(500),
+          })
+          .safeParse(request.body);
+        if (!params.success || !body.success) {
+          throw new HttpError(
+            400,
+            "BAD_REQUEST",
+            params.error?.issues[0]?.message ?? body.error?.issues[0]?.message ?? "Invalid request",
+          );
+        }
+
+        const transaction = await applyLoyaltyPointsTransaction({
+          tgUserId: params.data.tgUserId,
+          deltaPoints: body.data.deltaPoints,
+          kind: body.data.deltaPoints > 0 ? MANUAL_POINTS_CREDIT_KIND : MANUAL_POINTS_DEBIT_KIND,
+          comment: body.data.comment,
+          // The specification explicitly resets the timer for a manual credit.
+          resetExpiry: body.data.deltaPoints > 0,
+        });
+        const summary = await getLoyaltySummary(params.data.tgUserId);
+        return reply.code(200).send(ok({ transaction, ...summary }));
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
   app.put<{ Body: unknown; Reply: ApiSuccess<unknown> | ApiFailure }>(
     "/api/admin/orders/:id/status",
     async (request, reply) => {
@@ -4007,7 +4094,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           .from("orders")
           .update({ status: parsed.data.status })
           .eq("id", orderId)
-          .select("id,status")
+          .select("id,status,tg_user_id,total_price,total_after_discount")
           .single();
 
         if (error) {
@@ -4015,6 +4102,18 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
         if (!data) {
           throw new HttpError(404, "NOT_FOUND", "Order not found");
+        }
+
+        if (parsed.data.status === "done") {
+          try {
+            await processOrderCashback({
+              tgUserId: data.tg_user_id,
+              orderId: data.id,
+              cashbackBase: toNumber(data.total_after_discount ?? data.total_price, "orders.total_after_discount"),
+            });
+          } catch (e) {
+            request.log.error({ err: e, orderId: data.id }, "Failed to process order cashback");
+          }
         }
 
         if (parsed.data.status === "done") {
@@ -4037,12 +4136,6 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             await processReferralRewardForOrderDone({ orderId: data.id });
           } catch (e) {
             request.log.error({ err: e, orderId: data.id }, "Failed to process referral reward");
-          }
-
-          try {
-            await processOrderCashbackForOrderDone({ orderId: data.id });
-          } catch (e) {
-            request.log.error({ err: e, orderId: data.id }, "Failed to process order cashback");
           }
         }
 

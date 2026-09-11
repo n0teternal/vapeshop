@@ -21,16 +21,20 @@ type ReferralOverview = {
     inviter: number;
     invitee: number;
     minFirstOrderTotalRub: number;
-    pointsExpireAfterMonths: number;
+    pointsExpireAfterDays: number;
     pointsMaxSpendPercent: number;
   };
   pointsBalance: number;
+  pointsNextExpiresAt: string | null;
+  totalSpent: number;
+  cashbackLevel: number;
   pointsHistory: Array<{
     id: number;
     deltaPoints: number;
     kind: string;
     orderId: string | null;
     referralId: number | null;
+    comment: string | null;
     createdAt: string;
     expiresAt: string | null;
   }>;
@@ -69,16 +73,6 @@ function formatDate(value: string): string {
   }).format(date);
 }
 
-function monthLabel(value: number): string {
-  const abs = Math.abs(value);
-  const lastTwo = abs % 100;
-  const lastOne = abs % 10;
-  if (lastTwo >= 11 && lastTwo <= 14) return `${value} месяцев`;
-  if (lastOne === 1) return `${value} месяц`;
-  if (lastOne >= 2 && lastOne <= 4) return `${value} месяца`;
-  return `${value} месяцев`;
-}
-
 function statusLabel(status: ReferralStatus): string {
   if (status === "joined_no_order") return "Присоединился, заказа нет";
   if (status === "first_order_created_not_paid") return "Первый заказ создан, не оплачен";
@@ -102,6 +96,9 @@ function pointsKindLabel(kind: string): string {
   if (kind === "referral_invitee_bonus") return "Бонус за первый заказ";
   if (kind === "order_cashback") return "Кэшбек за заказ";
   if (kind === "order_points_spend") return "Списание баллов";
+  if (kind === "points_expired") return "Сгорание баллов";
+  if (kind === "manual_credit") return "Ручное начисление";
+  if (kind === "manual_debit") return "Ручное списание";
   return kind;
 }
 
@@ -233,7 +230,7 @@ export function ReferralPage() {
             <span className="text-primary">+{reward.invitee}</span> приглашенному.
           </div>
           <div className="mt-2 text-xs leading-5 text-muted-foreground">
-            Баллы действуют {monthLabel(reward.pointsExpireAfterMonths)}. Ими можно оплатить до{" "}
+            Баллы сгорают через {reward.pointsExpireAfterDays} дней без успешного заказа. Ими можно оплатить до{" "}
             {reward.pointsMaxSpendPercent}% корзины.
           </div>
         </CardContent>
@@ -245,6 +242,12 @@ export function ReferralPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="text-2xl font-bold">{firstPage.pointsBalance} баллов</div>
+
+          {firstPage.pointsNextExpiresAt ? (
+            <div className="text-xs text-muted-foreground">
+              Срок действия обновится после следующего успешного заказа. Сейчас баллы сгорят {formatDate(firstPage.pointsNextExpiresAt)}.
+            </div>
+          ) : null}
 
           <div className="rounded-xl border border-border/70 bg-background p-3 text-xs">
             <div className="flex flex-wrap gap-2">
@@ -291,6 +294,7 @@ export function ReferralPage() {
                 <div>
                   <div className="text-sm font-medium">{pointsKindLabel(row.kind)}</div>
                   <div className="text-xs text-muted-foreground">{formatDate(row.createdAt)}</div>
+                  {row.comment ? <div className="text-xs text-muted-foreground">{row.comment}</div> : null}
                   {row.expiresAt ? (
                     <div className="text-xs text-muted-foreground">
                       {new Date(row.expiresAt).getTime() <= historyNowMs ? "Сгорели" : "Сгорят"}{" "}

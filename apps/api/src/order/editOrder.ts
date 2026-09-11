@@ -1,4 +1,5 @@
 import { HttpError } from "../httpError.js";
+import { setOrderPointsSpend } from "../loyalty/service.js";
 import { getMaxPointsDiscountForTotal } from "../referral/service.js";
 import {
   calculatePromotionDiscount,
@@ -22,7 +23,6 @@ import type { CitySlug, CreateOrderPayload } from "./createOrder.js";
 import { buildOrderComment, parseOrderComment } from "./orderComment.js";
 
 const ORDER_EDIT_WINDOW_MS = 30 * 60 * 1_000;
-const ORDER_POINTS_SPEND_KIND = "order_points_spend";
 
 type OrderStatus = "new" | "processing" | "done" | "cancelled";
 
@@ -78,15 +78,6 @@ type RestorableInventoryUpdate = {
   previousInStock: boolean;
   nextStockQty: number;
   nextInStock: boolean;
-};
-
-type PointsSpendRow = {
-  id: number;
-  tg_user_id: number;
-  delta_points: number;
-  kind: string;
-  order_id: string | null;
-  created_at: string;
 };
 
 export type OrderEditCartItem = {
@@ -376,87 +367,25 @@ async function syncOrderPointsSpend(params: {
   orderId: string;
   nextPointsToSpend: number;
 }): Promise<() => Promise<void>> {
-  const supabase = createServiceSupabaseClient();
   const nextPointsToSpend = Math.max(0, Math.trunc(params.nextPointsToSpend));
-  const { data, error } = await supabase
-    .from("loyalty_transactions")
-    .select("id,tg_user_id,delta_points,kind,order_id,created_at")
-    .eq("tg_user_id", params.tgUserId)
-    .eq("kind", ORDER_POINTS_SPEND_KIND)
-    .eq("order_id", params.orderId)
-    .maybeSingle();
-
-  if (error) {
-    throw new HttpError(500, "DB", `Failed to load order points transaction: ${error.message}`);
-  }
-
-  const previousRow = (data ?? null) as PointsSpendRow | null;
-  const previousPointsToSpend = previousRow ? Math.max(0, -previousRow.delta_points) : 0;
-  if (previousPointsToSpend === nextPointsToSpend) {
-    return async () => {};
-  }
-
-  if (previousRow) {
-    if (nextPointsToSpend <= 0) {
-      const { error: deleteError } = await supabase
-        .from("loyalty_transactions")
-        .delete()
-        .eq("id", previousRow.id);
-
-      if (deleteError) {
-        throw new HttpError(500, "DB", `Failed to delete order points transaction: ${deleteError.message}`);
-      }
-
-      return async () => {
-        await supabase.from("loyalty_transactions").insert({
-          tg_user_id: previousRow.tg_user_id,
-          delta_points: previousRow.delta_points,
-          kind: previousRow.kind,
-          order_id: previousRow.order_id,
-          created_at: previousRow.created_at,
-        });
-      };
-    }
-
-    const { error: updateError } = await supabase
-      .from("loyalty_transactions")
-      .update({ delta_points: -nextPointsToSpend })
-      .eq("id", previousRow.id);
-
-    if (updateError) {
-      throw new HttpError(500, "DB", `Failed to update order points transaction: ${updateError.message}`);
-    }
-
-    return async () => {
-      await supabase
-        .from("loyalty_transactions")
-        .update({ delta_points: previousRow.delta_points })
-        .eq("id", previousRow.id);
-    };
-  }
-
-  if (nextPointsToSpend <= 0) {
-    return async () => {};
-  }
-
-  const { data: insertedRow, error: insertError } = await supabase
-    .from("loyalty_transactions")
-    .insert({
-      tg_user_id: params.tgUserId,
-      delta_points: -nextPointsToSpend,
-      kind: ORDER_POINTS_SPEND_KIND,
-      order_id: params.orderId,
-      created_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-
-  if (insertError || !insertedRow) {
-    throw new HttpError(500, "DB", `Failed to create order points transaction: ${insertError?.message ?? "empty response"}`);
-  }
+  const result = await setOrderPointsSpend({
+    tgUserId: params.tgUserId,
+    orderId: params.orderId,
+    pointsToSpend: nextPointsToSpend,
+  });
+  if (result.previousPoints === nextPointsToSpend) return async () => {};
 
   return async () => {
-    await supabase.from("loyalty_transactions").delete().eq("id", insertedRow.id);
+    try {
+      await setOrderPointsSpend({
+        tgUserId: params.tgUserId,
+        orderId: params.orderId,
+        pointsToSpend: result.previousPoints,
+      });
+    } catch {
+      // The calling operation already failed. Preserve its primary error while
+      // making the balance rollback best-effort, like inventory rollback.
+    }
   };
 }
 

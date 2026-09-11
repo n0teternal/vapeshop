@@ -31,8 +31,12 @@ export type AppConfig = {
     pointsInviter: number;
     pointsInvitee: number;
     minFirstOrderTotalRub: number;
-    pointsExpireAfterMonths: number;
     pointsMaxSpendPercent: number;
+  };
+  loyalty: {
+    expirationDays: number;
+    timezone: string;
+    cronSecret: string | null;
   };
   yandex: {
     geocoderApiKey: string | null;
@@ -248,8 +252,12 @@ export const config: AppConfig = (() => {
       pointsInviter: parsePositiveIntEnv("REFERRAL_POINTS_INVITER", 100),
       pointsInvitee: parsePositiveIntEnv("REFERRAL_POINTS_INVITEE", 100),
       minFirstOrderTotalRub: parsePositiveIntEnv("REFERRAL_MIN_FIRST_ORDER_TOTAL", 1200),
-      pointsExpireAfterMonths: parsePositiveIntEnv("REFERRAL_POINTS_EXPIRE_AFTER_MONTHS", 3),
       pointsMaxSpendPercent: parsePercentIntEnv("REFERRAL_POINTS_MAX_SPEND_PERCENT", 50),
+    },
+    loyalty: {
+      expirationDays: 60,
+      timezone: readEnv("LOYALTY_TIMEZONE") ?? "Asia/Vladivostok",
+      cronSecret: readEnv("LOYALTY_CRON_SECRET"),
     },
     yandex: {
       geocoderApiKey: readEnv("YANDEX_GEOCODER_API_KEY"),

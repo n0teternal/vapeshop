@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { isHttpError } from "../httpError.js";
+import { processOrderCashback } from "../loyalty/service.js";
 import { cancelOrderAndRestoreInventory } from "../order/cancelOrder.js";
 import { buildCustomerConversationRequestMessage } from "../order/conversationRequest.js";
 import {
@@ -14,7 +15,6 @@ import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import {
   bootstrapReferralProfile,
   getCustomerReferralShare,
-  processOrderCashbackForOrderDone,
   processReferralRewardForOrderDone,
 } from "../referral/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
@@ -1098,15 +1098,19 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
     if (action.kind === "order_status" && action.status === "done") {
       try {
-        await processReferralRewardForOrderDone({ orderId: order.id });
+        await processOrderCashback({
+          tgUserId: order.tg_user_id,
+          orderId: order.id,
+          cashbackBase: numberFromUnknown(order.total_price),
+        });
       } catch (e) {
-        request.log.error({ err: e, orderId: order.id }, "Failed to process referral reward");
+        request.log.error({ err: e, orderId: order.id }, "Failed to process order cashback");
       }
 
       try {
-        await processOrderCashbackForOrderDone({ orderId: order.id });
+        await processReferralRewardForOrderDone({ orderId: order.id });
       } catch (e) {
-        request.log.error({ err: e, orderId: order.id }, "Failed to process order cashback");
+        request.log.error({ err: e, orderId: order.id }, "Failed to process referral reward");
       }
     }
 

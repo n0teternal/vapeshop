@@ -314,6 +314,13 @@ export type Database = {
           referred_by_tg_user_id: number | null;
           referral_bound_at: string | null;
           tg_username: string | null;
+          total_spent: number;
+          bonus_points: number;
+          current_cashback_level: number;
+          last_order_date: string | null;
+          loyalty_expires_at: string | null;
+          loyalty_notice_45_sent_at: string | null;
+          loyalty_notice_59_sent_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -323,6 +330,13 @@ export type Database = {
           referred_by_tg_user_id?: number | null;
           referral_bound_at?: string | null;
           tg_username?: string | null;
+          total_spent?: number;
+          bonus_points?: number;
+          current_cashback_level?: number;
+          last_order_date?: string | null;
+          loyalty_expires_at?: string | null;
+          loyalty_notice_45_sent_at?: string | null;
+          loyalty_notice_59_sent_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -332,6 +346,13 @@ export type Database = {
           referred_by_tg_user_id?: number | null;
           referral_bound_at?: string | null;
           tg_username?: string | null;
+          total_spent?: number;
+          bonus_points?: number;
+          current_cashback_level?: number;
+          last_order_date?: string | null;
+          loyalty_expires_at?: string | null;
+          loyalty_notice_45_sent_at?: string | null;
+          loyalty_notice_59_sent_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -426,6 +447,7 @@ export type Database = {
           kind: string;
           referral_id: number | null;
           order_id: string | null;
+          comment: string | null;
           created_at: string;
         };
         Insert: {
@@ -435,6 +457,7 @@ export type Database = {
           kind: string;
           referral_id?: number | null;
           order_id?: string | null;
+          comment?: string | null;
           created_at?: string;
         };
         Update: {
@@ -444,6 +467,7 @@ export type Database = {
           kind?: string;
           referral_id?: number | null;
           order_id?: string | null;
+          comment?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -627,7 +651,39 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      loyalty_apply_points_transaction: {
+        Args: {
+          p_tg_user_id: number;
+          p_delta_points: number;
+          p_kind: string;
+          p_order_id?: string | null;
+          p_referral_id?: number | null;
+          p_comment?: string | null;
+          p_reset_expiry?: boolean;
+        };
+        Returns: Array<{ applied: boolean; bonus_points: number; loyalty_expires_at: string | null }>;
+      };
+      loyalty_set_order_points_spend: {
+        Args: { p_tg_user_id: number; p_order_id: string; p_points_to_spend: number };
+        Returns: Array<{ previous_points: number; points_to_spend: number; bonus_points: number }>;
+      };
+      loyalty_complete_order: {
+        Args: { p_tg_user_id: number; p_order_id: string; p_cashback_base: number };
+        Returns: Array<{
+          applied: boolean;
+          cashback_points: number;
+          cashback_percent: number;
+          total_spent: number;
+          bonus_points: number;
+          loyalty_expires_at: string | null;
+        }>;
+      };
+      loyalty_expire_points: {
+        Args: { p_tg_user_id: number };
+        Returns: Array<{ expired_points: number; bonus_points: number }>;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

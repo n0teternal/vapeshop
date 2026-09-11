@@ -7,7 +7,6 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { ProfileStatusBand } from "../components/ProfileStatusBand";
-import type { CashbackTier } from "../lib/cashback";
 import {
   writeCachedDeliveryPricingSettings,
   type DeliveryPeakSurchargeRule,
@@ -25,7 +24,8 @@ type AdminMe = {
 type LoyaltyBalanceOverview = {
   pointsBalance: number;
   pointsNextExpiresAt: string | null;
-  cashbackTiers: CashbackTier[];
+  totalSpent: number;
+  cashbackLevel: number;
 };
 
 const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
@@ -78,7 +78,7 @@ export function ProfilePage() {
   }, []);
 
   const tgUser = webApp.initDataUnsafe?.user;
-  const shouldShowLoyaltyStatus = tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
+  const shouldShowLoyaltyStatus = isTelegram && typeof tgUser?.id === "number";
   const canManageDeliveryPricing =
     isTelegram && tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
 
@@ -298,11 +298,12 @@ export function ProfilePage() {
             </div>
           </div>
           {shouldShowLoyaltyStatus ? (
-            <ProfileStatusBand
-              pointsBalance={loyaltyBalance?.pointsBalance ?? null}
-              pointsNextExpiresAt={loyaltyBalance?.pointsNextExpiresAt ?? null}
-              cashbackTiers={loyaltyBalance?.cashbackTiers ?? []}
-            />
+              <ProfileStatusBand
+                pointsBalance={loyaltyBalance?.pointsBalance ?? null}
+                pointsNextExpiresAt={loyaltyBalance?.pointsNextExpiresAt ?? null}
+                totalSpent={loyaltyBalance?.totalSpent ?? null}
+                cashbackLevel={loyaltyBalance?.cashbackLevel ?? null}
+              />
           ) : null}
         </CardContent>
       </Card>

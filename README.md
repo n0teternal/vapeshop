@@ -72,8 +72,9 @@ copy .env.example .env.local
 - `REFERRAL_POINTS_INVITER` — баллы пригласившему при `done` первого заказа реферала (default `100`)
 - `REFERRAL_POINTS_INVITEE` — баллы приглашенному при `done` первого заказа (default `100`)
 - `REFERRAL_MIN_FIRST_ORDER_TOTAL` — минимальная сумма первого `done` заказа реферала для начисления бонусов (default `1200`)
-- `REFERRAL_POINTS_EXPIRE_AFTER_MONTHS` — срок действия начисленных баллов в месяцах (default `3`)
 - `REFERRAL_POINTS_MAX_SPEND_PERCENT` — максимум корзины, который можно оплатить баллами (default `50`)
+- `LOYALTY_TIMEZONE` — часовой пояс ежедневной проверки сгорания (default `Asia/Vladivostok`)
+- `LOYALTY_CRON_SECRET` — секрет для защищённого запуска ежедневной проверки сгорания
 - `PRODUCT_IMAGES_BASE_URL` — базовый публичный URL для картинок товаров (рекомендуется Supabase Storage URL)
 - `CORS_ORIGINS` — **только для production**, список origin через запятую
 
@@ -114,9 +115,18 @@ Dashboard → **SQL Editor** → выполните:
 Dashboard → **SQL Editor** → выполните:
 - SQL рефералок (profiles/referrals/coupons + поля в orders)
 - `supabase/alter_referrals_loyalty.sql` (ledger баллов + индексы + `tg_username`)
-- `supabase/alter_cashback.sql` (защита от повторного начисления кэшбека за один заказ)
+- `supabase/alter_loyalty_program.sql` (кэшбек 3/5/7%, баланс, сгорание через 60 дней и атомарные операции)
 - `supabase/alter_promo_products.sql` (admin-only промо-товары по городам: старая/новая цена)
 - `supabase/alter_promotion_rules.sql` (правила автоматических скидок и типы акций)
+
+## Ежедневная проверка лояльности
+
+Настройте Railway Cron (или другой планировщик) на 12:00 `Asia/Vladivostok` одним из способов:
+
+- запрос `POST /api/internal/loyalty/retention` с заголовком `Authorization: Bearer <LOYALTY_CRON_SECRET>`;
+- отдельная cron-команда `pnpm -C apps/api loyalty:retention` в окружении с теми же переменными API.
+
+Задача отправляет напоминания за 15 и за 1 день, а в день истечения технически обнуляет баланс. Повторный запуск безопасен: уведомления и сгорание не дублируются.
 
 ## Storage (product images)
 
