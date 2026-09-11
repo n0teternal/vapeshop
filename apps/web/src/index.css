@@ -488,8 +488,8 @@ textarea {
   width: 100%;
   align-items: center;
   justify-content: space-between;
-  margin: 0.6rem 0 0.45rem;
-  padding: 0 0.8rem;
+  margin: 0.6rem 0 0.65rem;
+  padding: 0 0.45rem;
 }
 
 .loyalty-points-summary__pager span {
