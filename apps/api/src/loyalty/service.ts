@@ -10,13 +10,6 @@ export const MANUAL_POINTS_CREDIT_KIND = "manual_credit";
 export const MANUAL_POINTS_DEBIT_KIND = "manual_debit";
 
 const LOYALTY_PAGE_SIZE = 1_000;
-// Temporary controlled rollout. Remove this guard when the cashback program is
-// ready for every customer.
-export const LOYALTY_PILOT_TG_USER_ID = 1208488286;
-
-export function isLoyaltyPilotUser(tgUserId: number): boolean {
-  return tgUserId === LOYALTY_PILOT_TG_USER_ID;
-}
 
 type LoyaltyProfileRow = {
   tg_user_id: number;
@@ -228,10 +221,6 @@ export async function processOrderCashback(params: {
   orderId: string;
   cashbackBase: number;
 }): Promise<{ applied: boolean; cashbackPoints: number; cashbackPercent: number }> {
-  if (!isLoyaltyPilotUser(params.tgUserId)) {
-    return { applied: false, cashbackPoints: 0, cashbackPercent: 0 };
-  }
-
   if (!Number.isFinite(params.cashbackBase) || params.cashbackBase < 0) {
     throw new HttpError(500, "DB", "Invalid cashback base for completed order");
   }
@@ -311,7 +300,6 @@ async function loadExpiryCandidates(): Promise<LoyaltyProfileRow[]> {
         "tg_user_id,total_spent,bonus_points,current_cashback_level,last_order_date,loyalty_expires_at,loyalty_notice_45_sent_at,loyalty_notice_59_sent_at",
       )
       .gt("bonus_points", 0)
-      .eq("tg_user_id", LOYALTY_PILOT_TG_USER_ID)
       .not("loyalty_expires_at", "is", null)
       .order("loyalty_expires_at", { ascending: true })
       .range(offset, offset + LOYALTY_PAGE_SIZE - 1);

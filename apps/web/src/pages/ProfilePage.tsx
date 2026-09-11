@@ -29,7 +29,6 @@ type LoyaltyBalanceOverview = {
 };
 
 const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
-const LOYALTY_PILOT_TG_USER_ID = 1208488286;
 
 function normalizeNumericInput(value: string): number {
   const parsed = Number(value.replace(",", "."));
@@ -79,7 +78,7 @@ export function ProfilePage() {
   }, []);
 
   const tgUser = webApp.initDataUnsafe?.user;
-  const shouldShowLoyaltyStatus = isTelegram && tgUser?.id === LOYALTY_PILOT_TG_USER_ID;
+  const shouldShowLoyaltyStatus = isTelegram && typeof tgUser?.id === "number";
   const canManageDeliveryPricing =
     isTelegram && tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
 
