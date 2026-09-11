@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 
 type ProfileStatusBandProps = {
   pointsBalance: number | null;
@@ -75,19 +75,52 @@ export function ProfileStatusBand({
   totalSpent,
   cashbackLevel,
 }: ProfileStatusBandProps) {
-  const tierIndex = resolveTierIndex(cashbackLevel);
+  const currentTierIndex = resolveTierIndex(cashbackLevel);
+  const [previewTierIndex, setPreviewTierIndex] = useState<number | null>(null);
+  const [isChanging, setIsChanging] = useState(false);
+  const tierIndex = previewTierIndex ?? currentTierIndex;
   const tier = STATUS_TIERS[tierIndex];
+  const currentTier = STATUS_TIERS[currentTierIndex];
   const isLocked = tierIndex === 0;
   const expiryDate = formatExpiryDate(pointsNextExpiresAt);
-  const progress = getProgress(totalSpent, tierIndex);
+  const currentProgress = getProgress(totalSpent, currentTierIndex);
+  const progress = previewTierIndex === null
+    ? currentProgress
+    : {
+      label: `Просмотр ${tier.cashbackRate}. Ваш текущий уровень: ${currentTier.cashbackRate}`,
+      value: currentProgress.value,
+    };
   const statusClassName = tier.className.replace("loyalty-band", "loyalty-status");
+
+  function showNextTier(): void {
+    if (isChanging) return;
+
+    setPreviewTierIndex((currentPreview) => {
+      const current = currentPreview ?? currentTierIndex;
+      const next = (current + 1) % STATUS_TIERS.length;
+      return next === currentTierIndex ? null : next;
+    });
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setIsChanging(true);
+    }
+  }
 
   return (
     <section
       className={`loyalty-status loyalty-status--embedded ${statusClassName}`}
       aria-label="Статус Smoke Diller"
     >
-      <div className={`loyalty-band ${tier.className}`} aria-label={`Статус ${tier.name}`}>
+      <button
+        type="button"
+        className={`loyalty-band ${tier.className}${isChanging ? " loyalty-band--changing" : ""}`}
+        onClick={showNextTier}
+        onAnimationEnd={() => setIsChanging(false)}
+        aria-label={
+          previewTierIndex === null
+            ? `Ваш статус ${tier.name}: ${tier.cashbackRate}. Нажмите, чтобы посмотреть уровни.`
+            : `Просмотр уровня ${tier.name}: ${tier.cashbackRate}. Ваш текущий уровень: ${currentTier.name}.`
+        }
+      >
         <span className="loyalty-band__star" aria-hidden="true">
           {isLocked ? "☆" : "★"}
         </span>
@@ -100,7 +133,7 @@ export function ProfileStatusBand({
         <span className="loyalty-band__progress" aria-hidden="true">
           <span style={{ width: `${Math.max(0, progress.value)}%` }} />
         </span>
-      </div>
+      </button>
 
       <div
         className="loyalty-points-summary__pager"
