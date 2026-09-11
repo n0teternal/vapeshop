@@ -211,7 +211,6 @@ textarea {
 }
 
 .loyalty-status--embedded {
-  display: grid;
   margin-top: 0.6rem;
   border: 0;
   border-radius: 0;
@@ -456,10 +455,9 @@ textarea {
 
 .loyalty-points-summary {
   display: grid;
-  gap: 0.45rem;
-  margin: 0;
-  border-top: 1px solid rgb(134 163 195 / 0.22);
-  padding: 0.75rem 0.25rem 0;
+  gap: 0.3rem;
+  margin: 0.1rem 0 0;
+  padding: 0 0.25rem;
   color: #f4f8ff;
   font-size: 0.9rem;
   font-weight: 400;
@@ -468,8 +466,7 @@ textarea {
 
 .loyalty-points-summary__row {
   display: flex;
-  min-height: 1.25rem;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
 }
@@ -478,7 +475,7 @@ textarea {
   color: #fff;
   font-family: "Sora", "Manrope", sans-serif;
   font-size: 0.98rem;
-  font-weight: 700;
+  font-weight: 400;
   text-align: right;
 }
 
@@ -486,19 +483,13 @@ textarea {
   color: #fff;
 }
 
-.loyalty-points-summary__expiry {
-  color: #9aafc6;
-  font-size: 0.8rem;
-}
-
 .loyalty-points-summary__pager {
   display: flex;
-  width: fit-content;
+  width: 100%;
   align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  margin: 0.7rem auto 0.65rem;
-  padding: 0;
+  justify-content: space-between;
+  margin: 0.6rem 0 0.45rem;
+  padding: 0 0.8rem;
 }
 
 .loyalty-points-summary__pager span {
@@ -517,9 +508,9 @@ textarea {
 
 .loyalty-points-summary__pager .loyalty-points-summary__pager-line {
   position: relative;
-  flex: 0 0 1.6rem;
+  flex: 1 1 auto;
   height: 0.13rem;
-  margin: 0;
+  margin: 0 0.55rem;
   overflow: hidden;
   border-radius: 999px;
   background-color: var(--loyalty-pager-track);
