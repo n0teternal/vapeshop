@@ -43,7 +43,6 @@ import {
 } from "../staffInventory/service.js";
 import { requireAdmin } from "./requireAdmin.js";
 import {
-  createImagesRestorePoint,
   createProductsRestorePoint,
   listAdminChangeVersions,
   requireAdminHistoryOwner,
@@ -210,15 +209,15 @@ async function syncStaffInventoryFromWorkbook(params: {
   cityId: number;
   productIdRemap: Readonly<Record<string, string>>;
 }): Promise<number> {
-  const rows = readStaffInventorySheets(params.buffer).map((row) => ({
+  const importedRows = readStaffInventorySheets(params.buffer).map((row) => ({
     ...row,
     productId: params.productIdRemap[row.productId] ?? row.productId,
   }));
-  if (rows.length === 0) return 0;
+  if (importedRows.length === 0) return 0;
 
   const supabase = createServiceSupabaseClient();
-  const staffIds = Array.from(new Set(rows.map((row) => row.staffId)));
-  const productIds = Array.from(new Set(rows.map((row) => row.productId)));
+  const staffIds = Array.from(new Set(importedRows.map((row) => row.staffId)));
+  const productIds = Array.from(new Set(importedRows.map((row) => row.productId)));
   const productIdChunks = chunk(productIds, STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE);
   const [staffResult, cityInventoryResults, allocationResults] = await Promise.all([
       supabase.from("staff_members").select("id").in("id", staffIds),
@@ -269,6 +268,39 @@ async function syncStaffInventoryFromWorkbook(params: {
   }
 
   const cityQtyByProductId = new Map(cityInventory.map((row) => [row.product_id, row.stock_qty]));
+  // The first workbook sheet is the city-wide source of truth. In particular,
+  // a zero there means that the item is gone everywhere. Staff tabs describe
+  // allocations only, so stale numbers there must never bring it back into
+  // the catalog after the city stock was explicitly set to zero.
+  const zeroCityProductIds = new Set(
+    cityInventory
+      .filter((row) => row.stock_qty === 0)
+      .map((row) => row.product_id),
+  );
+  const rows = importedRows.map((row) =>
+    zeroCityProductIds.has(row.productId) ? { ...row, stockQty: 0 } : row,
+  );
+
+  if (zeroCityProductIds.size > 0) {
+    for (const productIdChunk of chunk(
+      Array.from(zeroCityProductIds),
+      STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE,
+    )) {
+      const { error } = await supabase
+        .from("staff_inventory")
+        .update({ stock_qty: 0 })
+        .eq("city_id", params.cityId)
+        .in("product_id", productIdChunk);
+      if (error) {
+        throw new HttpError(
+          500,
+          "DB",
+          `Failed to clear staff stock for zero city inventory: ${error.message}`,
+        );
+      }
+    }
+  }
+
   const missingRowsWithStock = rows.filter(
     (row) => !cityQtyByProductId.has(row.productId) && row.stockQty > 0,
   );
@@ -379,6 +411,7 @@ async function syncStaffInventoryFromWorkbook(params: {
   const retainedQtyByProductId = new Map<string, number>();
   for (const allocation of currentAllocations) {
     if (!cityQtyByProductId.has(allocation.product_id)) continue;
+    if (zeroCityProductIds.has(allocation.product_id)) continue;
     if (staffIds.includes(allocation.staff_id)) continue;
     retainedQtyByProductId.set(
       allocation.product_id,
@@ -3590,17 +3623,9 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         const saved: Array<{ originalName: string; fileName: string; size: number }> = [];
         const errors: Array<{ originalName: string; message: string }> = [];
         let received = 0;
-        let restorePoint: Awaited<ReturnType<typeof createImagesRestorePoint>> | null = null;
 
         for await (const file of files) {
           received += 1;
-          if (!restorePoint) {
-            restorePoint = await createImagesRestorePoint({
-              tgUserId: admin.tgUserId,
-              itemsDir,
-              label: "Перед загрузкой изображений",
-            });
-          }
           const originalName = file.filename || `file_${Date.now()}`;
           const safeName = sanitizeFileName(originalName) || `file_${Date.now()}`;
           const inferredMime = inferMimeType(safeName);
@@ -3645,7 +3670,6 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             saved,
             errors,
             baseUrl: config.productImagesBaseUrl ?? null,
-            restorePoint,
           }),
         );
       } catch (e) {

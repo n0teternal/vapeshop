@@ -174,6 +174,7 @@ export async function fetchCatalogByCity(params: {
       overrideRaw === null || overrideRaw === undefined
         ? null
         : numberFromUnknown(overrideRaw, "inventory.price_override");
+    const stockQty = stockQtyFromUnknown(row.stock_qty);
 
     const item: CatalogItem = {
       id: product.id,
@@ -183,8 +184,8 @@ export async function fetchCatalogByCity(params: {
       categorySlug: product.category_slug,
       price: overridePrice ?? basePrice,
       regularPrice: overridePrice ?? basePrice,
-      inStock: row.in_stock === true,
-      stockQty: stockQtyFromUnknown(row.stock_qty),
+      inStock: row.in_stock === true && (stockQty === null || stockQty > 0),
+      stockQty,
     };
     items.push(item);
     itemById.set(item.id, item);

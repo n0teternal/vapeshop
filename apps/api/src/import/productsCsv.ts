@@ -795,6 +795,13 @@ export async function importProductsCsv(params: {
         );
       }
 
+      // For goods with a tracked quantity, the amount is the source of truth.
+      // This lets an operator set only stock_qty to 0 in an XLSX and prevents
+      // a stale in_stock = true flag from leaving an empty item in the catalog.
+      if (stock_qty !== null) {
+        in_stock = stock_qty > 0;
+      }
+
       let price_override: number | null = null;
       try {
         price_override = parseNullableNumber(record[cityColumns.price_override] ?? "");
