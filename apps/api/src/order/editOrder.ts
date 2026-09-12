@@ -766,18 +766,24 @@ export async function applyOrderEdit(params: {
   }
 
   let rollbackPointsSpend = async () => {};
-  try {
-    rollbackPointsSpend = await syncOrderPointsSpend({
-      tgUserId: order.tg_user_id,
-      orderId: order.id,
-      nextPointsToSpend: nextDiscountAmount,
-    });
-  } catch (error) {
-    await rollbackInventoryUpdates({
-      cityId: city.id,
-      updates: inventoryUpdates,
-    });
-    throw error;
+  // Guest orders predate a Telegram loyalty profile and cannot have spent
+  // points. Do not call the loyalty RPC merely to set their zero balance.
+  // The same shortcut is valid for a regular order that did not use points:
+  // there is no ledger record to reconcile.
+  if (previousDiscountAmount > 0 || nextDiscountAmount > 0) {
+    try {
+      rollbackPointsSpend = await syncOrderPointsSpend({
+        tgUserId: order.tg_user_id,
+        orderId: order.id,
+        nextPointsToSpend: nextDiscountAmount,
+      });
+    } catch (error) {
+      await rollbackInventoryUpdates({
+        cityId: city.id,
+        updates: inventoryUpdates,
+      });
+      throw error;
+    }
   }
 
   const { error: deleteOrderItemsError } = await supabase

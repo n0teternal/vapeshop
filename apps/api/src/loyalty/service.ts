@@ -236,6 +236,13 @@ export async function processOrderCashback(params: {
     throw new HttpError(500, "DB", "Invalid cashback base for completed order");
   }
 
+  // Guest checkout deliberately stores `0` because there is no verified
+  // Telegram account to own points or a cashback level. Completing such an
+  // order must remain a normal order action, not a failed loyalty mutation.
+  if (!Number.isSafeInteger(params.tgUserId) || params.tgUserId <= 0) {
+    return { applied: false, cashbackPoints: 0, cashbackPercent: 0 };
+  }
+
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase.rpc("loyalty_complete_order", {
     p_tg_user_id: params.tgUserId,
