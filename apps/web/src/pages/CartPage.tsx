@@ -682,6 +682,11 @@ export function CartPage() {
     ? getOrderEditRemainingMs(orderEditSession, nowMs) <= 0
     : false;
   const showBlgDeliverySchedule = isRegularBlgDelivery;
+  // An admin edit changes product lines only. The API keeps the order's
+  // existing address, delivery method and slot, while those controls are
+  // deliberately hidden in this mode. Do not make the item update depend on
+  // hidden regular-delivery fields.
+  const requiresBlgDeliverySchedule = showBlgDeliverySchedule && !isAdminOrderEditSession;
   const promoCodesAvailable = state.city === "blg" && discountsAllowed;
   const availableDeliveryTimeSlots = useMemo(
     () =>
@@ -1077,7 +1082,7 @@ export function CartPage() {
   }, [checkoutDraft.deliveryDate, dispatch, minDeliveryDate, showBlgDeliverySchedule]);
 
   const hasRequiredBlgDeliverySchedule =
-    !showBlgDeliverySchedule ||
+    !requiresBlgDeliverySchedule ||
     (checkoutDraft.deliveryDate.trim().length > 0 &&
       checkoutDraft.deliveryTimeSlot.trim().length > 0 &&
       !selectedDateHasNoAvailableSlots &&
@@ -1199,12 +1204,12 @@ export function CartPage() {
         return;
       }
 
-      if (showBlgDeliverySchedule && checkoutDraft.deliveryDate.trim().length === 0) {
+      if (requiresBlgDeliverySchedule && checkoutDraft.deliveryDate.trim().length === 0) {
         setSubmitError("Р’С‹Р±РµСЂРёС‚Рµ РґР°С‚Сѓ РґРѕСЃС‚Р°РІРєРё.");
         return;
       }
 
-      if (showBlgDeliverySchedule && checkoutDraft.deliveryDate < minDeliveryDate) {
+      if (requiresBlgDeliverySchedule && checkoutDraft.deliveryDate < minDeliveryDate) {
         setSubmitError(
           minDeliveryDate > cityToday
             ? "На выбранную дату свободных слотов уже нет. Выберите другую дату."
@@ -1213,14 +1218,14 @@ export function CartPage() {
         return;
       }
 
-      if (showBlgDeliverySchedule && selectedDateHasNoAvailableSlots) {
+      if (requiresBlgDeliverySchedule && selectedDateHasNoAvailableSlots) {
         setSubmitError(
           "РќР° РІС‹Р±СЂР°РЅРЅСѓСЋ РґР°С‚Сѓ СЃРІРѕР±РѕРґРЅС‹С… СЃР»РѕС‚РѕРІ СѓР¶Рµ РЅРµС‚. Р’С‹Р±РµСЂРёС‚Рµ РґСЂСѓРіСѓСЋ РґР°С‚Сѓ.",
         );
         return;
       }
 
-      if (showBlgDeliverySchedule && checkoutDraft.deliveryTimeSlot.trim().length === 0) {
+      if (requiresBlgDeliverySchedule && checkoutDraft.deliveryTimeSlot.trim().length === 0) {
         setSubmitError("Р’С‹Р±РµСЂРёС‚Рµ РІСЂРµРјСЏ РґРѕСЃС‚Р°РІРєРё.");
         return;
       }
@@ -1237,7 +1242,7 @@ export function CartPage() {
       }
 
       if (
-        showBlgDeliverySchedule &&
+        requiresBlgDeliverySchedule &&
         checkoutDraft.deliveryTimeSlot.trim().length > 0 &&
         checkoutDraft.deliveryDate.trim().length === 0
       ) {
@@ -1246,7 +1251,7 @@ export function CartPage() {
       }
 
       if (
-        showBlgDeliverySchedule &&
+        requiresBlgDeliverySchedule &&
         selectedDateHasNoAvailableSlots &&
         checkoutDraft.deliveryTimeSlot.trim().length > 0
       ) {
@@ -1483,13 +1488,13 @@ export function CartPage() {
           <div className="space-y-2">
             <button
               type="button"
-              disabled={submitting}
+              disabled={submitting || isAdminOrderEditSession}
               aria-pressed={!isExpressDelivery}
               className={`w-full rounded-lg border p-4 text-left transition-colors ${
                 !isExpressDelivery
                   ? "border-sky-300/70 bg-sky-400/10"
                   : "border-border/70 bg-card"
-              } ${submitting ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
+              } ${submitting || isAdminOrderEditSession ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
               onClick={() => selectDeliveryMethod("delivery")}
             >
               <div className="flex items-center justify-between gap-3">
@@ -1520,13 +1525,13 @@ export function CartPage() {
             {deliveryUpgradesAvailable ? (
               <button
                 type="button"
-                disabled={submitting}
+                disabled={submitting || isAdminOrderEditSession}
                 aria-pressed={isExpressDelivery}
                 className={`w-full rounded-lg border p-4 text-left transition-colors ${
                   isExpressDelivery
                     ? "border-sky-300/70 bg-sky-400/10"
                     : "border-border/70 bg-card"
-                } ${submitting ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
+                } ${submitting || isAdminOrderEditSession ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
                 onClick={() => selectDeliveryMethod("express")}
               >
                 <div className="flex items-center justify-between gap-3">
