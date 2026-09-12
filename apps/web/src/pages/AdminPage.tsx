@@ -719,7 +719,8 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
             Import products: {formatCityLabel(city)}
           </div>
           <div className="mt-1 text-xs text-muted-foreground/80">
-            Upload a CSV/XLSX file for this city only.
+            Upload a CSV/XLSX file for this city only. The downloaded XLSX has a “Сверка” tab for viewing
+            city and staff stock side by side; it is ignored during import.
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -1162,6 +1163,14 @@ function AdminStaffInventoryManager() {
     return product.allocations.find((allocation) => allocation.staffId === staffId)?.stockQty ?? 0;
   }
 
+  function getStaffTotalQty(product: AdminStaffInventoryProduct): number {
+    return product.allocations.reduce((sum, allocation) => sum + allocation.stockQty, 0);
+  }
+
+  function getStockDifference(product: AdminStaffInventoryProduct): number | null {
+    return product.cityStockQty === null ? null : product.cityStockQty - getStaffTotalQty(product);
+  }
+
   async function addStaff(): Promise<void> {
     const name = newStaffName.trim();
     if (!name) return;
@@ -1447,7 +1456,10 @@ function AdminStaffInventoryManager() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <div className="text-sm font-semibold">Кто что держит: {snapshot?.city.name ?? ""}</div>
-            <div className="mt-1 text-xs text-muted-foreground">Общий остаток города и остатки сотрудников.</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              Общий остаток, сумма у сотрудников и разница. Минус означает, что у сотрудников товара больше,
+              чем числится в городе.
+            </div>
           </div>
           <input
             value={productFilter}
@@ -1463,6 +1475,10 @@ function AdminStaffInventoryManager() {
               <tr>
                 <th className="px-3 py-2 font-medium">Товар</th>
                 <th className="px-3 py-2 text-right font-medium">Город</th>
+                <th className="px-3 py-2 text-right font-medium">У сотрудников</th>
+                <th className="px-3 py-2 text-right font-medium" title="Общий остаток города минус сумма у сотрудников">
+                  Разница
+                </th>
                 {activeStaff.map((member) => (
                   <th key={member.id} className="min-w-28 px-3 py-2 text-right font-medium">
                     {member.name}
@@ -1477,6 +1493,19 @@ function AdminStaffInventoryManager() {
                   <td className="px-3 py-2 text-right text-muted-foreground">
                     {product.cityStockQty === null ? "∞" : product.cityStockQty}
                   </td>
+                  <td className="px-3 py-2 text-right text-muted-foreground">{getStaffTotalQty(product)}</td>
+                  {(() => {
+                    const difference = getStockDifference(product);
+                    const className =
+                      difference === null || difference === 0
+                        ? "text-muted-foreground"
+                        : difference > 0
+                          ? "text-amber-300"
+                          : "font-semibold text-destructive";
+                    const label =
+                      difference === null ? "—" : difference > 0 ? `+${difference}` : String(difference);
+                    return <td className={`px-3 py-2 text-right ${className}`}>{label}</td>;
+                  })()}
                   {activeStaff.map((member) => {
                     const key = allocationKey(member.id, product.id);
                     return (
@@ -1498,7 +1527,7 @@ function AdminStaffInventoryManager() {
               ))}
               {!loadingInventory && visibleProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={Math.max(2, activeStaff.length + 2)} className="px-3 py-5 text-center text-muted-foreground">
+                  <td colSpan={Math.max(4, activeStaff.length + 4)} className="px-3 py-5 text-center text-muted-foreground">
                     Товары не найдены.
                   </td>
                 </tr>

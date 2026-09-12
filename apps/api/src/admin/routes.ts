@@ -156,6 +156,19 @@ function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
   for (const sheetName of book.SheetNames.slice(1)) {
     const sheet = book.Sheets[sheetName];
     if (!sheet) continue;
+
+    // A city export also has a read-only reconciliation tab. Detect staff
+    // tabs by their actual columns rather than their position in the workbook,
+    // so that the reconciliation tab is never interpreted as stock to import.
+    const [headerRow] = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      raw: false,
+      defval: "",
+      blankrows: false,
+    });
+    const headers = Array.isArray(headerRow) ? headerRow.map((cell) => String(cell).trim()) : [];
+    if (!headers.includes("staff_id") || !headers.includes("staff_stock_qty")) continue;
+
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
       raw: false,
       defval: "",
@@ -3056,7 +3069,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       const invRows: ExportInventoryRow[] = [];
       const soldOrderItems: Array<{ product_id: string | null }> = [];
       let staffInventoryRows: ExportStaffInventoryRow[] = [];
-      let staffMembers: Array<{ id: number; name: string }> = [];
+      let staffMembers: Array<{ id: number; name: string; is_active: boolean }> = [];
 
       await Promise.all(
         chunk(productIds, 100).map(async (part) => {
@@ -3098,8 +3111,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             .eq("city_id", selectedCity.id),
           supabase
             .from("staff_members")
-            .select("id,name")
-            .eq("is_active", true)
+            .select("id,name,is_active")
             .order("name", { ascending: true }),
         ]);
 
@@ -3188,7 +3200,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const usedSheetNames = new Set(book.SheetNames);
-        for (const staff of staffMembers) {
+        for (const staff of staffMembers.filter((member) => member.is_active)) {
           const staffHeaders = [
             "id",
             "title",
@@ -3225,6 +3237,77 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           usedSheetNames.add(sheetName);
           XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(staffAoa), sheetName);
         }
+
+        // This sheet is deliberately view-only. It lets the person filling in
+        // staff tabs compare every allocation with the city total without
+        // jumping between sheets. The importer skips it by looking for the
+        // staff_id/staff_stock_qty columns above.
+        const reconciliationHeaders = [
+          "id",
+          "Товар",
+          "Общий остаток",
+          "У сотрудников",
+          "Разница",
+          "Статус",
+          ...staffMembers.map((staff) =>
+            staff.is_active ? staff.name : `${staff.name} (неактивен)`,
+          ),
+        ];
+        const reconciliationRows = filteredProductList.map((product) => {
+          const cityStockQty = invByKey.get(`${product.id}:${selectedCity.id}`)?.stock_qty ?? null;
+          const staffQuantities = staffMembers.map(
+            (staff) => staffQtyByKey.get(`${staff.id}:${product.id}`) ?? 0,
+          );
+          const staffTotal = staffQuantities.reduce((sum, quantity) => sum + quantity, 0);
+          const difference = cityStockQty === null ? null : cityStockQty - staffTotal;
+          const status =
+            difference === null
+              ? "Без лимита"
+              : difference === 0
+                ? "✓ распределено"
+                : difference > 0
+                  ? `+${difference} не распределено`
+                  : `⚠ у сотрудников больше на ${Math.abs(difference)}`;
+
+          return {
+            row: [
+              product.id,
+              product.title,
+              cityStockQty ?? "∞",
+              staffTotal,
+              difference ?? "",
+              status,
+              ...staffQuantities,
+            ],
+            hasDifference: difference !== null && difference !== 0,
+          };
+        });
+        reconciliationRows.sort(
+          (left, right) =>
+            Number(right.hasDifference) - Number(left.hasDifference) ||
+            String(left.row[1]).localeCompare(String(right.row[1]), "ru"),
+        );
+
+        const reconciliationSheet = XLSX.utils.aoa_to_sheet([
+          reconciliationHeaders,
+          ...reconciliationRows.map((entry) => entry.row),
+        ]);
+        reconciliationSheet["!cols"] = [
+          { wch: 38 },
+          { wch: 44 },
+          { wch: 16 },
+          { wch: 16 },
+          { wch: 14 },
+          { wch: 32 },
+          ...staffMembers.map(() => ({ wch: 18 })),
+        ];
+        reconciliationSheet["!autofilter"] = {
+          ref: XLSX.utils.encode_range({
+            s: { r: 0, c: 0 },
+            e: { r: reconciliationRows.length, c: reconciliationHeaders.length - 1 },
+          }),
+        };
+        XLSX.utils.book_append_sheet(book, reconciliationSheet, "Сверка");
       }
       const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
       const datePart = new Date().toISOString().slice(0, 10);
