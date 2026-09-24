@@ -78,6 +78,18 @@ function toCount(value: number | null): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function isMissingPromoProductsTableError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { code?: unknown; message?: unknown };
+  const code = typeof maybeError.code === "string" ? maybeError.code : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  return (
+    code === "PGRST205" ||
+    (message.includes("promo_products") && message.includes("schema cache")) ||
+    (message.includes("relation") && message.includes("promo_products"))
+  );
+}
+
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -3417,7 +3429,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       if (productsResponse.error) {
         throw new HttpError(500, "DB", `Failed to load products: ${productsResponse.error.message}`);
       }
-      if (promosResponse.error) {
+      if (promosResponse.error && !isMissingPromoProductsTableError(promosResponse.error)) {
         throw new HttpError(500, "DB", `Failed to load promo products: ${promosResponse.error.message}`);
       }
 
@@ -3427,7 +3439,9 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const promoByProductId = new Map<string, ExportPromoRow>();
-      for (const promo of (promosResponse.data ?? []) as ExportPromoRow[]) {
+      // Let the admin download a ready-to-fill template even if an older
+      // Supabase project has not yet applied alter_promo_products.sql.
+      for (const promo of (promosResponse.error ? [] : promosResponse.data ?? []) as ExportPromoRow[]) {
         promoByProductId.set(promo.product_id, promo);
       }
 

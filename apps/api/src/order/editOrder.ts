@@ -80,6 +80,20 @@ type RestorableInventoryUpdate = {
   nextInStock: boolean;
 };
 
+type OrderInventoryReservationRow = {
+  product_id: string;
+  qty: number;
+};
+
+type PointsSpendRow = {
+  id: number;
+  tg_user_id: number;
+  delta_points: number;
+  kind: string;
+  order_id: string | null;
+  created_at: string;
+};
+
 export type OrderEditCartItem = {
   productId: string;
   title: string;
@@ -242,6 +256,54 @@ async function loadOrderItems(orderId: string): Promise<OrderItemRow[]> {
   }
 
   return (data ?? []) as OrderItemRow[];
+}
+
+async function loadOrderInventoryReservations(
+  orderId: string,
+): Promise<OrderInventoryReservationRow[]> {
+  const supabase = createServiceSupabaseClient();
+  const { data, error } = await supabase
+    .from("order_inventory_reservations")
+    .select("product_id,qty")
+    .eq("order_id", orderId);
+
+  if (error) {
+    throw new HttpError(500, "DB", `Failed to load order inventory reservations: ${error.message}`);
+  }
+
+  return (data ?? []).filter(
+    (row): row is OrderInventoryReservationRow =>
+      typeof row.product_id === "string" && isPositiveInt(row.qty),
+  );
+}
+
+async function replaceOrderInventoryReservations(params: {
+  orderId: string;
+  rows: OrderInventoryReservationRow[];
+}): Promise<void> {
+  const supabase = createServiceSupabaseClient();
+  const { error: deleteError } = await supabase
+    .from("order_inventory_reservations")
+    .delete()
+    .eq("order_id", params.orderId);
+  if (deleteError) {
+    throw new HttpError(500, "DB", `Failed to replace order inventory reservations: ${deleteError.message}`);
+  }
+
+  if (params.rows.length === 0) return;
+
+  const { error: insertError } = await supabase
+    .from("order_inventory_reservations")
+    .insert(
+      params.rows.map((row) => ({
+        order_id: params.orderId,
+        product_id: row.product_id,
+        qty: row.qty,
+      })),
+    );
+  if (insertError) {
+    throw new HttpError(500, "DB", `Failed to replace order inventory reservations: ${insertError.message}`);
+  }
 }
 
 async function loadProductsById(productIds: string[]): Promise<Map<string, ProductRow>> {
@@ -452,13 +514,17 @@ export async function startOrderEditSession(params: {
     ? order.delivery_method
     : "pickup";
   const discountsAllowed = areDiscountsAllowedForDeliveryMethod(deliveryMethod);
-  const [productsById, inventoryByProductId, promoPriceByProductId] = await Promise.all([
+  const [productsById, inventoryByProductId, promoPriceByProductId, reservationRows] = await Promise.all([
     loadProductsById(productIds),
     loadInventoryByProductId({ cityId: city.id, productIds }),
     params.allowPromoPrices === true && discountsAllowed
       ? loadActivePromoPricesByProductId({ cityId: city.id, productIds })
       : Promise.resolve(new Map<string, number>()),
+    loadOrderInventoryReservations(order.id),
   ]);
+  const reservedQtyByProductId = new Map(
+    reservationRows.map((row) => [row.product_id, row.qty]),
+  );
 
   const cart = orderItems
     .filter((row): row is OrderItemRow & { product_id: string } => typeof row.product_id === "string")
@@ -486,7 +552,7 @@ export async function startOrderEditSession(params: {
         stockQty:
           inventory?.stock_qty === null
             ? null
-            : (inventory?.stock_qty ?? 0) + row.qty,
+            : (inventory?.stock_qty ?? 0) + (reservedQtyByProductId.get(row.product_id) ?? 0),
       };
     });
 
@@ -588,9 +654,15 @@ export async function applyOrderEdit(params: {
   }
 
   const requested = normalizeItems(payload.items);
-  const previousOrderItems = await loadOrderItems(order.id);
+  const [previousOrderItems, previousReservationRows] = await Promise.all([
+    loadOrderItems(order.id),
+    loadOrderInventoryReservations(order.id),
+  ]);
   const currentQtyByProductId = new Map<string, number>();
   const currentUnitPriceByProductId = new Map<string, number>();
+  const previousReservedQtyByProductId = new Map(
+    previousReservationRows.map((row) => [row.product_id, row.qty]),
+  );
 
   for (const row of previousOrderItems) {
     if (typeof row.product_id !== "string" || !isPositiveInt(row.qty)) continue;
@@ -605,7 +677,11 @@ export async function applyOrderEdit(params: {
   }
 
   const productIds = Array.from(
-    new Set([...currentQtyByProductId.keys(), ...requested.keys()]),
+    new Set([
+      ...currentQtyByProductId.keys(),
+      ...requested.keys(),
+      ...previousReservedQtyByProductId.keys(),
+    ]),
   );
   const [productsById, inventoryByProductId, promoPriceByProductId] = await Promise.all([
     loadProductsById(productIds),
@@ -709,6 +785,7 @@ export async function applyOrderEdit(params: {
   const totalAfterDiscount = Math.max(0, totalAfterPromotionDiscount - nextDiscountAmount);
 
   const inventoryUpdates: RestorableInventoryUpdate[] = [];
+  const nextReservedQtyByProductId = new Map(previousReservedQtyByProductId);
   for (const productId of productIds) {
     const currentQty = currentQtyByProductId.get(productId) ?? 0;
     const requestedQty = requested.get(productId) ?? 0;
@@ -721,8 +798,16 @@ export async function applyOrderEdit(params: {
     }
     if (inventory.stock_qty === null) continue;
 
-    const nextStockQty = inventory.stock_qty - delta;
-    if (delta > 0 && nextStockQty < 0) {
+    // A legacy order may have no reservation row.  In that case, decreasing
+    // its quantity must not add items to stock; only units recorded as
+    // reserved are eligible to be returned.
+    const previousReservedQty = previousReservedQtyByProductId.get(productId) ?? 0;
+    const reservationDelta =
+      delta > 0 ? delta : -Math.min(previousReservedQty, Math.abs(delta));
+    if (reservationDelta === 0) continue;
+
+    const nextStockQty = inventory.stock_qty - reservationDelta;
+    if (reservationDelta > 0 && nextStockQty < 0) {
       const product = productsById.get(productId);
       throw new HttpError(
         400,
@@ -763,7 +848,23 @@ export async function applyOrderEdit(params: {
 
     inventory.stock_qty = nextStockQty;
     inventory.in_stock = nextInStock;
+
+    const nextReservedQty = previousReservedQty + reservationDelta;
+    if (nextReservedQty > 0) {
+      nextReservedQtyByProductId.set(productId, nextReservedQty);
+    } else {
+      nextReservedQtyByProductId.delete(productId);
+    }
   }
+
+  const nextReservationRows = Array.from(nextReservedQtyByProductId.entries()).map(
+    ([product_id, qty]) => ({ product_id, qty }),
+  );
+  const reservationRowsChanged =
+    nextReservedQtyByProductId.size !== previousReservedQtyByProductId.size ||
+    Array.from(nextReservedQtyByProductId.entries()).some(
+      ([productId, qty]) => previousReservedQtyByProductId.get(productId) !== qty,
+    );
 
   let rollbackPointsSpend = async () => {};
   // Guest orders predate a Telegram loyalty profile and cannot have spent
@@ -825,6 +926,35 @@ export async function applyOrderEdit(params: {
     }
   }
 
+  if (reservationRowsChanged) {
+    try {
+      await replaceOrderInventoryReservations({
+        orderId: order.id,
+        rows: nextReservationRows,
+      });
+    } catch (error) {
+      // The failed replacement may already have deleted the old rows.
+      try {
+        await replaceOrderInventoryReservations({
+          orderId: order.id,
+          rows: previousReservationRows,
+        });
+      } catch {
+        // Preserve the original database error.
+      }
+      await restoreOrderItems({
+        orderId: order.id,
+        previousRows: previousOrderItems,
+      });
+      await rollbackPointsSpend();
+      await rollbackInventoryUpdates({
+        cityId: city.id,
+        updates: inventoryUpdates,
+      });
+      throw error;
+    }
+  }
+
   const orderComment = buildOrderComment(payload);
   const nowIso = new Date().toISOString();
   const { error: updateOrderError } = await supabase
@@ -845,6 +975,16 @@ export async function applyOrderEdit(params: {
     .eq("id", order.id);
 
   if (updateOrderError) {
+    if (reservationRowsChanged) {
+      try {
+        await replaceOrderInventoryReservations({
+          orderId: order.id,
+          rows: previousReservationRows,
+        });
+      } catch {
+        // Best-effort rollback; keep the primary order update error.
+      }
+    }
     await restoreOrderItems({
       orderId: order.id,
       previousRows: previousOrderItems,

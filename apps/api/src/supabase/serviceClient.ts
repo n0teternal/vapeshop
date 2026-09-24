@@ -619,6 +619,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      order_inventory_reservations: {
+        Row: {
+          order_id: string;
+          product_id: string;
+          qty: number;
+          created_at: string;
+        };
+        Insert: {
+          order_id: string;
+          product_id: string;
+          qty: number;
+          created_at?: string;
+        };
+        Update: {
+          order_id?: string;
+          product_id?: string;
+          qty?: number;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       admins: {
         Row: { tg_user_id: number; role: string };
         Insert: { tg_user_id: number; role?: string };

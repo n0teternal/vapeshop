@@ -16,7 +16,7 @@ type OrderRow = {
   coupon_id: string | null;
 };
 
-type OrderItemRow = {
+type OrderInventoryReservationRow = {
   product_id: string | null;
   qty: number;
 };
@@ -81,17 +81,21 @@ async function restoreOrderInventory(params: {
   orderId: string;
   cityId: number;
 }): Promise<RestoredInventory[]> {
-  const { data: orderItems, error: orderItemsError } = await params.supabase
-    .from("order_items")
+  const { data: reservationRows, error: reservationsError } = await params.supabase
+    .from("order_inventory_reservations")
     .select("product_id,qty")
     .eq("order_id", params.orderId);
 
-  if (orderItemsError) {
-    throw new HttpError(500, "DB", `Failed to load order items for cancellation: ${orderItemsError.message}`);
+  if (reservationsError) {
+    throw new HttpError(
+      500,
+      "DB",
+      `Failed to load inventory reservations for cancellation: ${reservationsError.message}`,
+    );
   }
 
   const qtyByProductId = new Map<string, number>();
-  for (const row of (orderItems ?? []) as OrderItemRow[]) {
+  for (const row of (reservationRows ?? []) as OrderInventoryReservationRow[]) {
     if (typeof row.product_id !== "string") continue;
     if (!isPositiveInt(row.qty)) continue;
     qtyByProductId.set(row.product_id, (qtyByProductId.get(row.product_id) ?? 0) + row.qty);

@@ -543,6 +543,35 @@ export async function createOrder(params: {
     throw new HttpError(500, "DB", `Failed to create order items: ${orderItemsError.message}`);
   }
 
+  if (reservations.length > 0) {
+    const { error: reservationError } = await supabase
+      .from("order_inventory_reservations")
+      .insert(
+        reservations.map((reservation) => ({
+          order_id: createdOrder.id,
+          product_id: reservation.productId,
+          qty: reservation.reservedQty,
+        })),
+      );
+
+    if (reservationError) {
+      // Deleting the order also deletes its order items and any partially
+      // inserted reservation rows via the foreign-key cascade.
+      await supabase.from("orders").delete().eq("id", createdOrder.id);
+      await releasePromoCodeUsage(promoReservation?.code);
+      await rollbackReservedInventory({
+        supabase,
+        cityId: city.id,
+        reservations,
+      });
+      throw new HttpError(
+        500,
+        "DB",
+        `Failed to record reserved inventory: ${reservationError.message}`,
+      );
+    }
+  }
+
   if (discountAmount > 0) {
     try {
       await spendPointsForOrder({
