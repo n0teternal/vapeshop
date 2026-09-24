@@ -3412,36 +3412,43 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       };
 
       const cityInventoryRows = (inventoryRows ?? []) as CityInventoryRow[];
-      const productIds = cityInventoryRows.map((row) => row.product_id);
-      const [productsResponse, promosResponse] = await Promise.all([
-        productIds.length > 0
-          ? supabase
-              .from("products")
-              .select("id,title,category_slug,base_price,is_active")
-              .in("id", productIds)
-          : Promise.resolve({ data: [], error: null }),
-        supabase
-          .from("promo_products")
-          .select("product_id,old_price,new_price,sort_order,is_active")
-          .eq("city_id", city.id),
-      ]);
+      // A single `in` filter with every city product becomes a URL of tens of
+      // kilobytes for a full catalog. Supabase then closes the response with a
+      // HeadersOverflow error, which surfaces in the browser as "fetch failed".
+      const productIds = [...new Set(cityInventoryRows.map((row) => row.product_id))];
+      const exportProducts: ExportProductRow[] = [];
+      const PRODUCT_EXPORT_QUERY_CHUNK_SIZE = 100;
 
-      if (productsResponse.error) {
-        throw new HttpError(500, "DB", `Failed to load products: ${productsResponse.error.message}`);
+      for (let start = 0; start < productIds.length; start += PRODUCT_EXPORT_QUERY_CHUNK_SIZE) {
+        const { data, error } = await supabase
+          .from("products")
+          .select("id,title,category_slug,base_price,is_active")
+          .in("id", productIds.slice(start, start + PRODUCT_EXPORT_QUERY_CHUNK_SIZE));
+
+        if (error) {
+          throw new HttpError(500, "DB", `Failed to load products: ${error.message}`);
+        }
+        exportProducts.push(...((data ?? []) as ExportProductRow[]));
       }
-      if (promosResponse.error && !isMissingPromoProductsTableError(promosResponse.error)) {
-        throw new HttpError(500, "DB", `Failed to load promo products: ${promosResponse.error.message}`);
+
+      const { data: promoRows, error: promosError } = await supabase
+        .from("promo_products")
+        .select("product_id,old_price,new_price,sort_order,is_active")
+        .eq("city_id", city.id);
+
+      if (promosError && !isMissingPromoProductsTableError(promosError)) {
+        throw new HttpError(500, "DB", `Failed to load promo products: ${promosError.message}`);
       }
 
       const productById = new Map<string, ExportProductRow>();
-      for (const product of (productsResponse.data ?? []) as ExportProductRow[]) {
+      for (const product of exportProducts) {
         productById.set(product.id, product);
       }
 
       const promoByProductId = new Map<string, ExportPromoRow>();
       // Let the admin download a ready-to-fill template even if an older
       // Supabase project has not yet applied alter_promo_products.sql.
-      for (const promo of (promosResponse.error ? [] : promosResponse.data ?? []) as ExportPromoRow[]) {
+      for (const promo of (promosError ? [] : promoRows ?? []) as ExportPromoRow[]) {
         promoByProductId.set(promo.product_id, promo);
       }
 
