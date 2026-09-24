@@ -4,6 +4,7 @@ node_modules
 # Builds
 dist
 dist-ssr
+.tmp/
 
 # Logs
 npm-debug.log*

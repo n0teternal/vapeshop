@@ -28,6 +28,7 @@ type YandexSuggestResult = {
 type CityGeocodeConfig = {
   label: string;
   queryPrefix: string;
+  regionQueryPrefix: string;
   ll: string;
   spn: string;
 };
@@ -42,12 +43,14 @@ const CITY_GEOCODE_CONFIGS: Record<CitySlug, CityGeocodeConfig> = {
   vvo: {
     label: "Владивосток",
     queryPrefix: "Россия, Приморский край, Владивосток",
+    regionQueryPrefix: "Россия, Приморский край",
     ll: "131.90,43.12",
     spn: "0.45,0.38",
   },
   blg: {
     label: "Благовещенск",
     queryPrefix: "Россия, Амурская область, Благовещенск",
+    regionQueryPrefix: "Россия, Амурская область",
     ll: "127.55,50.27",
     spn: "0.30,0.18",
   },
@@ -75,6 +78,59 @@ function uniqueStrings(values: string[]): string[] {
   }
 
   return out;
+}
+
+// Entrance, apartment and intercom details are useful to the courier, but
+// Yandex may resolve them as a different building or even another settlement.
+// Keep the original address on the order and remove only this suffix from the
+// lookup query.
+function addressForGeocoding(value: string): string {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  const withoutEntrance = trimmed.replace(
+    /(?:\s*[,;]?\s*)(?:под(?:ъезд)?|парадная|кв(?:артира)?|оф(?:ис)?|этаж|домофон)\.?\s*.*$/iu,
+    "",
+  );
+
+  return withoutEntrance.replace(/[\s,;]+$/u, "").trim();
+}
+
+function normalizeNearbySettlementAddress(citySlug: CitySlug, address: string): string {
+  if (citySlug !== "blg") return address;
+
+  // "Белогорье" is often entered without its settlement type, which makes
+  // Yandex select a same-named place in another region. This only affects the
+  // search query; the customer-facing order address stays unchanged.
+  return address.replace(/^белогорье(?=$|[\s,;])/iu, "село Белогорье");
+}
+
+function isWithinCitySearchBounds(citySlug: CitySlug, result: DeliveryGeocodeResult): boolean {
+  const config = CITY_GEOCODE_CONFIGS[citySlug];
+  const [centerLon, centerLat] = config.ll.split(",").map(Number);
+  const [lonSpan, latSpan] = config.spn.split(",").map(Number);
+  if (
+    centerLon === undefined ||
+    centerLat === undefined ||
+    lonSpan === undefined ||
+    latSpan === undefined ||
+    !Number.isFinite(centerLon) ||
+    !Number.isFinite(centerLat) ||
+    !Number.isFinite(lonSpan) ||
+    !Number.isFinite(latSpan)
+  ) {
+    return false;
+  }
+
+  return (
+    result.lon >= centerLon - lonSpan / 2 &&
+    result.lon <= centerLon + lonSpan / 2 &&
+    result.lat >= centerLat - latSpan / 2 &&
+    result.lat <= centerLat + latSpan / 2
+  );
+}
+
+function isWithinCityRegion(citySlug: CitySlug, result: DeliveryGeocodeResult): boolean {
+  const region = normalizeSearchText(CITY_GEOCODE_CONFIGS[citySlug].regionQueryPrefix);
+  return normalizeSearchText(result.address).includes(region);
 }
 
 function buildStreetHouseQueryVariants(rawQuery: string): string[] {
@@ -144,7 +200,7 @@ function shouldPreferUnscopedAddressSearch(citySlug: CitySlug, rawQuery: string)
 
   return (
     citySlug === "blg" &&
-    /\b(?:белогорск|чигири|игнатьево|владимировка|верхнеблаговещенское|моховая падь|марково|гродеково|каникурган|усть-ивановка)\b/iu.test(
+    /\b(?:белогорск|белогорье|чигири|игнатьево|владимировка|верхнеблаговещенское|моховая падь|марково|гродеково|каникурган|усть-ивановка)\b/iu.test(
       query,
     )
   );
@@ -160,8 +216,11 @@ function buildGeocodeQueries(citySlug: CitySlug, address: string): string[] {
   return uniqueStrings(
     queryVariants.flatMap((value) => {
       const scoped = `${cityConfig.queryPrefix}, ${value}`;
+      const regionScoped = `${cityConfig.regionQueryPrefix}, ${value}`;
       const countryScoped = `Россия, ${value}`;
-      return preferUnscoped ? [value, countryScoped, scoped] : [scoped, countryScoped, value];
+      return preferUnscoped
+        ? [regionScoped, value, countryScoped, scoped]
+        : [scoped, countryScoped, value];
     }),
   );
 }
@@ -173,7 +232,11 @@ function buildSuggestQueries(citySlug: CitySlug, address: string): string[] {
   const preferUnscoped = shouldPreferUnscopedAddressSearch(citySlug, query);
 
   if (preferUnscoped) {
-    return uniqueStrings([query, `Россия, ${query}`]);
+    return uniqueStrings([
+      `${cityConfig.regionQueryPrefix}, ${query}`,
+      query,
+      `Россия, ${query}`,
+    ]);
   }
 
   return uniqueStrings([
@@ -523,7 +586,10 @@ export async function geocodeDeliveryAddress(params: {
   citySlug: CitySlug;
   address: string;
 }): Promise<DeliveryGeocodeResult> {
-  const trimmedAddress = params.address.trim();
+  const trimmedAddress = normalizeNearbySettlementAddress(
+    params.citySlug,
+    addressForGeocoding(params.address),
+  );
   if (trimmedAddress.length < 3) {
     throw new HttpError(400, "BAD_REQUEST", "address is too short");
   }
@@ -531,6 +597,9 @@ export async function geocodeDeliveryAddress(params: {
   const queries = buildGeocodeQueries(params.citySlug, trimmedAddress);
   const suggestQueries = buildSuggestQueries(params.citySlug, trimmedAddress);
   const preferUnscoped = shouldPreferUnscopedAddressSearch(params.citySlug, trimmedAddress);
+  const isAcceptedResult = (result: DeliveryGeocodeResult): boolean =>
+    isWithinCityRegion(params.citySlug, result) &&
+    (preferUnscoped || isWithinCitySearchBounds(params.citySlug, result));
   const seenSuggestUris = new Set<string>();
 
   for (const query of suggestQueries) {
@@ -548,7 +617,7 @@ export async function geocodeDeliveryAddress(params: {
         uri: suggestion.uri,
         fallbackAddress: suggestion.address ?? trimmedAddress,
       });
-      if (byUri) return byUri;
+      if (byUri && isAcceptedResult(byUri)) return byUri;
     }
   }
 
@@ -560,7 +629,7 @@ export async function geocodeDeliveryAddress(params: {
         query,
         restrictToCity,
       });
-      if (result) return result;
+      if (result && isAcceptedResult(result)) return result;
     }
   }
 
@@ -577,7 +646,10 @@ export async function previewDeliveryAddressDistance(params: {
   originLat: number;
   originLon: number;
 }): Promise<DeliveryDistancePreviewResult> {
-  const trimmedAddress = params.address.trim();
+  const trimmedAddress = normalizeNearbySettlementAddress(
+    params.citySlug,
+    addressForGeocoding(params.address),
+  );
   if (trimmedAddress.length < 3) {
     throw new HttpError(400, "BAD_REQUEST", "address is too short");
   }
@@ -592,11 +664,13 @@ export async function previewDeliveryAddressDistance(params: {
   }
 
   const suggestQueries = buildSuggestQueries(params.citySlug, trimmedAddress);
+  const preferUnscoped = shouldPreferUnscopedAddressSearch(params.citySlug, trimmedAddress);
 
   for (const query of suggestQueries) {
     const suggestions = await requestYandexSuggest({
       citySlug: params.citySlug,
       query,
+      restrictToCity: !preferUnscoped,
       origin: {
         lat: params.originLat,
         lon: params.originLon,

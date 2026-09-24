@@ -56,6 +56,7 @@ type DeliveryAddressMapProps = {
 type CitySearchConfig = {
   label: string;
   queryPrefix: string;
+  regionQueryPrefix: string;
   boundedBy: [YMapsCoords, YMapsCoords];
 };
 
@@ -63,6 +64,7 @@ const CITY_SEARCH_CONFIGS: Record<CitySlug, CitySearchConfig> = {
   vvo: {
     label: "Владивосток",
     queryPrefix: "Россия, Приморский край, Владивосток",
+    regionQueryPrefix: "Россия, Приморский край",
     boundedBy: [
       [42.94, 131.72],
       [43.32, 132.16],
@@ -71,6 +73,7 @@ const CITY_SEARCH_CONFIGS: Record<CitySlug, CitySearchConfig> = {
   blg: {
     label: "Благовещенск",
     queryPrefix: "Россия, Амурская область, Благовещенск",
+    regionQueryPrefix: "Россия, Амурская область",
     boundedBy: [
       [50.18, 127.42],
       [50.36, 127.68],
@@ -209,6 +212,38 @@ function normalizeSearchText(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+type AddressForGeocoding = {
+  query: string;
+  entranceDetails: string | null;
+};
+
+function splitAddressForGeocoding(value: string): AddressForGeocoding {
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  const match = /^(.*?)(?:\s*[,;]\s*|\s+)(под(?:ъезд)?\.?.*)$/iu.exec(trimmed);
+  if (!match?.[1] || !match[2]) {
+    return { query: trimmed, entranceDetails: null };
+  }
+
+  return {
+    query: match[1].replace(/[\s,;]+$/u, "").trim(),
+    entranceDetails: match[2].trim(),
+  };
+}
+
+function normalizeNearbySettlementQuery(city: CitySlug, query: string): string {
+  if (city !== "blg") return query;
+  return query.replace(/^белогорье(?=$|[\s,;])/iu, "село Белогорье");
+}
+
+function joinAddressWithEntrance(params: {
+  address: string;
+  entranceDetails: string | null;
+}): string {
+  const address = params.address.trim();
+  if (!address || !params.entranceDetails) return address;
+  return `${address}, ${params.entranceDetails}`;
+}
+
 function uniqueStrings(values: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -318,7 +353,7 @@ function shouldPreferUnscopedAddressSearch(city: CitySlug, rawQuery: string): bo
 
   return (
     city === "blg" &&
-    /\b(?:белогорск|чигири|игнатьево|владимировка|верхнеблаговещенское|моховая падь|марково|гродеково|каникурган|усть-ивановка)\b/iu.test(
+    /\b(?:белогорск|белогорье|чигири|игнатьево|владимировка|верхнеблаговещенское|моховая падь|марково|гродеково|каникурган|усть-ивановка)\b/iu.test(
       query,
     )
   );
@@ -338,7 +373,9 @@ function buildAddressSearchQueries(city: CitySlug, rawQuery: string): string[] {
       `${config.label}, ${value}`,
       value,
     ];
-    return preferUnscoped ? [value, `Россия, ${value}`, ...scoped] : scoped;
+    return preferUnscoped
+      ? [`${config.regionQueryPrefix}, ${value}`, value, `Россия, ${value}`, ...scoped]
+      : scoped;
   });
 
   return uniqueStrings(queries);
@@ -436,17 +473,19 @@ export function DeliveryAddressMap({
   }, [mapOpen, origin.label, originCoords, ymapsApi]);
 
   useEffect(() => {
-    if (!ymapsApi?.suggest || localAddress.trim().length < 3 || disabled) {
+    const addressParts = splitAddressForGeocoding(localAddress);
+    const query = normalizeNearbySettlementQuery(city, addressParts.query);
+    if (!ymapsApi?.suggest || query.length < 3 || disabled) {
       setSuggestions([]);
       return undefined;
     }
 
     const timeoutId = window.setTimeout(() => {
       const config = CITY_SEARCH_CONFIGS[city];
-      const preferUnscoped = shouldPreferUnscopedAddressSearch(city, localAddress);
+      const preferUnscoped = shouldPreferUnscopedAddressSearch(city, query);
       const request = preferUnscoped
-        ? localAddress.trim()
-        : `${config.queryPrefix}, ${localAddress.trim()}`;
+        ? `${config.regionQueryPrefix}, ${query}`
+        : `${config.queryPrefix}, ${query}`;
       ymapsApi
         .suggest?.(request, {
           provider: "yandex#map",
@@ -541,11 +580,14 @@ export function DeliveryAddressMap({
     }
   }
 
-  async function searchAddressViaApi(query: string): Promise<AddressSearchAttempt> {
+  async function searchAddressViaApi(params: {
+    query: string;
+    displayAddress: string;
+  }): Promise<AddressSearchAttempt> {
     try {
       const search = new URLSearchParams({
         citySlug: city,
-        address: query,
+        address: params.query,
       });
       const result = await apiGet<DeliveryGeocodeResponse>(
         `/api/delivery/geocode?${search.toString()}`,
@@ -557,17 +599,20 @@ export function DeliveryAddressMap({
         };
       }
 
-      applyDeliverySelection(result.address || query, coords);
+      applyDeliverySelection(params.displayAddress || result.address || params.query, coords);
       return { found: true };
     } catch {
       return { found: false };
     }
   }
 
-  async function searchAddressViaYmaps(query: string): Promise<AddressSearchAttempt> {
+  async function searchAddressViaYmaps(params: {
+    query: string;
+    displayAddress: string;
+  }): Promise<AddressSearchAttempt> {
     if (!ymapsApi) return { found: false };
 
-    const searchQueries = buildAddressSearchQueries(city, query);
+    const searchQueries = buildAddressSearchQueries(city, params.query);
 
     for (const searchQuery of searchQueries) {
       const result = await ymapsApi.geocode(searchQuery, {
@@ -580,7 +625,10 @@ export function DeliveryAddressMap({
       const coords = geoObject.geometry.getCoordinates();
       if (!isValidCoords(coords)) continue;
 
-      applyDeliverySelection(getGeoObjectAddress(geoObject, query), coords);
+      applyDeliverySelection(
+        params.displayAddress || getGeoObjectAddress(geoObject, params.query),
+        coords,
+      );
       return { found: true };
     }
 
@@ -588,20 +636,24 @@ export function DeliveryAddressMap({
   }
 
   async function searchAddress(nextAddress = localAddress): Promise<void> {
-    const query = nextAddress.trim();
+    const displayAddress = nextAddress.trim();
+    const query = normalizeNearbySettlementQuery(
+      city,
+      splitAddressForGeocoding(displayAddress).query,
+    );
     if (!query || disabled) return;
 
     setLoading(true);
     try {
-      const ymapsAttempt = await searchAddressViaYmaps(query);
+      const ymapsAttempt = await searchAddressViaYmaps({ query, displayAddress });
       if (ymapsAttempt.found) return;
 
       if (!ymapsApi) {
-        await searchAddressViaApi(query);
+        await searchAddressViaApi({ query, displayAddress });
         return;
       }
 
-      await searchAddressViaApi(query);
+      await searchAddressViaApi({ query, displayAddress });
     } catch {
       // The parent form validates the address before submit.
     } finally {
@@ -670,11 +722,15 @@ export function DeliveryAddressMap({
               className="min-w-0 rounded px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted/70"
               disabled={disabled}
               onClick={() => {
-                setLocalAddress(suggestion.value);
-                onAddressChange(suggestion.value);
+                const selectedAddress = joinAddressWithEntrance({
+                  address: suggestion.value,
+                  entranceDetails: splitAddressForGeocoding(localAddress).entranceDetails,
+                });
+                setLocalAddress(selectedAddress);
+                onAddressChange(selectedAddress);
                 onSelectionChange(null);
                 setSuggestions([]);
-                void searchAddress(suggestion.value);
+                void searchAddress(selectedAddress);
               }}
             >
               <span className="line-clamp-2">{suggestion.label}</span>

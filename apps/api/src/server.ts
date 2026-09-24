@@ -83,6 +83,7 @@ type CitySlug = "vvo" | "blg";
 const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
 const DEV_FALLBACK_TG_USER_ID = 42;
 const ADMIN_ORDER_EDIT_SESSION_MS = 100 * 365 * 24 * 60 * 60 * 1_000;
+const BLG_DELIVERY_ORIGIN = { lat: 50.258119, lon: 127.534845 };
 
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
@@ -197,6 +198,30 @@ function getAllowedDeliveryLocation(
   }
 
   return deliveryLocation;
+}
+
+async function calculateBlgDeliveryLocationFromAddress(address: string): Promise<
+  NonNullable<CreateOrderPayload["deliveryLocation"]>
+> {
+  // The browser may fail to resolve an address or send manipulated coordinates.
+  // Price calculation must therefore use the server-side Yandex result.
+  const [geocodedAddress, distancePreview] = await Promise.all([
+    geocodeDeliveryAddress({ citySlug: "blg", address }),
+    previewDeliveryAddressDistance({
+      citySlug: "blg",
+      address,
+      originLat: BLG_DELIVERY_ORIGIN.lat,
+      originLon: BLG_DELIVERY_ORIGIN.lon,
+    }),
+  ]);
+
+  return {
+    address: geocodedAddress.address,
+    lat: geocodedAddress.lat,
+    lon: geocodedAddress.lon,
+    distanceKm: distancePreview.distanceKm,
+    zone: null,
+  };
 }
 
 function parseOptionalTrimmedString(value: unknown, fieldName: string): string | null {
@@ -1405,10 +1430,28 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           : useDevBypass
             ? { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" }
             : { id: 0, username: null };
-      const deliveryLocation = getAllowedDeliveryLocation(
+      let deliveryLocation = getAllowedDeliveryLocation(
         body.citySlug,
         body.deliveryLocation,
       );
+      if (
+        body.citySlug === "blg" &&
+        isDeliveryAddressMethod(body.deliveryMethod) &&
+        body.address
+      ) {
+        try {
+          deliveryLocation = await calculateBlgDeliveryLocationFromAddress(body.address);
+        } catch (deliveryLocationError) {
+          // Checkout remains available if Yandex is temporarily unavailable.
+          // Do not fall back to a browser-provided point: it could be stale or
+          // belong to another settlement. Use the normal base tariff instead.
+          deliveryLocation = null;
+          request.log.warn(
+            { err: deliveryLocationError, address: body.address },
+            "Failed to recalculate Blagoveshchensk delivery distance",
+          );
+        }
+      }
 
       if (verified) {
         try {
