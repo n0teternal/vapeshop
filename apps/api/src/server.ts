@@ -597,10 +597,11 @@ await app.register(cors, {
 
 await app.register(multipart, {
   limits: {
-    // Phone photos routinely exceed 5 MB. The upload endpoint processes each
-    // part one at a time, so this increases the practical per-image limit
-    // without buffering a whole multi-file request in memory.
-    fileSize: 10 * 1024 * 1024,
+    // Imports and modern phone photos can be substantially larger than the
+    // former 5–10 MB limit. Each part is consumed one at a time.
+    fileSize: 50 * 1024 * 1024,
+    files: 500,
+    parts: 550,
   },
 });
 

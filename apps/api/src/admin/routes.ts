@@ -98,6 +98,29 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+async function fetchAllPages<T>(params: {
+  fetchPage: (from: number, to: number) => PromiseLike<{
+    data: T[] | null;
+    error: { message: string } | null;
+  }>;
+  onError: (message: string) => Error;
+  pageSize?: number;
+}): Promise<T[]> {
+  const pageSize = params.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  for (;;) {
+    const { data, error } = await params.fetchPage(from, from + pageSize - 1);
+    if (error) throw params.onError(error.message);
+
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+    from += page.length;
+  }
+}
+
 function stringifyDelimitedRow(values: string[], delimiter: string): string {
   const out: string[] = [];
   for (const v of values) {
@@ -147,7 +170,9 @@ function decodeSpreadsheetBuffer(buffer: Buffer): string {
 type ImportedStaffInventoryRow = {
   staffId: number;
   productId: string;
-  stockQty: number;
+  // An empty cell means that this workbook does not change the allocation.
+  // A literal 0 is the deliberate instruction to clear that staff member's stock.
+  stockQty: number | null;
   product: {
     title: string;
     description: string | null;
@@ -160,6 +185,8 @@ type ImportedStaffInventoryRow = {
 
 // PostgREST serializes `.in()` values into the URL, so a whole workbook does not fit in one query.
 const STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE = 100;
+const STAFF_INVENTORY_WORKBOOK_VERSION_COLUMN = "staff_inventory_version";
+const STAFF_INVENTORY_WORKBOOK_VERSION = "2";
 
 function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
   const book = XLSX.read(buffer, { type: "buffer" });
@@ -179,7 +206,13 @@ function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
       blankrows: false,
     });
     const headers = Array.isArray(headerRow) ? headerRow.map((cell) => String(cell).trim()) : [];
-    if (!headers.includes("staff_id") || !headers.includes("staff_stock_qty")) continue;
+    if (
+      !headers.includes("staff_id") ||
+      !headers.includes("staff_stock_qty") ||
+      !headers.includes(STAFF_INVENTORY_WORKBOOK_VERSION_COLUMN)
+    ) {
+      continue;
+    }
 
     const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
       raw: false,
@@ -192,7 +225,8 @@ function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
       const staffId = Number(String(row.staff_id ?? "").trim());
       const productId = String(row.id ?? "").trim();
       const stockQtyRaw = String(row.staff_stock_qty ?? "").trim();
-      const stockQty = stockQtyRaw.length === 0 ? 0 : Number(stockQtyRaw);
+      const workbookVersion = String(row[STAFF_INVENTORY_WORKBOOK_VERSION_COLUMN] ?? "").trim();
+      const stockQty = stockQtyRaw.length === 0 ? null : Number(stockQtyRaw);
       const title = String(row.title ?? "").trim();
       const descriptionRaw = String(row.description ?? "").trim();
       const categorySlug = String(row.category_slug ?? "other").trim() || "other";
@@ -203,10 +237,13 @@ function readStaffInventorySheets(buffer: Buffer): ImportedStaffInventoryRow[] {
       if (!Number.isSafeInteger(staffId) || staffId <= 0) {
         throw new HttpError(400, "BAD_REQUEST", `Invalid staff_id in sheet ${sheetName}`);
       }
+      if (workbookVersion !== STAFF_INVENTORY_WORKBOOK_VERSION) {
+        throw new HttpError(400, "BAD_REQUEST", `Unsupported staff sheet version in ${sheetName}`);
+      }
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)) {
         throw new HttpError(400, "BAD_REQUEST", `Invalid product id in sheet ${sheetName}`);
       }
-      if (!Number.isInteger(stockQty) || stockQty < 0) {
+      if (stockQty !== null && (!Number.isInteger(stockQty) || stockQty < 0)) {
         throw new HttpError(400, "BAD_REQUEST", `Invalid staff_stock_qty in sheet ${sheetName}`);
       }
 
@@ -238,93 +275,74 @@ async function syncStaffInventoryFromWorkbook(params: {
     ...row,
     productId: params.productIdRemap[row.productId] ?? row.productId,
   }));
-  if (importedRows.length === 0) return 0;
+  const stockRows = importedRows.filter(
+    (row): row is ImportedStaffInventoryRow & { stockQty: number } => row.stockQty !== null,
+  );
+  if (stockRows.length === 0) return 0;
 
   const supabase = createServiceSupabaseClient();
-  const staffIds = Array.from(new Set(importedRows.map((row) => row.staffId)));
-  const productIds = Array.from(new Set(importedRows.map((row) => row.productId)));
+  const staffIds = Array.from(new Set(stockRows.map((row) => row.staffId)));
+  const productIds = Array.from(new Set(stockRows.map((row) => row.productId)));
   const productIdChunks = chunk(productIds, STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE);
-  const [staffResult, cityInventoryResults, allocationResults] = await Promise.all([
-      supabase.from("staff_members").select("id").in("id", staffIds),
-      Promise.all(
-        productIdChunks.map((productIdChunk) =>
-          supabase
-            .from("inventory")
-            .select("product_id,stock_qty")
-            .eq("city_id", params.cityId)
-            .in("product_id", productIdChunk),
-        ),
+  const staffIdChunks = chunk(staffIds, REPORT_IN_FILTER_CHUNK_SIZE);
+  const [staffResults, cityInventoryPages, allocationPages] = await Promise.all([
+    Promise.all(
+      staffIdChunks.map((staffIdChunk) =>
+        supabase.from("staff_members").select("id").in("id", staffIdChunk),
       ),
-      Promise.all(
-        productIdChunks.map((productIdChunk) =>
-          supabase
-            .from("staff_inventory")
-            .select("staff_id,product_id,stock_qty")
-            .eq("city_id", params.cityId)
-            .in("product_id", productIdChunk),
-        ),
+    ),
+    Promise.all(
+      productIdChunks.map((productIdChunk) =>
+        fetchAllPages({
+          fetchPage: (from, to) =>
+            supabase
+              .from("inventory")
+              .select("product_id,stock_qty")
+              .eq("city_id", params.cityId)
+              .in("product_id", productIdChunk)
+              .range(from, to),
+          onError: (message) => new HttpError(500, "DB", `Failed to load city inventory: ${message}`),
+        }),
       ),
-    ]);
+    ),
+    Promise.all(
+      productIdChunks.map((productIdChunk) =>
+        fetchAllPages({
+          fetchPage: (from, to) =>
+            supabase
+              .from("staff_inventory")
+              .select("staff_id,product_id,stock_qty")
+              .eq("city_id", params.cityId)
+              .in("product_id", productIdChunk)
+              .range(from, to),
+          onError: (message) => new HttpError(500, "DB", `Failed to load staff inventory: ${message}`),
+        }),
+      ),
+    ),
+  ]);
 
-  if (staffResult.error) throw new HttpError(500, "DB", `Failed to load staff: ${staffResult.error.message}`);
-
-  const cityInventory = [] as Array<{ product_id: string; stock_qty: number | null }>;
-  for (const result of cityInventoryResults) {
-    if (result.error) {
-      throw new HttpError(500, "DB", `Failed to load city inventory: ${result.error.message}`);
-    }
-    cityInventory.push(...(result.data ?? []));
+  const loadedStaffIds = new Set<number>();
+  for (const result of staffResults) {
+    if (result.error) throw new HttpError(500, "DB", `Failed to load staff: ${result.error.message}`);
+    for (const staff of result.data ?? []) loadedStaffIds.add(staff.id);
   }
 
-  const currentAllocations = [] as Array<{
+  const cityInventory = cityInventoryPages.flat() as Array<{
+    product_id: string;
+    stock_qty: number | null;
+  }>;
+  const currentAllocations = allocationPages.flat() as Array<{
     staff_id: number;
     product_id: string;
     stock_qty: number;
   }>;
-  for (const result of allocationResults) {
-    if (result.error) {
-      throw new HttpError(500, "DB", `Failed to load staff inventory: ${result.error.message}`);
-    }
-    currentAllocations.push(...(result.data ?? []));
-  }
 
-  if ((staffResult.data ?? []).length !== staffIds.length) {
+  if (loadedStaffIds.size !== staffIds.length) {
     throw new HttpError(400, "BAD_REQUEST", "Workbook references an unknown staff member");
   }
 
   const cityQtyByProductId = new Map(cityInventory.map((row) => [row.product_id, row.stock_qty]));
-  // The first workbook sheet is the city-wide source of truth. In particular,
-  // a zero there means that the item is gone everywhere. Staff tabs describe
-  // allocations only, so stale numbers there must never bring it back into
-  // the catalog after the city stock was explicitly set to zero.
-  const zeroCityProductIds = new Set(
-    cityInventory
-      .filter((row) => row.stock_qty === 0)
-      .map((row) => row.product_id),
-  );
-  const rows = importedRows.map((row) =>
-    zeroCityProductIds.has(row.productId) ? { ...row, stockQty: 0 } : row,
-  );
-
-  if (zeroCityProductIds.size > 0) {
-    for (const productIdChunk of chunk(
-      Array.from(zeroCityProductIds),
-      STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE,
-    )) {
-      const { error } = await supabase
-        .from("staff_inventory")
-        .update({ stock_qty: 0 })
-        .eq("city_id", params.cityId)
-        .in("product_id", productIdChunk);
-      if (error) {
-        throw new HttpError(
-          500,
-          "DB",
-          `Failed to clear staff stock for zero city inventory: ${error.message}`,
-        );
-      }
-    }
-  }
+  const rows = stockRows;
 
   const missingRowsWithStock = rows.filter(
     (row) => !cityQtyByProductId.has(row.productId) && row.stockQty > 0,
@@ -436,7 +454,6 @@ async function syncStaffInventoryFromWorkbook(params: {
   const retainedQtyByProductId = new Map<string, number>();
   for (const allocation of currentAllocations) {
     if (!cityQtyByProductId.has(allocation.product_id)) continue;
-    if (zeroCityProductIds.has(allocation.product_id)) continue;
     if (staffIds.includes(allocation.staff_id)) continue;
     retainedQtyByProductId.set(
       allocation.product_id,
@@ -508,7 +525,12 @@ const VERSIONED_IMAGE_CACHE_CONTROL_SECONDS = "31536000";
 const DEFAULT_IMAGE_CACHE_CONTROL_SECONDS = "2592000";
 const ADMIN_REPORT_PASSWORD = "q81231";
 const REPORT_PAGE_SIZE = 1000;
+// PostgREST's `.in()` filters are sent as GET query strings. Keep UUID batches
+// small enough to stay below URL limits imposed by the API gateway/proxies.
+const REPORT_IN_FILTER_CHUNK_SIZE = 100;
+const ADMIN_IMPORT_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const REPORT_CITY_SLUGS = new Set(["vvo", "blg"]);
+const REPORT_LOYALTY_STATUS_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
 
 type ListedImageFile = { name: string; size: number; updatedAt: string };
 type StorageLocation = { bucket: string; prefix: string };
@@ -628,6 +650,10 @@ type ReportProfileRow = {
   referral_bound_at: string | null;
   tg_username: string | null;
   created_at: string;
+  bonus_points?: unknown;
+  current_cashback_level?: unknown;
+  last_order_date?: string | null;
+  loyalty_expires_at?: string | null;
 };
 
 function parseStorageLocationFromBaseUrl(baseUrl: string | null): StorageLocation | null {
@@ -901,33 +927,35 @@ async function validatePromotionProductIds(params: {
 }): Promise<string[]> {
   if (params.productIds.length === 0) return [];
 
-  const { data, error } = await params.supabase
-    .from("inventory")
-    .select("product_id,products!inner(title,category_slug,is_active)")
-    .eq("city_id", params.cityId)
-    .eq("in_stock", true)
-    .eq("products.is_active", true)
-    .in("product_id", params.productIds);
-
-  if (error) {
-    throw new HttpError(500, "DB", `Failed to validate promotion models: ${error.message}`);
-  }
-
   const validIds = new Set<string>();
-  for (const row of (data ?? []) as Array<{ product_id?: unknown; products?: unknown }>) {
-    const productId = typeof row.product_id === "string" ? row.product_id : "";
-    const product = getJoinedProduct(row);
-    const title = typeof product?.title === "string" ? product.title : "";
-    const categorySlug =
-      typeof product?.category_slug === "string"
-        ? normalizePromotionCategorySlug(product.category_slug)
-        : "";
+  for (const part of chunk(params.productIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
+    const { data, error } = await params.supabase
+      .from("inventory")
+      .select("product_id,products!inner(title,category_slug,is_active)")
+      .eq("city_id", params.cityId)
+      .eq("in_stock", true)
+      .eq("products.is_active", true)
+      .in("product_id", part);
 
-    if (!productId) continue;
-    if (categorySlug !== params.categorySlug) continue;
-    if (!brandMatches(title, params.brand)) continue;
+    if (error) {
+      throw new HttpError(500, "DB", `Failed to validate promotion models: ${error.message}`);
+    }
 
-    validIds.add(productId);
+    for (const row of (data ?? []) as Array<{ product_id?: unknown; products?: unknown }>) {
+      const productId = typeof row.product_id === "string" ? row.product_id : "";
+      const product = getJoinedProduct(row);
+      const title = typeof product?.title === "string" ? product.title : "";
+      const categorySlug =
+        typeof product?.category_slug === "string"
+          ? normalizePromotionCategorySlug(product.category_slug)
+          : "";
+
+      if (!productId) continue;
+      if (categorySlug !== params.categorySlug) continue;
+      if (!brandMatches(title, params.brand)) continue;
+
+      validIds.add(productId);
+    }
   }
 
   if (validIds.size !== params.productIds.length) {
@@ -979,6 +1007,65 @@ function customerLabel(params: {
 }): string {
   const username = params.tgUsername ?? params.profile?.tg_username ?? null;
   return username ? `@${username.replace(/^@+/, "")}` : String(params.tgUserId);
+}
+
+function reportCustomerLoyaltyFields(
+  profile: ReportProfileRow | undefined,
+  nowMs = Date.now(),
+): Record<string, unknown> {
+  const rawLevel = profile?.current_cashback_level;
+  const storedLevel =
+    rawLevel === undefined || rawLevel === null
+      ? null
+      : Math.max(0, Math.trunc(toNumber(rawLevel, "customer_profiles.current_cashback_level")));
+  const lastOrderMs = profile?.last_order_date ? Date.parse(profile.last_order_date) : Number.NaN;
+  const tierExpiresAt = Number.isFinite(lastOrderMs)
+    ? new Date(lastOrderMs + REPORT_LOYALTY_STATUS_RETENTION_MS).toISOString()
+    : null;
+  const activeLevel =
+    storedLevel !== null &&
+    storedLevel > 0 &&
+    tierExpiresAt !== null &&
+    Date.parse(tierExpiresAt) > nowMs
+      ? storedLevel
+      : storedLevel === null
+        ? null
+        : 0;
+  const tierNames: Record<number, string> = {
+    0: "Пока без кэшбэка",
+    3: "Базовый",
+    5: "Продвинутый",
+    7: "VIP",
+  };
+
+  const rawPoints = profile?.bonus_points;
+  const storedPoints =
+    rawPoints === undefined || rawPoints === null
+      ? null
+      : Math.max(0, Math.trunc(toNumber(rawPoints, "customer_profiles.bonus_points")));
+  const pointsExpiryMs = profile?.loyalty_expires_at
+    ? Date.parse(profile.loyalty_expires_at)
+    : Number.NaN;
+  const pointsExpired =
+    storedPoints !== null &&
+    storedPoints > 0 &&
+    Number.isFinite(pointsExpiryMs) &&
+    pointsExpiryMs <= nowMs;
+  const activePoints = storedPoints === null ? null : pointsExpired ? 0 : storedPoints;
+
+  return {
+    "Уровень лояльности":
+      activeLevel === null
+        ? "Нет данных"
+        : tierNames[activeLevel] ?? `Неизвестный уровень (${activeLevel}%)`,
+    "Кэшбэк, %": activeLevel ?? "",
+    "Уровень действует до": storedLevel && tierExpiresAt ? formatReportDate(tierExpiresAt) : "",
+    "Баллы на балансе": activePoints ?? "Нет данных",
+    "Баллы сгорают":
+      storedPoints !== null && storedPoints > 0 && profile?.loyalty_expires_at
+        ? formatReportDate(profile.loyalty_expires_at)
+        : "",
+  };
 }
 
 function categoryReportLabel(categorySlug: string | null | undefined): string {
@@ -1094,7 +1181,7 @@ async function fetchReportOrderItems(
 ): Promise<ReportOrderItemRow[]> {
   const rows: ReportOrderItemRow[] = [];
 
-  for (const part of chunk(orderIds, 300)) {
+  for (const part of chunk(orderIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
     let offset = 0;
     for (;;) {
       const { data, error } = await supabase
@@ -1123,17 +1210,24 @@ async function fetchReportProducts(
 ): Promise<ReportProductRow[]> {
   const rows: ReportProductRow[] = [];
 
-  for (const part of chunk(productIds, 500)) {
-    const { data, error } = await supabase
-      .from("products")
-      .select("id,title,category_slug")
-      .in("id", part);
+  for (const part of chunk(productIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from("products")
+        .select("id,title,category_slug")
+        .in("id", part)
+        .range(offset, offset + REPORT_PAGE_SIZE - 1);
 
-    if (error) {
-      throw new HttpError(500, "DB", `Failed to load report products: ${error.message}`);
+      if (error) {
+        throw new HttpError(500, "DB", `Failed to load report products: ${error.message}`);
+      }
+
+      const page = (data ?? []) as ReportProductRow[];
+      rows.push(...page);
+      if (page.length < REPORT_PAGE_SIZE) break;
+      offset += page.length;
     }
-
-    rows.push(...((data ?? []) as ReportProductRow[]));
   }
 
   return rows;
@@ -1142,16 +1236,15 @@ async function fetchReportProducts(
 async function fetchReportCities(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
 ): Promise<ReportCityRow[]> {
-  const { data, error } = await supabase
-    .from("cities")
-    .select("id,name,slug")
-    .order("slug", { ascending: true });
-
-  if (error) {
-    throw new HttpError(500, "DB", `Failed to load report cities: ${error.message}`);
-  }
-
-  return (data ?? []) as ReportCityRow[];
+  return fetchAllPages({
+    fetchPage: (from, to) =>
+      supabase
+        .from("cities")
+        .select("id,name,slug")
+        .order("slug", { ascending: true })
+        .range(from, to),
+    onError: (message) => new HttpError(500, "DB", `Failed to load report cities: ${message}`),
+  }) as Promise<ReportCityRow[]>;
 }
 
 async function fetchReportLoyaltyTransactions(
@@ -1160,18 +1253,25 @@ async function fetchReportLoyaltyTransactions(
 ): Promise<ReportLoyaltyRow[]> {
   const rows: ReportLoyaltyRow[] = [];
 
-  for (const part of chunk(orderIds, 500)) {
-    const { data, error } = await supabase
-      .from("loyalty_transactions")
-      .select("id,tg_user_id,delta_points,kind,referral_id,order_id,created_at")
-      .in("order_id", part);
+  for (const part of chunk(orderIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from("loyalty_transactions")
+        .select("id,tg_user_id,delta_points,kind,referral_id,order_id,created_at")
+        .in("order_id", part)
+        .range(offset, offset + REPORT_PAGE_SIZE - 1);
 
-    if (error) {
-      if (isMissingDbObjectError(error, "loyalty_transactions")) return [];
-      throw new HttpError(500, "DB", `Failed to load loyalty transactions: ${error.message}`);
+      if (error) {
+        if (isMissingDbObjectError(error, "loyalty_transactions")) return [];
+        throw new HttpError(500, "DB", `Failed to load loyalty transactions: ${error.message}`);
+      }
+
+      const page = (data ?? []) as ReportLoyaltyRow[];
+      rows.push(...page);
+      if (page.length < REPORT_PAGE_SIZE) break;
+      offset += page.length;
     }
-
-    rows.push(...((data ?? []) as ReportLoyaltyRow[]));
   }
 
   return rows;
@@ -1186,7 +1286,7 @@ async function fetchReportCoupons(params: {
   const select =
     "id,tg_user_id,kind,value,min_order_sum,max_discount,source,referral_id,is_used,used_order_id,expires_at,created_at,used_at";
 
-  for (const part of chunk(params.orderIds, 500)) {
+  for (const part of chunk(params.orderIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
     const { data, error } = await params.supabase
       .from("coupons")
       .select(select)
@@ -1200,7 +1300,7 @@ async function fetchReportCoupons(params: {
     for (const row of (data ?? []) as ReportCouponRow[]) byId.set(row.id, row);
   }
 
-  for (const part of chunk(params.couponIds, 500)) {
+  for (const part of chunk(params.couponIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
     if (part.length === 0) continue;
     const { data, error } = await params.supabase.from("coupons").select(select).in("id", part);
 
@@ -1218,18 +1318,26 @@ async function fetchReportCoupons(params: {
 async function fetchReportPromoCodes(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
 ): Promise<PromoCodeAdminRow[]> {
-  const { data, error } = await supabase
-    .from("promo_codes")
-    .select(PROMO_CODE_ADMIN_SELECT)
-    .order("created_at", { ascending: false })
-    .limit(1000);
+  const rows: PromoCodeAdminRow[] = [];
+  let offset = 0;
 
-  if (error) {
-    if (isMissingDbObjectError(error, "promo_codes")) return [];
-    throw new HttpError(500, "DB", `Failed to load report promo codes: ${error.message}`);
+  for (;;) {
+    const { data, error } = await supabase
+      .from("promo_codes")
+      .select(PROMO_CODE_ADMIN_SELECT)
+      .order("created_at", { ascending: false })
+      .range(offset, offset + REPORT_PAGE_SIZE - 1);
+
+    if (error) {
+      if (isMissingDbObjectError(error, "promo_codes")) return [];
+      throw new HttpError(500, "DB", `Failed to load report promo codes: ${error.message}`);
+    }
+
+    const page = (data ?? []) as PromoCodeAdminRow[];
+    rows.push(...page);
+    if (page.length < REPORT_PAGE_SIZE) return rows;
+    offset += page.length;
   }
-
-  return (data ?? []) as PromoCodeAdminRow[];
 }
 
 async function fetchReportReferrals(
@@ -1238,18 +1346,25 @@ async function fetchReportReferrals(
 ): Promise<ReportReferralRow[]> {
   const rows: ReportReferralRow[] = [];
 
-  for (const part of chunk(userIds, 500)) {
-    const { data, error } = await supabase
-      .from("referrals")
-      .select("id,inviter_tg_user_id,invitee_tg_user_id,status,qualified_order_id,qualified_at,rewarded_at,created_at")
-      .in("invitee_tg_user_id", part);
+  for (const part of chunk(userIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from("referrals")
+        .select("id,inviter_tg_user_id,invitee_tg_user_id,status,qualified_order_id,qualified_at,rewarded_at,created_at")
+        .in("invitee_tg_user_id", part)
+        .range(offset, offset + REPORT_PAGE_SIZE - 1);
 
-    if (error) {
-      if (isMissingDbObjectError(error, "referrals")) return [];
-      throw new HttpError(500, "DB", `Failed to load referrals: ${error.message}`);
+      if (error) {
+        if (isMissingDbObjectError(error, "referrals")) return [];
+        throw new HttpError(500, "DB", `Failed to load referrals: ${error.message}`);
+      }
+
+      const page = (data ?? []) as ReportReferralRow[];
+      rows.push(...page);
+      if (page.length < REPORT_PAGE_SIZE) break;
+      offset += page.length;
     }
-
-    rows.push(...((data ?? []) as ReportReferralRow[]));
   }
 
   return rows;
@@ -1260,19 +1375,38 @@ async function fetchReportProfiles(
   userIds: number[],
 ): Promise<ReportProfileRow[]> {
   const rows: ReportProfileRow[] = [];
+  const baseSelect =
+    "tg_user_id,referral_code,referred_by_tg_user_id,referral_bound_at,tg_username,created_at";
+  const selectWithLoyalty =
+    `${baseSelect},bonus_points,current_cashback_level,last_order_date,loyalty_expires_at`;
+  let select = selectWithLoyalty;
 
-  for (const part of chunk(userIds, 500)) {
-    const { data, error } = await supabase
+  for (const part of chunk(userIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
+    let { data, error } = await supabase
       .from("customer_profiles")
-      .select("tg_user_id,referral_code,referred_by_tg_user_id,referral_bound_at,tg_username,created_at")
+      .select(select)
       .in("tg_user_id", part);
+
+    if (
+      error &&
+      select === selectWithLoyalty &&
+      ["bonus_points", "current_cashback_level", "last_order_date", "loyalty_expires_at"].some(
+        (column) => isMissingColumnError(error, column),
+      )
+    ) {
+      select = baseSelect;
+      ({ data, error } = await supabase
+        .from("customer_profiles")
+        .select(select)
+        .in("tg_user_id", part));
+    }
 
     if (error) {
       if (isMissingDbObjectError(error, "customer_profiles")) return [];
       throw new HttpError(500, "DB", `Failed to load customer profiles: ${error.message}`);
     }
 
-    rows.push(...((data ?? []) as ReportProfileRow[]));
+    rows.push(...((data ?? []) as unknown as ReportProfileRow[]));
   }
 
   return rows;
@@ -1685,6 +1819,7 @@ export async function buildBusinessReportWorkbook(
         }),
         "tg_user_id": stat.userId,
         "username": stat.username ? `@${stat.username}` : profile?.tg_username ? `@${profile.tg_username}` : "",
+        ...reportCustomerLoyaltyFields(profile),
         "Заказов": stat.orders,
         "Выручка": stat.revenue,
         "Средний чек": stat.orders > 0 ? Math.round(stat.revenue / stat.orders) : 0,
@@ -1826,7 +1961,7 @@ function errorToResponse(e: unknown): { statusCode: number; body: ApiFailure } {
   ) {
     return {
       statusCode: 400,
-      body: fail("BAD_REQUEST", "File too large (max 5MB)"),
+      body: fail("BAD_REQUEST", "File too large (max 50MB)"),
     };
   }
 
@@ -2899,9 +3034,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const buffer = await file.toBuffer();
-        const maxSize = 5 * 1024 * 1024;
-        if (buffer.byteLength > maxSize) {
-          throw new HttpError(400, "BAD_REQUEST", "File too large (max 5MB)");
+        if (buffer.byteLength > ADMIN_IMPORT_MAX_FILE_BYTES) {
+          throw new HttpError(400, "BAD_REQUEST", "File too large (max 50MB)");
         }
 
         const supabase = createServiceSupabaseClient();
@@ -3035,25 +3169,30 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const supabase = createServiceSupabaseClient();
-      const [{ data: cities, error: citiesError }, { data: products, error: productsError }] =
-        await Promise.all([
-          supabase.from("cities").select("id,slug,name").order("slug", { ascending: true }),
-          supabase
-            .from("products")
-            .select(
-              "id,title,description,category_slug,base_price,image_url,is_active,created_at",
-            )
-            .order("title", { ascending: true }),
-        ]);
+      const [cities, products] = await Promise.all([
+        fetchAllPages({
+          fetchPage: (from, to) =>
+            supabase
+              .from("cities")
+              .select("id,slug,name")
+              .order("slug", { ascending: true })
+              .range(from, to),
+          onError: (message) => new HttpError(500, "DB", `Failed to load cities: ${message}`),
+        }),
+        fetchAllPages({
+          fetchPage: (from, to) =>
+            supabase
+              .from("products")
+              .select(
+                "id,title,description,category_slug,base_price,image_url,is_active,created_at",
+              )
+              .order("title", { ascending: true })
+              .range(from, to),
+          onError: (message) => new HttpError(500, "DB", `Failed to load products: ${message}`),
+        }),
+      ]);
 
-      if (citiesError) {
-        throw new HttpError(500, "DB", `Failed to load cities: ${citiesError.message}`);
-      }
-      if (productsError) {
-        throw new HttpError(500, "DB", `Failed to load products: ${productsError.message}`);
-      }
-
-      const cityList = (cities ?? []).map((c) => ({ id: c.id, slug: c.slug, name: c.name }));
+      const cityList = cities.map((c) => ({ id: c.id, slug: c.slug, name: c.name }));
       const requestedCitySlug = parsedQuery.data.citySlug?.toLowerCase() ?? null;
       const selectedCity =
         requestedCitySlug === null
@@ -3063,7 +3202,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         throw new HttpError(400, "BAD_REQUEST", "Unknown citySlug");
       }
       const exportCities = selectedCity ? [selectedCity] : cityList;
-      const productList = products ?? [];
+      const productList = products;
       const productIds = productList.map((p) => p.id);
 
       type ExportInventoryRow = {
@@ -3083,58 +3222,58 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       let staffInventoryRows: ExportStaffInventoryRow[] = [];
       let staffMembers: Array<{ id: number; name: string; is_active: boolean }> = [];
 
-      await Promise.all(
-        chunk(productIds, 100).map(async (part) => {
-          const { data, error } = await supabase
-            .from("inventory")
-            .select("product_id,city_id,in_stock,stock_qty,price_override")
-            .in("product_id", part);
-
-          if (error) {
-            throw new HttpError(500, "DB", `Failed to load inventory: ${error.message}`);
-          }
-
-          invRows.push(...((data ?? []) as unknown as ExportInventoryRow[]));
-        }),
-      );
+      for (const part of chunk(productIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
+        const page = await fetchAllPages({
+          fetchPage: (from, to) =>
+            supabase
+              .from("inventory")
+              .select("product_id,city_id,in_stock,stock_qty,price_override")
+              .in("product_id", part)
+              .range(from, to),
+          onError: (message) => new HttpError(500, "DB", `Failed to load inventory: ${message}`),
+        });
+        invRows.push(...(page as ExportInventoryRow[]));
+      }
 
       if (selectedCity) {
-        const [, staffInventoryResult, staffMembersResult] = await Promise.all([
-          Promise.all(chunk(productIds, 100).map(async (part) => {
-            const { data, error } = await supabase
-              .from("order_items")
-              .select("product_id,orders!inner(city_id)")
-              .in("product_id", part)
-              .eq("orders.city_id", selectedCity.id);
-
-            if (error) {
-              throw new HttpError(
-                500,
-                "DB",
-                `Failed to load order history for export: ${error.message}`,
-              );
-            }
-
-            soldOrderItems.push(...((data ?? []) as Array<{ product_id: string | null }>));
-          })),
-          supabase
-            .from("staff_inventory")
-            .select("staff_id,product_id,stock_qty")
-            .eq("city_id", selectedCity.id),
-          supabase
-            .from("staff_members")
-            .select("id,name,is_active")
-            .order("name", { ascending: true }),
+        const [loadedStaffInventory, loadedStaffMembers] = await Promise.all([
+          fetchAllPages({
+            fetchPage: (from, to) =>
+              supabase
+                .from("staff_inventory")
+                .select("staff_id,product_id,stock_qty")
+                .eq("city_id", selectedCity.id)
+                .range(from, to),
+            onError: (message) =>
+              new HttpError(500, "DB", `Failed to load staff inventory for export: ${message}`),
+          }),
+          fetchAllPages({
+            fetchPage: (from, to) =>
+              supabase
+                .from("staff_members")
+                .select("id,name,is_active")
+                .order("name", { ascending: true })
+                .range(from, to),
+            onError: (message) => new HttpError(500, "DB", `Failed to load staff for export: ${message}`),
+          }),
         ]);
+        staffInventoryRows = loadedStaffInventory as ExportStaffInventoryRow[];
+        staffMembers = loadedStaffMembers as Array<{ id: number; name: string; is_active: boolean }>;
 
-        if (staffInventoryResult.error) {
-          throw new HttpError(500, "DB", `Failed to load staff inventory for export: ${staffInventoryResult.error.message}`);
+        for (const part of chunk(productIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
+          const page = await fetchAllPages({
+            fetchPage: (from, to) =>
+              supabase
+                .from("order_items")
+                .select("product_id,orders!inner(city_id)")
+                .in("product_id", part)
+                .eq("orders.city_id", selectedCity.id)
+                .range(from, to),
+            onError: (message) =>
+              new HttpError(500, "DB", `Failed to load order history for export: ${message}`),
+          });
+          soldOrderItems.push(...(page as Array<{ product_id: string | null }>));
         }
-        if (staffMembersResult.error) {
-          throw new HttpError(500, "DB", `Failed to load staff for export: ${staffMembersResult.error.message}`);
-        }
-        staffInventoryRows = (staffInventoryResult.data ?? []) as ExportStaffInventoryRow[];
-        staffMembers = staffMembersResult.data ?? [];
       }
 
       const invByKey = new Map<string, ExportInventoryRow>();
@@ -3223,6 +3362,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
             "is_active",
             "staff_id",
             "staff_stock_qty",
+            STAFF_INVENTORY_WORKBOOK_VERSION_COLUMN,
           ];
           const staffAoa: Array<Array<string | number | boolean>> = [staffHeaders];
           for (const product of filteredProductList) {
@@ -3235,7 +3375,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
               product.image_url ?? "",
               product.is_active === true,
               staff.id,
-              staffQtyByKey.get(`${staff.id}:${product.id}`) ?? 0,
+              staffQtyByKey.get(`${staff.id}:${product.id}`) ?? "",
+              STAFF_INVENTORY_WORKBOOK_VERSION,
             ]);
           }
 
@@ -3381,15 +3522,6 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         throw new HttpError(400, "BAD_REQUEST", "Unknown citySlug");
       }
 
-      const { data: inventoryRows, error: inventoryError } = await supabase
-        .from("inventory")
-        .select("product_id,in_stock,stock_qty,price_override")
-        .eq("city_id", city.id);
-
-      if (inventoryError) {
-        throw new HttpError(500, "DB", `Failed to load city inventory: ${inventoryError.message}`);
-      }
-
       type CityInventoryRow = {
         product_id: string;
         in_stock: boolean;
@@ -3411,44 +3543,56 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         is_active: boolean;
       };
 
-      const cityInventoryRows = (inventoryRows ?? []) as CityInventoryRow[];
-      // A single `in` filter with every city product becomes a URL of tens of
-      // kilobytes for a full catalog. Supabase then closes the response with a
-      // HeadersOverflow error, which surfaces in the browser as "fetch failed".
-      const productIds = [...new Set(cityInventoryRows.map((row) => row.product_id))];
-      const exportProducts: ExportProductRow[] = [];
-      const PRODUCT_EXPORT_QUERY_CHUNK_SIZE = 100;
-
-      for (let start = 0; start < productIds.length; start += PRODUCT_EXPORT_QUERY_CHUNK_SIZE) {
-        const { data, error } = await supabase
-          .from("products")
-          .select("id,title,category_slug,base_price,is_active")
-          .in("id", productIds.slice(start, start + PRODUCT_EXPORT_QUERY_CHUNK_SIZE));
-
-        if (error) {
-          throw new HttpError(500, "DB", `Failed to load products: ${error.message}`);
-        }
-        exportProducts.push(...((data ?? []) as ExportProductRow[]));
+      const cityInventoryRows = await fetchAllPages({
+        fetchPage: (from, to) =>
+          supabase
+            .from("inventory")
+            .select("product_id,in_stock,stock_qty,price_override")
+            .eq("city_id", city.id)
+            .range(from, to),
+        onError: (message) => new HttpError(500, "DB", `Failed to load city inventory: ${message}`),
+      }) as CityInventoryRow[];
+      const productIds = cityInventoryRows.map((row) => row.product_id);
+      const products: ExportProductRow[] = [];
+      for (const part of chunk(productIds, REPORT_IN_FILTER_CHUNK_SIZE)) {
+        const page = await fetchAllPages({
+          fetchPage: (from, to) =>
+            supabase
+              .from("products")
+              .select("id,title,category_slug,base_price,is_active")
+              .in("id", part)
+              .range(from, to),
+          onError: (message) => new HttpError(500, "DB", `Failed to load products: ${message}`),
+        });
+        products.push(...(page as ExportProductRow[]));
       }
-
-      const { data: promoRows, error: promosError } = await supabase
-        .from("promo_products")
-        .select("product_id,old_price,new_price,sort_order,is_active")
-        .eq("city_id", city.id);
-
-      if (promosError && !isMissingPromoProductsTableError(promosError)) {
-        throw new HttpError(500, "DB", `Failed to load promo products: ${promosError.message}`);
+      const promos: ExportPromoRow[] = [];
+      let promoOffset = 0;
+      for (;;) {
+        const { data, error } = await supabase
+          .from("promo_products")
+          .select("product_id,old_price,new_price,sort_order,is_active")
+          .eq("city_id", city.id)
+          .range(promoOffset, promoOffset + REPORT_PAGE_SIZE - 1);
+        if (error) {
+          // Let the admin download a ready-to-fill template even if an older
+          // Supabase project has not yet applied alter_promo_products.sql.
+          if (isMissingPromoProductsTableError(error)) break;
+          throw new HttpError(500, "DB", `Failed to load promo products: ${error.message}`);
+        }
+        const page = (data ?? []) as ExportPromoRow[];
+        promos.push(...page);
+        if (page.length < REPORT_PAGE_SIZE) break;
+        promoOffset += page.length;
       }
 
       const productById = new Map<string, ExportProductRow>();
-      for (const product of exportProducts) {
+      for (const product of products) {
         productById.set(product.id, product);
       }
 
       const promoByProductId = new Map<string, ExportPromoRow>();
-      // Let the admin download a ready-to-fill template even if an older
-      // Supabase project has not yet applied alter_promo_products.sql.
-      for (const promo of (promosError ? [] : promoRows ?? []) as ExportPromoRow[]) {
+      for (const promo of promos) {
         promoByProductId.set(promo.product_id, promo);
       }
 
@@ -3551,9 +3695,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const buffer = await file.toBuffer();
-        const maxSize = 5 * 1024 * 1024;
-        if (buffer.byteLength > maxSize) {
-          throw new HttpError(400, "BAD_REQUEST", "File too large (max 5MB)");
+        if (buffer.byteLength > ADMIN_IMPORT_MAX_FILE_BYTES) {
+          throw new HttpError(400, "BAD_REQUEST", "File too large (max 50MB)");
         }
 
         const fileName = (file.filename ?? "").toLowerCase();
@@ -3618,9 +3761,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const buffer = await file.toBuffer();
-        const maxSize = 5 * 1024 * 1024;
-        if (buffer.byteLength > maxSize) {
-          throw new HttpError(400, "BAD_REQUEST", "File too large (max 5MB)");
+        if (buffer.byteLength > ADMIN_IMPORT_MAX_FILE_BYTES) {
+          throw new HttpError(400, "BAD_REQUEST", "File too large (max 50MB)");
         }
 
         const fileName = (file.filename ?? "").toLowerCase();

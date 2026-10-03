@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import * as XLSX from "xlsx";
 import type { Database } from "../supabase/serviceClient.js";
 
 export type CsvRowError = {
@@ -35,7 +34,6 @@ export type ImportProductsCsvResult = {
   };
   generatedIds: boolean;
   productIdRemap: Record<string, string>;
-  outputXlsxBase64: string | null;
   errors: CsvRowError[];
   warnings: CsvRowWarning[];
 };
@@ -312,6 +310,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 // Supabase encodes `.in()` filters into the request URL. UUID batches of 500
 // produce URLs that some proxies reject before they reach PostgREST.
 const PRODUCT_ID_QUERY_CHUNK_SIZE = 100;
+const SUPABASE_PAGE_SIZE = 1000;
 
 type ExistingProduct = {
   imageUrl: string | null;
@@ -373,17 +372,24 @@ async function fetchProductIdsWithInventory(
   const productIds = new Set<string>();
 
   for (const part of chunk(ids, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
-    const { data, error } = await supabase
-      .from("inventory")
-      .select("product_id")
-      .in("product_id", part);
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from("inventory")
+        .select("product_id")
+        .in("product_id", part)
+        .range(offset, offset + SUPABASE_PAGE_SIZE - 1);
 
-    if (error) throw new Error(`Failed to query product inventory usage: ${error.message}`);
+      if (error) throw new Error(`Failed to query product inventory usage: ${error.message}`);
 
-    for (const row of (data ?? []) as Array<{ product_id: string }>) {
-      if (typeof row.product_id === "string") {
-        productIds.add(row.product_id);
+      const page = (data ?? []) as Array<{ product_id: string }>;
+      for (const row of page) {
+        if (typeof row.product_id === "string") {
+          productIds.add(row.product_id);
+        }
       }
+      if (page.length < SUPABASE_PAGE_SIZE) break;
+      offset += page.length;
     }
   }
 
@@ -397,17 +403,24 @@ async function fetchProductIdsWithOrderItems(
   const productIds = new Set<string>();
 
   for (const part of chunk(ids, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
-    const { data, error } = await supabase
-      .from("order_items")
-      .select("product_id")
-      .in("product_id", part);
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from("order_items")
+        .select("product_id")
+        .in("product_id", part)
+        .range(offset, offset + SUPABASE_PAGE_SIZE - 1);
 
-    if (error) throw new Error(`Failed to query product order usage: ${error.message}`);
+      if (error) throw new Error(`Failed to query product order usage: ${error.message}`);
 
-    for (const row of (data ?? []) as Array<{ product_id: string | null }>) {
-      if (typeof row.product_id === "string") {
-        productIds.add(row.product_id);
+      const page = (data ?? []) as Array<{ product_id: string | null }>;
+      for (const row of page) {
+        if (typeof row.product_id === "string") {
+          productIds.add(row.product_id);
+        }
       }
+      if (page.length < SUPABASE_PAGE_SIZE) break;
+      offset += page.length;
     }
   }
 
@@ -452,26 +465,34 @@ async function fetchExistingProductUsageByCity(
   const usageByProductId = new Map<string, ExistingProductUsage>();
 
   for (const part of chunk(ids, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
-    const [
-      { data: products, error: productsError },
-      { data: inventory, error: inventoryError },
-      { data: orderItems, error: orderItemsError },
-    ] = await Promise.all([
+    const [{ data: products, error: productsError }, { data: inventory, error: inventoryError }] =
+      await Promise.all([
       retryTransientSupabaseQuery(() => supabase.from("products").select("id").in("id", part)),
       retryTransientSupabaseQuery(() =>
         supabase.from("inventory").select("product_id,city_id").in("product_id", part),
-      ),
-      retryTransientSupabaseQuery(() =>
-        supabase
-          .from("order_items")
-          .select("product_id,orders!inner(city_id)")
-          .in("product_id", part),
       ),
     ]);
 
     if (productsError) throw new Error(`Failed to query products: ${productsError.message}`);
     if (inventoryError) throw new Error(`Failed to query inventory: ${inventoryError.message}`);
-    if (orderItemsError) throw new Error(`Failed to query order history: ${orderItemsError.message}`);
+
+    const orderItems: Array<{ product_id: string | null; orders: unknown }> = [];
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await retryTransientSupabaseQuery(() =>
+        supabase
+          .from("order_items")
+          .select("product_id,orders!inner(city_id)")
+          .in("product_id", part)
+          .range(offset, offset + SUPABASE_PAGE_SIZE - 1),
+      );
+      if (error) throw new Error(`Failed to query order history: ${error.message}`);
+
+      const page = (data ?? []) as Array<{ product_id: string | null; orders: unknown }>;
+      orderItems.push(...page);
+      if (page.length < SUPABASE_PAGE_SIZE) break;
+      offset += page.length;
+    }
 
     for (const row of products ?? []) {
       const usage = usageByProductId.get(row.id) ?? { exists: true, cityIds: new Set<number>() };
@@ -483,7 +504,7 @@ async function fetchExistingProductUsageByCity(
       addCityUsage(usageByProductId, row.product_id, row.city_id);
     }
 
-    for (const row of (orderItems ?? []) as Array<{ product_id: string | null; orders: unknown }>) {
+    for (const row of orderItems) {
       if (typeof row.product_id !== "string") continue;
       const joinedCityIds = parseJoinedCityIds(row.orders);
       if (joinedCityIds.length === 0) {
@@ -1004,19 +1025,6 @@ export async function importProductsCsv(params: {
     }
   }
 
-  let outputXlsxBase64: string | null = null;
-  if (generatedIds) {
-    const aoa: string[][] = [headers];
-    for (const { record } of inputRecords) {
-      aoa.push(headers.map((h) => record[h] ?? ""));
-    }
-    const sheet = XLSX.utils.aoa_to_sheet(aoa);
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "products");
-    const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
-    outputXlsxBase64 = buffer.toString("base64");
-  }
-
   return {
     delimiter,
     cities: inventoryCities.map((c) => ({ id: c.id, slug: c.slug, name: c.name })),
@@ -1026,7 +1034,6 @@ export async function importProductsCsv(params: {
     sync,
     generatedIds,
     productIdRemap,
-    outputXlsxBase64,
     errors,
     warnings,
   };

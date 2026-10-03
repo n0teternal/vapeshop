@@ -16,6 +16,7 @@ export type ImportPromoProductsCsvResult = {
 
 type CityRow = { id: number; slug: string; name: string };
 type CsvRowError = ImportPromoProductsCsvResult["errors"][number];
+const PRODUCT_ID_QUERY_CHUNK_SIZE = 100;
 
 function normalizeHeader(value: string): string {
   return value
@@ -154,7 +155,7 @@ async function fetchInventoryProductIds(params: {
   const result = new Set<string>();
   if (params.productIds.length === 0) return result;
 
-  for (const part of chunk(params.productIds, 500)) {
+  for (const part of chunk(params.productIds, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
     const { data, error } = await params.supabase
       .from("inventory")
       .select("product_id")
@@ -335,7 +336,7 @@ export async function importPromoProductsCsv(params: {
       .filter((row) => !activeProductIds.has(row.product_id))
       .map((row) => row.id);
 
-    for (const part of chunk(obsoleteIds, 500)) {
+    for (const part of chunk(obsoleteIds, PRODUCT_ID_QUERY_CHUNK_SIZE)) {
       const { error } = await params.supabase.from("promo_products").delete().in("id", part);
       if (error) throw new Error(`Failed to delete obsolete promo products: ${error.message}`);
       deleted += part.length;

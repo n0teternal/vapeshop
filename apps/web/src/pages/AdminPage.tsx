@@ -72,7 +72,6 @@ type ImportProductsCsvResult = {
   };
   generatedIds: boolean;
   productIdRemap: Record<string, string>;
-  outputXlsxBase64: string | null;
   errors: Array<{
     rowNum: number;
     id: string | null;
@@ -457,8 +456,6 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [error, setError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportProductsCsvResult | null>(null);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
-  const [downloadName, setDownloadName] = useState<string>("products.with_ids.xlsx");
   const [promoFile, setPromoFile] = useState<File | null>(null);
   const [promoCsvEncoding, setPromoCsvEncoding] = useState<
     "auto" | "utf-8" | "windows-1251" | "ibm866" | "koi8-r"
@@ -470,12 +467,6 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [promoResult, setPromoResult] = useState<ImportPromoProductsCsvResult | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
 
-  useEffect(() => {
-    return () => {
-      if (downloadUrl) URL.revokeObjectURL(downloadUrl);
-    };
-  }, [downloadUrl]);
-
   async function runImport(): Promise<void> {
     if (!file) return;
 
@@ -483,11 +474,6 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
     setError(null);
     setDownloadError(null);
     setResult(null);
-
-    if (downloadUrl) {
-      URL.revokeObjectURL(downloadUrl);
-      setDownloadUrl(null);
-    }
 
     try {
       const form = new FormData();
@@ -505,21 +491,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
       setResult(res);
       setHistoryRefresh((value) => value + 1);
 
-      if (res.outputXlsxBase64) {
-        const binary = atob(res.outputXlsxBase64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        const blob = new Blob([bytes], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        });
-        const url = URL.createObjectURL(blob);
-        setDownloadUrl(url);
-
-        const base = file.name.replace(/\.(csv|xlsx|xls)$/i, "");
-        setDownloadName(`${base || "products"}.with_ids.xlsx`);
-      }
+      if (res.generatedIds) await downloadLastXlsx();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Import failed";
       setError(message);
@@ -607,7 +579,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to download XLSX";
       setDownloadError(message);
@@ -702,7 +674,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to download promo XLSX";
       setPromoDownloadError(message);
@@ -818,21 +790,9 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
           </div>
           {result.generatedIds ? (
             <div className="text-xs text-muted-foreground">
-              Для новых строк созданы UUID. Скачайте файл с ними перед следующим импортом.
+              Для новых строк созданы UUID; актуальный XLSX с ними скачивается автоматически.
             </div>
           ) : null}
-          {downloadUrl ? (
-            <div>
-              <a
-                href={downloadUrl}
-                download={downloadName}
-                className="text-sm font-semibold text-[#66a3ff] hover:text-[#8fb9ff]"
-              >
-                Скачать XLSX с созданными UUID
-              </a>
-            </div>
-          ) : null}
-
           {result.errors.length > 0 ? (
             <details className="rounded-xl border border-border/70 bg-muted/55 px-3 py-2">
               <summary className="cursor-pointer text-sm font-semibold text-foreground">
@@ -2728,7 +2688,7 @@ function AdminBusinessReportsManager() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setNotice("Отчёт скачан.");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Не удалось скачать отчёт");

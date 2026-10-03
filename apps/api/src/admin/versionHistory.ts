@@ -88,6 +88,31 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+const SUPABASE_QUERY_CHUNK_SIZE = 100;
+
+async function fetchAllPages<T>(params: {
+  fetchPage: (from: number, to: number) => PromiseLike<{
+    data: T[] | null;
+    error: { message: string } | null;
+  }>;
+  onError: (message: string) => Error;
+  pageSize?: number;
+}): Promise<T[]> {
+  const pageSize = params.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  for (;;) {
+    const { data, error } = await params.fetchPage(from, from + pageSize - 1);
+    if (error) throw params.onError(error.message);
+
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+    from += page.length;
+  }
+}
+
 function parseStorageLocationFromBaseUrl(baseUrl: string | null): StorageLocation | null {
   if (!baseUrl) return null;
   try {
@@ -200,25 +225,38 @@ async function insertVersion(params: {
 
 async function captureProductsSnapshot(): Promise<ProductSnapshot> {
   const supabase = createServiceSupabaseClient();
-  const [productsResult, inventoryResult, staffInventoryResult] = await Promise.all([
-    supabase.from("products").select("id,title,description,category_slug,base_price,image_url,is_active,created_at"),
-    supabase.from("inventory").select("product_id,city_id,in_stock,stock_qty,price_override"),
-    supabase.from("staff_inventory").select("staff_id,city_id,product_id,stock_qty"),
+  const [products, inventory, staffInventory] = await Promise.all([
+    fetchAllPages({
+      fetchPage: (from, to) =>
+        supabase
+          .from("products")
+          .select("id,title,description,category_slug,base_price,image_url,is_active,created_at")
+          .range(from, to),
+      onError: (message) => new HttpError(500, "DB", `Failed to snapshot products: ${message}`),
+    }),
+    fetchAllPages({
+      fetchPage: (from, to) =>
+        supabase
+          .from("inventory")
+          .select("product_id,city_id,in_stock,stock_qty,price_override")
+          .range(from, to),
+      onError: (message) => new HttpError(500, "DB", `Failed to snapshot inventory: ${message}`),
+    }),
+    fetchAllPages({
+      fetchPage: (from, to) =>
+        supabase
+          .from("staff_inventory")
+          .select("staff_id,city_id,product_id,stock_qty")
+          .range(from, to),
+      onError: (message) =>
+        new HttpError(500, "DB", `Failed to snapshot staff inventory: ${message}`),
+    }),
   ]);
-  if (productsResult.error) {
-    throw new HttpError(500, "DB", `Failed to snapshot products: ${productsResult.error.message}`);
-  }
-  if (inventoryResult.error) {
-    throw new HttpError(500, "DB", `Failed to snapshot inventory: ${inventoryResult.error.message}`);
-  }
-  if (staffInventoryResult.error) {
-    throw new HttpError(500, "DB", `Failed to snapshot staff inventory: ${staffInventoryResult.error.message}`);
-  }
   return {
     version: 1,
-    products: productsResult.data ?? [],
-    inventory: inventoryResult.data ?? [],
-    staffInventory: staffInventoryResult.data ?? [],
+    products,
+    inventory,
+    staffInventory,
   };
 }
 
@@ -305,15 +343,19 @@ export async function listAdminChangeVersions(params: {
   citySlug: string | null;
 }): Promise<AdminChangeVersionSummary[]> {
   const supabase = createServiceSupabaseClient();
-  let query = supabase
-    .from("admin_change_versions")
-    .select("id,kind,city_slug,label,created_at,created_by_tg_user_id")
-    .eq("kind", params.kind)
-    .order("created_at", { ascending: false });
-  if (params.citySlug) query = query.eq("city_slug", params.citySlug);
-  const { data, error } = await query;
-  if (error) throw new HttpError(500, "DB", `Failed to load restore history: ${error.message}`);
-  return (data ?? []).map((row) => ({
+  const rows = await fetchAllPages({
+    fetchPage: (from, to) => {
+      let query = supabase
+        .from("admin_change_versions")
+        .select("id,kind,city_slug,label,created_at,created_by_tg_user_id")
+        .eq("kind", params.kind)
+        .order("created_at", { ascending: false });
+      if (params.citySlug) query = query.eq("city_slug", params.citySlug);
+      return query.range(from, to);
+    },
+    onError: (message) => new HttpError(500, "DB", `Failed to load restore history: ${message}`),
+  });
+  return rows.map((row) => ({
     id: row.id,
     kind: row.kind,
     citySlug: row.city_slug,
@@ -325,15 +367,13 @@ export async function listAdminChangeVersions(params: {
 
 async function restoreProductsSnapshot(snapshot: ProductSnapshot): Promise<void> {
   const supabase = createServiceSupabaseClient();
-  const { data: currentProducts, error: currentProductsError } = await supabase
-    .from("products")
-    .select("id");
-  if (currentProductsError) {
-    throw new HttpError(500, "DB", `Failed to load current products: ${currentProductsError.message}`);
-  }
+  const currentProducts = await fetchAllPages({
+    fetchPage: (from, to) => supabase.from("products").select("id").range(from, to),
+    onError: (message) => new HttpError(500, "DB", `Failed to load current products: ${message}`),
+  });
 
-  if (snapshot.products.length > 0) {
-    const { error } = await supabase.from("products").upsert(snapshot.products, { onConflict: "id" });
+  for (const rows of chunk(snapshot.products, 200)) {
+    const { error } = await supabase.from("products").upsert(rows, { onConflict: "id" });
     if (error) throw new HttpError(500, "DB", `Failed to restore products: ${error.message}`);
   }
 
@@ -347,19 +387,17 @@ async function restoreProductsSnapshot(snapshot: ProductSnapshot): Promise<void>
   }
 
   const snapshotProductIds = new Set(snapshot.products.map((product) => product.id));
-  const introducedProductIds = (currentProducts ?? [])
+  const introducedProductIds = currentProducts
     .map((product) => product.id)
     .filter((id) => !snapshotProductIds.has(id));
 
-  for (const ids of chunk(introducedProductIds, 200)) {
-    const { data: usedRows, error: usedRowsError } = await supabase
-      .from("order_items")
-      .select("product_id")
-      .in("product_id", ids);
-    if (usedRowsError) {
-      throw new HttpError(500, "DB", `Failed to inspect product history: ${usedRowsError.message}`);
-    }
-    const usedIds = new Set((usedRows ?? []).flatMap((row) => (row.product_id ? [row.product_id] : [])));
+  for (const ids of chunk(introducedProductIds, SUPABASE_QUERY_CHUNK_SIZE)) {
+    const usedRows = await fetchAllPages({
+      fetchPage: (from, to) =>
+        supabase.from("order_items").select("product_id").in("product_id", ids).range(from, to),
+      onError: (message) => new HttpError(500, "DB", `Failed to inspect product history: ${message}`),
+    });
+    const usedIds = new Set(usedRows.flatMap((row) => (row.product_id ? [row.product_id] : [])));
     const idsToArchive = ids.filter((id) => usedIds.has(id));
     const idsToDelete = ids.filter((id) => !usedIds.has(id));
     if (idsToArchive.length > 0) {

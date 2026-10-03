@@ -366,7 +366,7 @@ async function fetchExistingProductIds(
   ids: string[],
 ): Promise<Set<string>> {
   const existing = new Set<string>();
-  for (const part of chunk(ids, 500)) {
+  for (const part of chunk(ids, 100)) {
     const { data, error } = await retryTransientSupabaseQuery(() =>
       supabase.from("products").select("id").in("id", part),
     );

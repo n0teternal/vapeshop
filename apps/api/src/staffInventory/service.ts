@@ -5,6 +5,29 @@ import * as XLSX from "xlsx";
 
 const PRODUCT_ID_QUERY_CHUNK_SIZE = 100;
 
+async function fetchAllPages<T>(params: {
+  fetchPage: (from: number, to: number) => PromiseLike<{
+    data: T[] | null;
+    error: { message: string } | null;
+  }>;
+  onError: (message: string) => Error;
+  pageSize?: number;
+}): Promise<T[]> {
+  const pageSize = params.pageSize ?? 1000;
+  const rows: T[] = [];
+  let from = 0;
+
+  for (;;) {
+    const { data, error } = await params.fetchPage(from, from + pageSize - 1);
+    if (error) throw params.onError(error.message);
+
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+    from += page.length;
+  }
+}
+
 export type StaffMember = {
   id: number;
   name: string;
@@ -334,12 +357,16 @@ export async function exportInventoryMovementsXlsx(): Promise<Buffer> {
     if (page.length < pageSize) break;
   }
 
-  const [citiesResult, staffResult] = await Promise.all([
-    supabase.from("cities").select("id,name,slug"),
-    supabase.from("staff_members").select("id,name"),
+  const [cities, staff] = await Promise.all([
+    fetchAllPages({
+      fetchPage: (from, to) => supabase.from("cities").select("id,name,slug").range(from, to),
+      onError: (message) => new HttpError(500, "DB", `Failed to load cities: ${message}`),
+    }),
+    fetchAllPages({
+      fetchPage: (from, to) => supabase.from("staff_members").select("id,name").range(from, to),
+      onError: (message) => new HttpError(500, "DB", `Failed to load staff: ${message}`),
+    }),
   ]);
-  if (citiesResult.error) throw new HttpError(500, "DB", `Failed to load cities: ${citiesResult.error.message}`);
-  if (staffResult.error) throw new HttpError(500, "DB", `Failed to load staff: ${staffResult.error.message}`);
 
   const productIds = Array.from(
     new Set(
@@ -349,19 +376,19 @@ export async function exportInventoryMovementsXlsx(): Promise<Buffer> {
     ),
   );
   const productTitleById = new Map<string, string>();
-  for (let index = 0; index < productIds.length; index += 200) {
+  for (let index = 0; index < productIds.length; index += PRODUCT_ID_QUERY_CHUNK_SIZE) {
     const { data, error } = await supabase
       .from("products")
       .select("id,title")
-      .in("id", productIds.slice(index, index + 200));
+      .in("id", productIds.slice(index, index + PRODUCT_ID_QUERY_CHUNK_SIZE));
     if (error) throw new HttpError(500, "DB", `Failed to load products: ${error.message}`);
     for (const product of data ?? []) productTitleById.set(product.id, product.title);
   }
 
   const cityById = new Map(
-    (citiesResult.data ?? []).map((city) => [city.id, `${city.name} (${city.slug.toUpperCase()})`]),
+    cities.map((city) => [city.id, `${city.name} (${city.slug.toUpperCase()})`]),
   );
-  const staffNameById = new Map((staffResult.data ?? []).map((staff) => [staff.id, staff.name]));
+  const staffNameById = new Map(staff.map((member) => [member.id, member.name]));
   const kindLabel: Record<string, string> = {
     inbound: "Выдача сотруднику",
     sale: "Продажа",
