@@ -2659,10 +2659,18 @@ function AdminBusinessReportsManager() {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadName, setDownloadName] = useState("business-report-done-orders.xlsx");
+
+  useEffect(() => {
+    if (!downloadUrl) return;
+    return () => URL.revokeObjectURL(downloadUrl);
+  }, [downloadUrl]);
 
   function openReports(): void {
     setError(null);
     setNotice(null);
+    setDownloadUrl(null);
 
     if (password !== ADMIN_REPORT_PASSWORD) {
       setError("Неверный пароль.");
@@ -2676,20 +2684,15 @@ function AdminBusinessReportsManager() {
     setDownloading(true);
     setError(null);
     setNotice(null);
+    setDownloadUrl(null);
 
     try {
       const { blob, filename } = await apiDownloadBlob("/api/admin/reports/business", {
         password,
       });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename ?? "business-report-done-orders.xlsx";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      setNotice("Отчёт скачан.");
+      setDownloadName(filename ?? "business-report-done-orders.xlsx");
+      setDownloadUrl(URL.createObjectURL(blob));
+      setNotice("Отчёт подготовлен. Нажмите «Скачать файл».");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Не удалось скачать отчёт");
     } finally {
@@ -2768,6 +2771,18 @@ function AdminBusinessReportsManager() {
               Листы: заказы, позиции, города, товары, клиенты, адреса, рефералка, промокоды.
             </div>
 
+            {error ? (
+              <div role="alert" className="mt-3 rounded-xl border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </div>
+            ) : null}
+
+            {notice ? (
+              <div aria-live="polite" className="mt-3 rounded-xl border border-emerald-400/35 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-500">
+                {notice}
+              </div>
+            ) : null}
+
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -2777,14 +2792,24 @@ function AdminBusinessReportsManager() {
               >
                 Отмена
               </button>
-              <button
-                type="button"
-                className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
-                disabled={downloading}
-                onClick={() => void downloadReport()}
-              >
-                {downloading ? "Готовим..." : "Скачать отчёт"}
-              </button>
+              {downloadUrl ? (
+                <a
+                  href={downloadUrl}
+                  download={downloadName}
+                  className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
+                >
+                  Скачать файл
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-slate-600"
+                  disabled={downloading}
+                  onClick={() => void downloadReport()}
+                >
+                  {downloading ? "Готовим..." : "Подготовить отчёт"}
+                </button>
+              )}
             </div>
           </div>
         </div>
