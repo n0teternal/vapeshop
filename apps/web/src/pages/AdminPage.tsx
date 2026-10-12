@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import {
   ApiError,
   apiDelete,
-  apiDownloadBlob,
   apiGet,
   apiPost,
   apiPut,
@@ -34,6 +33,11 @@ type AdminCity = {
   id: number;
   name: string;
   slug: string;
+};
+
+type AdminDownloadTicket = {
+  path: string;
+  filename: string;
 };
 
 type AdminStaffMember = {
@@ -321,6 +325,22 @@ function formatCityLabel(city: Pick<AdminCity, "name" | "slug">): string {
   return `${city.name} (${city.slug.toUpperCase()})`;
 }
 
+function getDownloadTicketUrl(path: string): string {
+  const url = new URL(buildApiUrl(path), window.location.href);
+  if (window.location.protocol === "https:" && url.protocol === "http:" && url.host === window.location.host) {
+    url.protocol = "https:";
+  }
+  return url.toString();
+}
+
+function startTelegramDownload(url: string, filename: string): boolean {
+  const webApp = window.Telegram?.WebApp;
+  if (!webApp || typeof webApp.downloadFile !== "function") return false;
+
+  webApp.downloadFile({ url, file_name: filename });
+  return true;
+}
+
 function AdminRestoreHistory({
   kind,
   citySlug = null,
@@ -471,16 +491,6 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [promoResult, setPromoResult] = useState<ImportPromoProductsCsvResult | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
 
-  useEffect(() => {
-    if (!downloadUrl) return;
-    return () => URL.revokeObjectURL(downloadUrl);
-  }, [downloadUrl]);
-
-  useEffect(() => {
-    if (!promoDownloadUrl) return;
-    return () => URL.revokeObjectURL(promoDownloadUrl);
-  }, [promoDownloadUrl]);
-
   async function runImport(): Promise<void> {
     if (!file) return;
 
@@ -515,80 +525,17 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
     }
   }
 
-  function parseDownloadFileName(contentDisposition: string | null, fallback: string): string {
-    if (!contentDisposition) return fallback;
-
-    const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
-    if (utf8Match?.[1]) {
-      const encoded = utf8Match[1].trim().replace(/^"|"$/g, "");
-      try {
-        return decodeURIComponent(encoded);
-      } catch {
-        return encoded;
-      }
-    }
-
-    const basicMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
-    if (basicMatch?.[1]) {
-      return basicMatch[1].trim();
-    }
-
-    return fallback;
-  }
-
   async function downloadLastXlsx(): Promise<void> {
     setDownloadingLastXlsx(true);
     setDownloadError(null);
     setDownloadUrl(null);
     try {
-      const headers: Record<string, string> = {};
-      const tgInitData = window.Telegram?.WebApp?.initData ?? "";
-      if (tgInitData) {
-        headers["x-telegram-init-data"] = tgInitData;
-      }
-      if (import.meta.env.DEV && !tgInitData) {
-        headers["x-dev-admin"] = "1";
-      }
-
-      const query = `?${new URLSearchParams({ citySlug: city.slug }).toString()}`;
-
-      let res = await fetch(buildApiUrl(`/api/admin/export/products.xlsx${query}`), {
-        method: "GET",
-        headers,
+      const ticket = await apiPost<AdminDownloadTicket>("/api/admin/download-tickets", {
+        kind: "products",
+        citySlug: city.slug,
       });
-      if (res.status === 404) {
-        res = await fetch(buildApiUrl(`/api/admin/export/products${query}`), {
-          method: "GET",
-          headers,
-        });
-      }
-
-      if (!res.ok) {
-        let message = `Failed to download XLSX (${res.status})`;
-        try {
-          const payload = (await res.json()) as {
-            ok?: boolean;
-            error?: { message?: string };
-          };
-          const apiMessage = payload?.error?.message;
-          if (typeof apiMessage === "string" && apiMessage.trim().length > 0) {
-            message = apiMessage;
-          }
-        } catch {
-          // ignore JSON parse failures for non-JSON error responses
-        }
-        throw new Error(message);
-      }
-
-      const blob = await res.blob();
-      const fallbackName = `products.${city.slug}.latest.${new Date().toISOString().slice(0, 10)}.xlsx`;
-      const fileName = parseDownloadFileName(
-        res.headers.get("content-disposition"),
-        fallbackName,
-      );
-      if (blob.size === 0) throw new Error("The XLSX file is empty");
-      setDownloadName(fileName);
-      setDownloadUrl(URL.createObjectURL(blob));
+      setDownloadName(ticket.filename);
+      setDownloadUrl(getDownloadTicketUrl(ticket.path));
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to download XLSX";
       setDownloadError(message);
@@ -632,53 +579,12 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
     setPromoDownloadError(null);
     setPromoDownloadUrl(null);
     try {
-      const headers: Record<string, string> = {};
-      const tgInitData = window.Telegram?.WebApp?.initData ?? "";
-      if (tgInitData) {
-        headers["x-telegram-init-data"] = tgInitData;
-      }
-      if (import.meta.env.DEV && !tgInitData) {
-        headers["x-dev-admin"] = "1";
-      }
-
-      const query = `?${new URLSearchParams({ citySlug: city.slug }).toString()}`;
-      let res = await fetch(buildApiUrl(`/api/admin/export/promos.xlsx${query}`), {
-        method: "GET",
-        headers,
+      const ticket = await apiPost<AdminDownloadTicket>("/api/admin/download-tickets", {
+        kind: "promos",
+        citySlug: city.slug,
       });
-      if (res.status === 404) {
-        res = await fetch(buildApiUrl(`/api/admin/export/promos${query}`), {
-          method: "GET",
-          headers,
-        });
-      }
-
-      if (!res.ok) {
-        let message = `Failed to download promo XLSX (${res.status})`;
-        try {
-          const payload = (await res.json()) as {
-            ok?: boolean;
-            error?: { message?: string };
-          };
-          const apiMessage = payload?.error?.message;
-          if (typeof apiMessage === "string" && apiMessage.trim().length > 0) {
-            message = apiMessage;
-          }
-        } catch {
-          // ignore JSON parse failures for non-JSON error responses
-        }
-        throw new Error(message);
-      }
-
-      const blob = await res.blob();
-      const fallbackName = `promo-products.${city.slug}.latest.${new Date().toISOString().slice(0, 10)}.xlsx`;
-      const fileName = parseDownloadFileName(
-        res.headers.get("content-disposition"),
-        fallbackName,
-      );
-      if (blob.size === 0) throw new Error("The promo XLSX file is empty");
-      setPromoDownloadName(fileName);
-      setPromoDownloadUrl(URL.createObjectURL(blob));
+      setPromoDownloadName(ticket.filename);
+      setPromoDownloadUrl(getDownloadTicketUrl(ticket.path));
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to download promo XLSX";
       setPromoDownloadError(message);
@@ -712,6 +618,9 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
             <a
               href={downloadUrl}
               download={downloadName}
+              onClick={(event) => {
+                if (startTelegramDownload(downloadUrl, downloadName)) event.preventDefault();
+              }}
               className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
             >
               Download {city.slug.toUpperCase()} XLSX file
@@ -885,6 +794,9 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
               <a
                 href={promoDownloadUrl}
                 download={promoDownloadName}
+                onClick={(event) => {
+                  if (startTelegramDownload(promoDownloadUrl, promoDownloadName)) event.preventDefault();
+                }}
                 className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
               >
                 Download promo {city.slug.toUpperCase()} XLSX file
@@ -2688,11 +2600,6 @@ function AdminBusinessReportsManager() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [downloadName, setDownloadName] = useState("business-report-done-orders.xlsx");
 
-  useEffect(() => {
-    if (!downloadUrl) return;
-    return () => URL.revokeObjectURL(downloadUrl);
-  }, [downloadUrl]);
-
   function openReports(): void {
     setError(null);
     setNotice(null);
@@ -2713,11 +2620,12 @@ function AdminBusinessReportsManager() {
     setDownloadUrl(null);
 
     try {
-      const { blob, filename } = await apiDownloadBlob("/api/admin/reports/business", {
+      const ticket = await apiPost<AdminDownloadTicket>("/api/admin/download-tickets", {
+        kind: "business",
         password,
       });
-      setDownloadName(filename ?? "business-report-done-orders.xlsx");
-      setDownloadUrl(URL.createObjectURL(blob));
+      setDownloadName(ticket.filename);
+      setDownloadUrl(getDownloadTicketUrl(ticket.path));
       setNotice("Отчёт подготовлен. Нажмите «Скачать файл».");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Не удалось скачать отчёт");
@@ -2822,6 +2730,9 @@ function AdminBusinessReportsManager() {
                 <a
                   href={downloadUrl}
                   download={downloadName}
+                  onClick={(event) => {
+                    if (startTelegramDownload(downloadUrl, downloadName)) event.preventDefault();
+                  }}
                   className="rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary/90"
                 >
                   Скачать файл

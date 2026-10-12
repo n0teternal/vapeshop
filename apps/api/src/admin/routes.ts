@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import * as XLSX from "xlsx";
@@ -531,6 +532,55 @@ const REPORT_IN_FILTER_CHUNK_SIZE = 100;
 const ADMIN_IMPORT_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const REPORT_CITY_SLUGS = new Set(["vvo", "blg"]);
 const REPORT_LOYALTY_STATUS_RETENTION_MS = 60 * 24 * 60 * 60 * 1000;
+const ADMIN_DOWNLOAD_TICKET_TTL_MS = 10 * 60 * 1000;
+
+type AdminDownloadTicket = {
+  expiresAt: number;
+  method: "GET" | "POST";
+  path: string;
+  payload: string | null;
+  headers: Record<string, string>;
+  filename: string;
+};
+
+const adminDownloadTickets = new Map<string, AdminDownloadTicket>();
+
+function getRequestHeader(request: FastifyRequest, name: string): string | null {
+  const value = request.headers[name];
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value[0] ?? null;
+  return null;
+}
+
+function pruneAdminDownloadTickets(now = Date.now()): void {
+  for (const [token, ticket] of adminDownloadTickets) {
+    if (ticket.expiresAt <= now) adminDownloadTickets.delete(token);
+  }
+}
+
+function createAdminDownloadTicket(
+  request: FastifyRequest,
+  ticket: Omit<AdminDownloadTicket, "expiresAt" | "headers">,
+): string {
+  pruneAdminDownloadTickets();
+
+  const headers: Record<string, string> = {};
+  for (const headerName of ["x-telegram-init-data", "x-dev-admin"]) {
+    const value = getRequestHeader(request, headerName);
+    if (value) headers[headerName] = value;
+  }
+
+  let token = randomBytes(32).toString("base64url");
+  while (adminDownloadTickets.has(token)) {
+    token = randomBytes(32).toString("base64url");
+  }
+  adminDownloadTickets.set(token, {
+    ...ticket,
+    headers,
+    expiresAt: Date.now() + ADMIN_DOWNLOAD_TICKET_TTL_MS,
+  });
+  return token;
+}
 
 type ListedImageFile = { name: string; size: number; updatedAt: string };
 type StorageLocation = { bucket: string; prefix: string };
@@ -4121,6 +4171,135 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           .header("Content-Disposition", `attachment; filename="${filename}"`)
           .header("Cache-Control", "no-store")
           .send(buffer);
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  const downloadTicketSchema = z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("products"),
+      citySlug: z.string().trim().min(1).max(50),
+    }),
+    z.object({
+      kind: z.literal("promos"),
+      citySlug: z.string().trim().min(1).max(50),
+    }),
+    z.object({
+      kind: z.literal("business"),
+      password: z.string(),
+    }),
+  ]);
+
+  app.post<{
+    Body: unknown;
+    Reply: ApiSuccess<{ path: string; filename: string }> | ApiFailure;
+  }>(
+    "/api/admin/download-tickets",
+    async (request, reply) => {
+      try {
+        await requireAdmin(request);
+        const parsed = downloadTicketSchema.safeParse(request.body);
+        if (!parsed.success) {
+          throw new HttpError(400, "BAD_REQUEST", "Invalid download request");
+        }
+
+        const datePart = new Date().toISOString().slice(0, 10);
+        let method: AdminDownloadTicket["method"];
+        let path: string;
+        let payload: string | null = null;
+        let filename: string;
+
+        if (parsed.data.kind === "products") {
+          const citySlug = parsed.data.citySlug;
+          method = "GET";
+          path = `/api/admin/export/products.xlsx?${new URLSearchParams({ citySlug }).toString()}`;
+          filename = `products.${citySlug}.latest.${datePart}.xlsx`;
+        } else if (parsed.data.kind === "promos") {
+          const citySlug = parsed.data.citySlug;
+          method = "GET";
+          path = `/api/admin/export/promos.xlsx?${new URLSearchParams({ citySlug }).toString()}`;
+          filename = `promo-products.${citySlug}.latest.${datePart}.xlsx`;
+        } else {
+          if (parsed.data.password !== ADMIN_REPORT_PASSWORD) {
+            throw new HttpError(403, "FORBIDDEN", "Invalid report password");
+          }
+          method = "POST";
+          path = "/api/admin/reports/business";
+          payload = JSON.stringify({ password: parsed.data.password });
+          filename = `business-report-vvo-blg-done-orders-${reportFileDate()}.xlsx`;
+        }
+
+        const token = createAdminDownloadTicket(request, {
+          method,
+          path,
+          payload,
+          filename,
+        });
+        return reply.code(200).send(
+          ok({
+            path: `/api/admin/downloads/${token}`,
+            filename,
+          }),
+        );
+      } catch (e) {
+        const { statusCode, body } = errorToResponse(e);
+        return reply.code(statusCode).send(body);
+      }
+    },
+  );
+
+  app.get<{ Params: { token: string }; Reply: Buffer | ApiFailure }>(
+    "/api/admin/downloads/:token",
+    async (request, reply) => {
+      try {
+        pruneAdminDownloadTickets();
+        const token = request.params.token;
+        if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
+          throw new HttpError(404, "NOT_FOUND", "Download link not found");
+        }
+
+        const ticket = adminDownloadTickets.get(token);
+        if (!ticket) {
+          throw new HttpError(404, "NOT_FOUND", "Download link expired. Prepare the file again.");
+        }
+
+        const headers = {
+          ...ticket.headers,
+          ...(ticket.payload ? { "content-type": "application/json" } : {}),
+        };
+        const response =
+          ticket.payload === null
+            ? await app.inject({
+                method: ticket.method,
+                url: ticket.path,
+                headers,
+              })
+            : await app.inject({
+                method: ticket.method,
+                url: ticket.path,
+                headers,
+                payload: ticket.payload,
+              });
+
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          const contentType = response.headers["content-type"];
+          if (typeof contentType === "string") reply.header("Content-Type", contentType);
+          return reply.code(response.statusCode).send(response.rawPayload);
+        }
+
+        return reply
+          .code(200)
+          .header(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          )
+          .header("Content-Disposition", `attachment; filename="${ticket.filename}"`)
+          .header("Cache-Control", "no-store")
+          .header("Access-Control-Allow-Origin", "https://web.telegram.org")
+          .send(response.rawPayload);
       } catch (e) {
         const { statusCode, body } = errorToResponse(e);
         return reply.code(statusCode).send(body);
