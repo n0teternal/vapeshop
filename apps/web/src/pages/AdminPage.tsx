@@ -455,6 +455,8 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [downloadingLastXlsx, setDownloadingLastXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [downloadName, setDownloadName] = useState("products.xlsx");
   const [result, setResult] = useState<ImportProductsCsvResult | null>(null);
   const [promoFile, setPromoFile] = useState<File | null>(null);
   const [promoCsvEncoding, setPromoCsvEncoding] = useState<
@@ -464,8 +466,20 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   const [promoDownloading, setPromoDownloading] = useState(false);
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoDownloadError, setPromoDownloadError] = useState<string | null>(null);
+  const [promoDownloadUrl, setPromoDownloadUrl] = useState<string | null>(null);
+  const [promoDownloadName, setPromoDownloadName] = useState("promo-products.xlsx");
   const [promoResult, setPromoResult] = useState<ImportPromoProductsCsvResult | null>(null);
   const [historyRefresh, setHistoryRefresh] = useState(0);
+
+  useEffect(() => {
+    if (!downloadUrl) return;
+    return () => URL.revokeObjectURL(downloadUrl);
+  }, [downloadUrl]);
+
+  useEffect(() => {
+    if (!promoDownloadUrl) return;
+    return () => URL.revokeObjectURL(promoDownloadUrl);
+  }, [promoDownloadUrl]);
 
   async function runImport(): Promise<void> {
     if (!file) return;
@@ -473,6 +487,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
     setSubmitting(true);
     setError(null);
     setDownloadError(null);
+    setDownloadUrl(null);
     setResult(null);
 
     try {
@@ -524,6 +539,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   async function downloadLastXlsx(): Promise<void> {
     setDownloadingLastXlsx(true);
     setDownloadError(null);
+    setDownloadUrl(null);
     try {
       const headers: Record<string, string> = {};
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
@@ -570,16 +586,9 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
         res.headers.get("content-disposition"),
         fallbackName,
       );
-      const objectUrl = URL.createObjectURL(blob);
-
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = fileName;
-      anchor.style.display = "none";
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      if (blob.size === 0) throw new Error("The XLSX file is empty");
+      setDownloadName(fileName);
+      setDownloadUrl(URL.createObjectURL(blob));
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to download XLSX";
       setDownloadError(message);
@@ -594,6 +603,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
     setPromoSubmitting(true);
     setPromoError(null);
     setPromoDownloadError(null);
+    setPromoDownloadUrl(null);
     setPromoResult(null);
 
     try {
@@ -620,6 +630,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
   async function downloadPromoXlsx(): Promise<void> {
     setPromoDownloading(true);
     setPromoDownloadError(null);
+    setPromoDownloadUrl(null);
     try {
       const headers: Record<string, string> = {};
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
@@ -665,16 +676,9 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
         res.headers.get("content-disposition"),
         fallbackName,
       );
-      const objectUrl = URL.createObjectURL(blob);
-
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = fileName;
-      anchor.style.display = "none";
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      if (blob.size === 0) throw new Error("The promo XLSX file is empty");
+      setPromoDownloadName(fileName);
+      setPromoDownloadUrl(URL.createObjectURL(blob));
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to download promo XLSX";
       setPromoDownloadError(message);
@@ -704,14 +708,24 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
           >
             {submitting ? "Importing..." : "Import"}
           </button>
-          <button
-            type="button"
-            className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={downloadingLastXlsx || submitting}
-            onClick={() => void downloadLastXlsx()}
-          >
-            {downloadingLastXlsx ? "Preparing..." : `Download ${city.slug.toUpperCase()} XLSX`}
-          </button>
+          {downloadUrl ? (
+            <a
+              href={downloadUrl}
+              download={downloadName}
+              className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+            >
+              Download {city.slug.toUpperCase()} XLSX file
+            </a>
+          ) : (
+            <button
+              type="button"
+              className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={downloadingLastXlsx || submitting}
+              onClick={() => void downloadLastXlsx()}
+            >
+              {downloadingLastXlsx ? "Preparing..." : `Download ${city.slug.toUpperCase()} XLSX`}
+            </button>
+          )}
         </div>
       </div>
 
@@ -725,6 +739,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
             setFile(next);
             setResult(null);
             setError(null);
+            setDownloadUrl(null);
           }}
         />
       </div>
@@ -790,7 +805,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
           </div>
           {result.generatedIds ? (
             <div className="text-xs text-muted-foreground">
-              Для новых строк созданы UUID; актуальный XLSX с ними скачивается автоматически.
+              Для новых строк созданы UUID; актуальный XLSX с ними готов к скачиванию по кнопке выше.
             </div>
           ) : null}
           {result.errors.length > 0 ? (
@@ -866,14 +881,24 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
             >
               {promoSubmitting ? "Importing..." : "Import promo"}
             </button>
-            <button
-              type="button"
-              className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={promoDownloading || promoSubmitting}
-              onClick={() => void downloadPromoXlsx()}
-            >
-              {promoDownloading ? "Preparing..." : `Download promo ${city.slug.toUpperCase()} XLSX`}
-            </button>
+            {promoDownloadUrl ? (
+              <a
+                href={promoDownloadUrl}
+                download={promoDownloadName}
+                className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55"
+              >
+                Download promo {city.slug.toUpperCase()} XLSX file
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="rounded-xl border border-border/70 bg-card/90 px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted/55 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={promoDownloading || promoSubmitting}
+                onClick={() => void downloadPromoXlsx()}
+              >
+                {promoDownloading ? "Preparing..." : `Download promo ${city.slug.toUpperCase()} XLSX`}
+              </button>
+            )}
           </div>
         </div>
 
@@ -887,6 +912,7 @@ function AdminImportProductsCityCard({ city }: { city: AdminCity }) {
               setPromoFile(next);
               setPromoResult(null);
               setPromoError(null);
+              setPromoDownloadUrl(null);
             }}
           />
         </div>
