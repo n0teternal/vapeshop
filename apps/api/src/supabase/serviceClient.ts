@@ -710,6 +710,10 @@ export type Database = {
         Args: { p_tg_user_id: number };
         Returns: Array<{ expired_points: number; bonus_points: number }>;
       };
+      complete_order_with_staff_sale: {
+        Args: { p_order_id: string; p_staff_id: number; p_payment_method: string };
+        Returns: boolean;
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

@@ -72,27 +72,11 @@ async function loadProductSummaries(params: {
   return products;
 }
 
-type StockLine = {
-  productId: string;
-  qty: number;
-};
-
 type ReservedStaffInventory = {
   productId: string;
   previousQty: number;
   nextQty: number;
 };
-
-function normalizeStockLines(lines: Array<{ productId: string; qty: number }>): StockLine[] {
-  const qtyByProductId = new Map<string, number>();
-
-  for (const line of lines) {
-    if (!Number.isInteger(line.qty) || line.qty <= 0) continue;
-    qtyByProductId.set(line.productId, (qtyByProductId.get(line.productId) ?? 0) + line.qty);
-  }
-
-  return Array.from(qtyByProductId, ([productId, qty]) => ({ productId, qty }));
-}
 
 async function restoreStaffInventory(params: {
   staffId: number;
@@ -446,118 +430,43 @@ export async function completeOrderWithStaffSale(params: {
   paymentMethod: OrderPaymentMethod;
 }): Promise<void> {
   const supabase = createServiceSupabaseClient();
-  const { data: order, error: orderError } = await supabase
-    .from("orders")
-    .select("id,status,city_id,seller_id,payment_method")
-    .eq("id", params.orderId)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc("complete_order_with_staff_sale", {
+    p_order_id: params.orderId,
+    p_staff_id: params.staffId,
+    p_payment_method: params.paymentMethod,
+  });
 
-  if (orderError) throw new HttpError(500, "DB", `Failed to load order: ${orderError.message}`);
-  if (!order) throw new HttpError(404, "NOT_FOUND", "Order not found");
-  const cityId = order.city_id;
-  if (cityId === null) throw new HttpError(400, "BAD_REQUEST", "Order city is missing");
-
-  if (order.status === "done") {
-    if (order.seller_id === params.staffId && order.payment_method === params.paymentMethod) return;
-    throw new HttpError(409, "ORDER_FINAL", "Order is already completed");
-  }
-  if (order.status === "cancelled") {
-    throw new HttpError(409, "ORDER_FINAL", "Cancelled order cannot be completed");
+  if (!error) {
+    if (typeof data === "boolean") return;
+    throw new HttpError(500, "DB", "Order completion returned an invalid result");
   }
 
-  const { data: staff, error: staffError } = await supabase
-    .from("staff_members")
-    .select("id,is_active")
-    .eq("id", params.staffId)
-    .maybeSingle();
-  if (staffError) throw new HttpError(500, "DB", `Failed to load staff member: ${staffError.message}`);
-  if (!staff || !staff.is_active) throw new HttpError(400, "STAFF_UNAVAILABLE", "Staff member is unavailable");
-
-  const { data: orderItems, error: itemsError } = await supabase
-    .from("order_items")
-    .select("product_id,qty")
-    .eq("order_id", order.id);
-  if (itemsError) throw new HttpError(500, "DB", `Failed to load order items: ${itemsError.message}`);
-
-  const lines = normalizeStockLines(
-    (orderItems ?? [])
-      .filter((item): item is { product_id: string; qty: number } => typeof item.product_id === "string")
-      .map((item) => ({ productId: item.product_id, qty: item.qty })),
-  );
-  if (lines.length === 0) throw new HttpError(400, "BAD_REQUEST", "Order has no stock items");
-
-  const productIds = lines.map((line) => line.productId);
-  const { data: staffInventory, error: inventoryError } = await supabase
-    .from("staff_inventory")
-    .select("product_id,stock_qty")
-    .eq("staff_id", params.staffId)
-    .eq("city_id", cityId)
-    .in("product_id", productIds);
-  if (inventoryError) throw new HttpError(500, "DB", `Failed to load staff stock: ${inventoryError.message}`);
-
-  const staffQtyByProductId = new Map((staffInventory ?? []).map((row) => [row.product_id, row.stock_qty]));
-  for (const line of lines) {
-    const available = staffQtyByProductId.get(line.productId);
-    if (available === undefined || available < line.qty) {
-      throw new HttpError(400, "STAFF_OUT_OF_STOCK", "Selected staff member does not have enough stock");
-    }
+  const errorMessage = error.message ?? "Failed to complete order";
+  if (error.code === "P0002" || errorMessage.includes("ORDER_NOT_FOUND")) {
+    throw new HttpError(404, "NOT_FOUND", "Order not found");
   }
-
-  const reserved: ReservedStaffInventory[] = [];
-  for (const line of lines) {
-    const previousQty = staffQtyByProductId.get(line.productId) ?? 0;
-    const nextQty = previousQty - line.qty;
-    const { data: updated, error: updateError } = await supabase
-      .from("staff_inventory")
-      .update({ stock_qty: nextQty })
-      .eq("staff_id", params.staffId)
-      .eq("city_id", cityId)
-      .eq("product_id", line.productId)
-      .eq("stock_qty", previousQty)
-      .select("product_id")
-      .maybeSingle();
-
-    if (updateError || !updated) {
-      await restoreStaffInventory({ staffId: params.staffId, cityId, rows: reserved });
-      throw new HttpError(409, "STAFF_OUT_OF_STOCK", "Staff stock changed, choose another seller");
-    }
-
-    reserved.push({ productId: line.productId, previousQty, nextQty });
+  if (errorMessage.includes("ORDER_FINAL") || errorMessage.includes("ORDER_COMPLETION_CONFLICT")) {
+    throw new HttpError(409, "ORDER_FINAL", "Order is already completed or cancelled");
   }
-
-  const { error: movementsError } = await supabase.from("inventory_movements").insert(
-    lines.map((line) => ({
-      city_id: cityId,
-      staff_id: params.staffId,
-      product_id: line.productId,
-      kind: "sale",
-      qty: line.qty,
-      order_id: order.id,
-    })),
-  );
-  if (movementsError) {
-    await restoreStaffInventory({ staffId: params.staffId, cityId, rows: reserved });
-    throw new HttpError(500, "DB", `Failed to record sale movement: ${movementsError.message}`);
+  if (errorMessage.includes("STAFF_STOCK_CONFLICT")) {
+    throw new HttpError(409, "STAFF_OUT_OF_STOCK", "Staff stock changed, try again");
   }
-
-  const { data: completedOrder, error: completeError } = await supabase
-    .from("orders")
-    .update({ status: "done", seller_id: params.staffId, payment_method: params.paymentMethod })
-    .eq("id", order.id)
-    .neq("status", "done")
-    .select("id")
-    .maybeSingle();
-
-  if (completeError || !completedOrder) {
-    await supabase
-      .from("inventory_movements")
-      .delete()
-      .eq("order_id", order.id)
-      .eq("staff_id", params.staffId)
-      .eq("kind", "sale");
-    await restoreStaffInventory({ staffId: params.staffId, cityId, rows: reserved });
-    throw new HttpError(409, "ORDER_FINAL", "Order status changed, reload the order");
+  if (errorMessage.includes("STAFF_OUT_OF_STOCK")) {
+    throw new HttpError(400, "STAFF_OUT_OF_STOCK", "Selected staff member does not have enough stock");
   }
+  if (errorMessage.includes("STAFF_UNAVAILABLE")) {
+    throw new HttpError(400, "STAFF_UNAVAILABLE", "Staff member is unavailable");
+  }
+  if (errorMessage.includes("ORDER_CITY_MISSING")) {
+    throw new HttpError(400, "BAD_REQUEST", "Order city is missing");
+  }
+  if (errorMessage.includes("ORDER_NO_STOCK_ITEMS")) {
+    throw new HttpError(400, "BAD_REQUEST", "Order has no stock items");
+  }
+  if (errorMessage.includes("INVALID_PAYMENT_METHOD") || errorMessage.includes("INVALID_ORDER_ITEM_QTY")) {
+    throw new HttpError(400, "BAD_REQUEST", "Order data is invalid");
+  }
+  throw new HttpError(500, "DB", `Failed to complete order: ${errorMessage}`);
 }
 
 export async function applyStaffInventoryOperation(params: {
