@@ -3,7 +3,7 @@
 Каркас Telegram Mini App: React + Vite + TypeScript + Tailwind + `react-router-dom`.
 
 Сейчас:
-- 18+ гейт + выбор города (VVO/BLG) (persist в `localStorage`)
+- 18+ гейт + выбор доступного города (persist в `localStorage`)
 - корзина (persist в `localStorage`)
 - `/admin` показывает Telegram WebApp debug (`initData`, `initDataUnsafe`, `platform`, `version`, `colorScheme`)
 - каталог: **моки**, либо **чтение из Supabase** (если заданы env)
@@ -46,6 +46,13 @@ pnpm dev:api
 Порт берётся из `PORT` (Railway подставляет автоматически). В UI можно указать `8080`.
 
 ## Env (web + api)
+
+### Временное отключение города
+
+Владивосток выключен по умолчанию. Его данные, каталог и остатки не удаляются.
+Чтобы вернуть город, выставьте `VITE_VVO_ENABLED=true` для web и `VVO_ENABLED=true`
+для API, затем задеплойте web и перезапустите API. Для повторного отключения
+поставьте оба значения в `false`.
 
 1) Скопируйте `.env.example` → `.env.local` (в корне репозитория):
 

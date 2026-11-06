@@ -44,6 +44,7 @@ export type AppConfig = {
   };
   features: {
     deliveryUpgradesEnabled: boolean;
+    vvoEnabled: boolean;
   };
   productImagesBaseUrl: string | null;
   adminHistory: {
@@ -265,6 +266,7 @@ export const config: AppConfig = (() => {
     },
     features: {
       deliveryUpgradesEnabled: parseBooleanEnv("DELIVERY_UPGRADES_ENABLED", true),
+      vvoEnabled: parseBooleanEnv("VVO_ENABLED", false),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     adminHistory: {

@@ -47,14 +47,21 @@ export const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
 export const BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB = 150;
 export const EXPRESS_DELIVERY_SURCHARGE_RUB = 200;
 
+function defaultBlgDistancePricingRules(baseFeeRub: number): DeliveryPricingRule[] {
+  const middleFeeRub = Math.max(baseFeeRub + 50, 200);
+  const farFeeRub = Math.max(middleFeeRub + 50, 250);
+  return [
+    { minDistanceKm: 3, feeRub: middleFeeRub },
+    { minDistanceKm: 5, feeRub: farFeeRub },
+  ];
+}
+
 // These thresholds deliberately match the customer-facing map zones:
 // up to 3 km is the base tariff, then the middle and far tariffs apply.
 // Keeping a non-empty fallback is important: a missing DB row must not
 // silently make every distant address cost the base 150 ₽.
-export const DEFAULT_BLG_DISTANCE_PRICING_RULES: readonly DeliveryPricingRule[] = [
-  { minDistanceKm: 3, feeRub: 200 },
-  { minDistanceKm: 5, feeRub: 250 },
-];
+export const DEFAULT_BLG_DISTANCE_PRICING_RULES: readonly DeliveryPricingRule[] =
+  defaultBlgDistancePricingRules(DEFAULT_BLG_DELIVERY_FEE_RUB);
 
 const DEFAULT_DELIVERY_PRICING_BY_CITY: Record<DeliveryPricingCitySlug, DeliveryPricingSettings> = {
   vvo: {
@@ -156,6 +163,24 @@ function normalizeRules(value: unknown): DeliveryPricingRule[] {
   return Array.from(byDistance.values()).sort((a, b) => a.minDistanceKm - b.minDistanceKm);
 }
 
+function hasSafeBlgDistancePricing(params: {
+  baseFeeRub: number;
+  rules: DeliveryPricingRule[];
+}): boolean {
+  if (params.rules.length === 0) return false;
+
+  let previousFeeRub = params.baseFeeRub;
+  for (const rule of params.rules) {
+    // Every farther tier must cost strictly more than the preceding one.
+    // Otherwise a misconfigured tariff can make a distant address cheaper
+    // than a nearby one or silently leave it at the base price.
+    if (rule.feeRub <= previousFeeRub) return false;
+    previousFeeRub = rule.feeRub;
+  }
+
+  return true;
+}
+
 function normalizePeakSurchargeRules(value: unknown): DeliveryPeakSurchargeRule[] {
   if (value === null || value === undefined) return [];
   if (!Array.isArray(value)) {
@@ -229,11 +254,20 @@ function rowToDeliveryPricingSettings(
   const fallback = defaultDeliveryPricingSettings(citySlug);
   if (!row) return fallback;
 
+  const baseFeeRub = normalizeFeeRub(row.base_fee_rub, "delivery_pricing_settings.base_fee_rub");
+  const rules = normalizeRules(row.rules);
+
   return {
     citySlug,
     freeDeliveryThresholdRub: fallback.freeDeliveryThresholdRub,
-    baseFeeRub: normalizeFeeRub(row.base_fee_rub, "delivery_pricing_settings.base_fee_rub"),
-    rules: normalizeRules(row.rules),
+    baseFeeRub,
+    // An empty or unsafe legacy row must never disable distance pricing for
+    // the whole city. New settings are rejected below; this branch protects
+    // the app from existing rows changed outside the API as well.
+    rules:
+      citySlug === "blg" && !hasSafeBlgDistancePricing({ baseFeeRub, rules })
+        ? defaultBlgDistancePricingRules(baseFeeRub)
+        : rules,
     peakSurchargeRules: normalizePeakSurchargeRules(row.peak_surcharge_rules),
   };
 }
@@ -245,10 +279,21 @@ export function parseDeliveryPricingSettingsUpdate(
     throw new HttpError(400, "BAD_REQUEST", "body must be an object");
   }
 
+  const citySlug = parseCitySlug(value.citySlug);
+  const baseFeeRub = normalizeFeeRub(value.baseFeeRub, "baseFeeRub");
+  const rules = normalizeRules(value.rules);
+  if (citySlug === "blg" && !hasSafeBlgDistancePricing({ baseFeeRub, rules })) {
+    throw new HttpError(
+      400,
+      "BAD_REQUEST",
+      "Для BLG нужен хотя бы один возрастающий тариф выше базовой стоимости доставки",
+    );
+  }
+
   return {
-    citySlug: parseCitySlug(value.citySlug),
-    baseFeeRub: normalizeFeeRub(value.baseFeeRub, "baseFeeRub"),
-    rules: normalizeRules(value.rules),
+    citySlug,
+    baseFeeRub,
+    rules,
     peakSurchargeRules: normalizePeakSurchargeRules(value.peakSurchargeRules),
   };
 }

@@ -24,6 +24,11 @@ export type DeliveryDistanceZone = {
   toneClassName: string;
 };
 
+export type DeliveryDistancePricingRule = {
+  minDistanceKm: number;
+  feeRub: number;
+};
+
 type CitySlug = "vvo" | "blg";
 
 type DeliveryGeocodeResponse = {
@@ -45,6 +50,8 @@ type DeliveryAddressMapProps = {
   city: CitySlug;
   address: string;
   disabled: boolean;
+  baseFeeRub: number;
+  pricingRules: readonly DeliveryDistancePricingRule[];
   required?: boolean;
   inputClassName?: string;
   showDistanceStatus?: boolean;
@@ -154,36 +161,61 @@ function distanceKmBetween(a: YMapsCoords, b: YMapsCoords): number {
   return earthRadiusKm * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
-function getDistanceZone(distanceKm: number): DeliveryDistanceZone {
-  if (distanceKm <= 3) {
+export function getDeliveryDistanceZone(params: {
+  distanceKm: number;
+  baseFeeRub: number;
+  pricingRules: readonly DeliveryDistancePricingRule[];
+}): DeliveryDistanceZone {
+  const rules = [...params.pricingRules]
+    .filter(
+      (rule) =>
+        Number.isFinite(rule.minDistanceKm) &&
+        rule.minDistanceKm > 0 &&
+        Number.isFinite(rule.feeRub) &&
+        rule.feeRub >= 0,
+    )
+    .sort((left, right) => left.minDistanceKm - right.minDistanceKm);
+
+  let matchedRuleIndex = -1;
+  for (const [index, rule] of rules.entries()) {
+    if (params.distanceKm > rule.minDistanceKm) matchedRuleIndex = index;
+  }
+
+  if (matchedRuleIndex < 0) {
     return {
       id: "near",
       title: "Ближняя зона",
-      feeHint: "обычный тариф",
+      feeHint: `обычный тариф: ${params.baseFeeRub} ₽`,
       toneClassName: "border-emerald-300/40 bg-emerald-400/10 text-emerald-500",
     };
   }
-  if (distanceKm <= 5) {
+
+  const matchedRule = rules[matchedRuleIndex];
+  if (!matchedRule) {
+    // The guards above guarantee this cannot happen; retain a safe label in
+    // case the component is called with a malformed cache value.
     return {
       id: "middle",
       title: "Средняя зона",
-      feeHint: "проверить маржу",
+      feeHint: "повышенный тариф",
       toneClassName: "border-amber-300/40 bg-amber-400/10 text-amber-500",
     };
   }
-  if (distanceKm <= 7) {
+
+  if (matchedRuleIndex === 0) {
     return {
-      id: "far",
-      title: "Дальняя зона",
-      feeHint: "повысить доставку",
-      toneClassName: "border-orange-300/40 bg-orange-400/10 text-orange-500",
+      id: "middle",
+      title: "Средняя зона",
+      feeHint: `тариф: ${matchedRule.feeRub} ₽`,
+      toneClassName: "border-amber-300/40 bg-amber-400/10 text-amber-500",
     };
   }
+
   return {
-    id: "manual",
-    title: "По согласованию",
-    feeHint: "не отдавать бесплатно",
-    toneClassName: "border-destructive/40 bg-destructive/10 text-destructive",
+    id: "far",
+    title: "Дальняя зона",
+    feeHint: `тариф: ${matchedRule.feeRub} ₽`,
+    toneClassName: "border-orange-300/40 bg-orange-400/10 text-orange-500",
   };
 }
 
@@ -385,6 +417,8 @@ export function DeliveryAddressMap({
   city,
   address,
   disabled,
+  baseFeeRub,
+  pricingRules,
   required,
   inputClassName,
   showDistanceStatus = false,
@@ -554,7 +588,11 @@ export function DeliveryAddressMap({
       lat: coords[0],
       lon: coords[1],
       distanceKm,
-      zone: getDistanceZone(distanceKm),
+      zone: getDeliveryDistanceZone({
+        distanceKm,
+        baseFeeRub,
+        pricingRules,
+      }),
     };
 
     setCustomerPlacemark(coords);
@@ -781,7 +819,8 @@ export function DeliveryAddressMap({
 
       {!loading && localAddress.trim().length > 0 && !restoredSelection ? (
         <p className="text-xs text-muted-foreground">
-          Если расстояние не определится, заказ можно оформить по базовому тарифу доставки.
+          Расстояние проверяется при оформлении. Если адрес временно не удастся определить,
+          предложим повторить попытку — цена не будет рассчитана по случайному тарифу.
         </p>
       ) : null}
 

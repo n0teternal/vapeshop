@@ -475,10 +475,18 @@ export async function startOrderEditSession(params: {
   allowPromoPrices?: boolean;
   skipDeliveryWindowCheck?: boolean;
   sessionDurationMs?: number;
+  allowedCitySlugs?: CitySlug[];
 }): Promise<StartOrderEditSessionResult> {
   const supabase = createServiceSupabaseClient();
   const order = await loadOrder(params);
   const city = await loadOrderCity(order.city_id);
+  if (params.allowedCitySlugs && !params.allowedCitySlugs.includes(city.citySlug)) {
+    throw new HttpError(
+      409,
+      "CITY_DISABLED",
+      "Владивосток временно не обслуживается. Выберите Благовещенск.",
+    );
+  }
   if (params.skipDeliveryWindowCheck !== true) {
     ensureOrderEditableByWindow({
       citySlug: city.citySlug,

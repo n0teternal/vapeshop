@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BadgePercent, Check } from "lucide-react";
 import { ProductImagePreview } from "../components/ProductImagePreview";
+import { VVO_ENABLED } from "../config";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
 import { isSupabaseConfigured } from "../supabase/client";
@@ -1338,13 +1339,15 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
     return (
       <FullscreenGate title="Выберите город">
         <div className="grid gap-3">
-          <button
-            type="button"
-            className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-            onClick={() => dispatch({ type: "city/set", city: "vvo" })}
-          >
-            Владивосток (VVO)
-          </button>
+          {VVO_ENABLED ? (
+            <button
+              type="button"
+              className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+              onClick={() => dispatch({ type: "city/set", city: "vvo" })}
+            >
+              Владивосток (VVO)
+            </button>
+          ) : null}
           <button
             type="button"
             className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"

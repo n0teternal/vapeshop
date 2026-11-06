@@ -5,6 +5,7 @@ import { ApiError, apiGet, apiPost } from "../api/client";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import {
   DeliveryAddressMap,
+  getDeliveryDistanceZone,
   type DeliveryMapSelection,
 } from "../components/DeliveryAddressMap";
 import { Alert, AlertDescription } from "../components/ui/alert";
@@ -724,12 +725,32 @@ export function CartPage() {
   }, [state.cart]);
   const itemsTotal = isExpressDelivery ? expressItemsTotal : regularItemsTotal;
   const showDeliveryTypeOptions = state.city === "blg" && isAddressDeliveryMethod;
-  const confirmedDeliveryMapSelection =
-    deliveryMapSelection &&
-    normalizeDeliveryMapAddressKey(deliveryMapSelection.address) ===
-      normalizeDeliveryMapAddressKey(checkoutDraft.address)
-      ? deliveryMapSelection
-      : null;
+  const confirmedDeliveryMapSelection = useMemo(() => {
+    if (
+      !deliveryMapSelection ||
+      normalizeDeliveryMapAddressKey(deliveryMapSelection.address) !==
+        normalizeDeliveryMapAddressKey(checkoutDraft.address)
+    ) {
+      return null;
+    }
+
+    // A cached address selection may have been created before an operator
+    // changed the tariff rules. Rebuild its label from current pricing so the
+    // map, checkout preview and server all describe the same tier.
+    return {
+      ...deliveryMapSelection,
+      zone: getDeliveryDistanceZone({
+        distanceKm: deliveryMapSelection.distanceKm,
+        baseFeeRub: deliveryPricing.baseFeeRub,
+        pricingRules: deliveryPricing.rules,
+      }),
+    };
+  }, [
+    checkoutDraft.address,
+    deliveryMapSelection,
+    deliveryPricing.baseFeeRub,
+    deliveryPricing.rules,
+  ]);
   const regularDeliveryFee =
     state.city === "blg"
       ? getBlgDeliveryFeeRub({
@@ -1652,6 +1673,8 @@ export function CartPage() {
                     city={state.city}
                     address={checkoutDraft.address}
                     disabled={submitting}
+                    baseFeeRub={deliveryPricing.baseFeeRub}
+                    pricingRules={deliveryPricing.rules}
                     required
                     inputClassName={DELIVERY_FIELD_HIGHLIGHT_CLASS_NAME}
                     showDistanceStatus={showDeliveryDistanceDebug}

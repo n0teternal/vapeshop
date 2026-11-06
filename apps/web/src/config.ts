@@ -61,6 +61,10 @@ export const DELIVERY_UPGRADES_ENABLED = readEnvBoolean(
   true,
 );
 
+// Keep a city switch separate from its data: turning a city back on does not
+// require a database migration or restoring deleted catalog/inventory rows.
+export const VVO_ENABLED = readEnvBoolean("VITE_VVO_ENABLED", false);
+
 function readEnvNumber(key: string): number | null {
   const raw = readEnvString(key);
   if (!raw) return null;

@@ -85,6 +85,16 @@ const DEV_FALLBACK_TG_USER_ID = 42;
 const ADMIN_ORDER_EDIT_SESSION_MS = 100 * 365 * 24 * 60 * 60 * 1_000;
 const BLG_DELIVERY_ORIGIN = { lat: 50.258119, lon: 127.534845 };
 
+function assertPublicCityEnabled(citySlug: CitySlug): void {
+  if (citySlug === "vvo" && !config.features.vvoEnabled) {
+    throw new HttpError(
+      409,
+      "CITY_DISABLED",
+      "Владивосток временно не обслуживается. Выберите Благовещенск.",
+    );
+  }
+}
+
 type OrderRequestBody = CreateOrderPayload & {
   initData?: string;
 };
@@ -372,6 +382,7 @@ function parseOrderRequestBody(value: unknown): OrderRequestBody {
   if (citySlug !== "vvo" && citySlug !== "blg") {
     throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
   }
+  assertPublicCityEnabled(citySlug);
 
   const deliveryMethod = value.deliveryMethod;
   if (typeof deliveryMethod !== "string" || deliveryMethod.trim().length === 0) {
@@ -790,6 +801,7 @@ app.get<{
     if (citySlug !== "vvo" && citySlug !== "blg") {
       throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
     }
+    assertPublicCityEnabled(citySlug);
 
     const includePromos = request.query.includePromos === "1";
     const catalog = await fetchCatalogByCity({ citySlug, includePromos });
@@ -825,6 +837,7 @@ app.get<{
     if (citySlug !== "vvo" && citySlug !== "blg") {
       throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
     }
+    assertPublicCityEnabled(citySlug);
 
     const supabase = createServiceSupabaseClient();
     const { data: city, error: cityError } = await supabase
@@ -975,6 +988,7 @@ app.get<{
     if (citySlug !== "vvo" && citySlug !== "blg") {
       throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
     }
+    assertPublicCityEnabled(citySlug);
 
     const result = await loadDeliveryPricingSettings({
       supabase: createServiceSupabaseClient(),
@@ -1237,6 +1251,7 @@ app.put<{
       orderId,
       expectedTgUserId: user.id,
       allowPromoPrices: true,
+      ...(config.features.vvoEnabled ? {} : { allowedCitySlugs: ["blg"] }),
     });
     return reply.code(200).send(ok(result));
   } catch (e: unknown) {

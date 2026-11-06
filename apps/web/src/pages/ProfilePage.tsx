@@ -1,4 +1,5 @@
 import { Clock3, Gift, PackageSearch, Plus, Save, ShieldCheck, Trash2, Truck, UserRound } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet, apiPut } from "../api/client";
@@ -7,6 +8,11 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { ProfileStatusBand } from "../components/ProfileStatusBand";
+import {
+  fetchLoyaltyStatus,
+  LOYALTY_STATUS_QUERY_KEY,
+  LOYALTY_STATUS_STALE_TIME_MS,
+} from "../lib/loyaltyStatus";
 import {
   writeCachedDeliveryPricingSettings,
   type DeliveryPeakSurchargeRule,
@@ -19,13 +25,6 @@ type AdminMe = {
   tgUserId: number;
   username: string | null;
   role: string;
-};
-
-type LoyaltyBalanceOverview = {
-  pointsBalance: number;
-  pointsNextExpiresAt: string | null;
-  monthlySpent: number;
-  cashbackLevel: number;
 };
 
 const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
@@ -46,8 +45,6 @@ export function ProfilePage() {
   const [deliveryPricingSaving, setDeliveryPricingSaving] = useState(false);
   const [deliveryPricingError, setDeliveryPricingError] = useState<string | null>(null);
   const [deliveryPricingSaved, setDeliveryPricingSaved] = useState(false);
-  const [loyaltyBalance, setLoyaltyBalance] = useState<LoyaltyBalanceOverview | null>(null);
-
   useEffect(() => {
     let cancelled = false;
     setError(null);
@@ -82,28 +79,13 @@ export function ProfilePage() {
   const canManageDeliveryPricing =
     isTelegram && tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
 
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!shouldShowLoyaltyStatus) {
-      setLoyaltyBalance(null);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    apiGet<LoyaltyBalanceOverview>("/api/referrals/overview?limit=1&offset=0")
-      .then((overview) => {
-        if (!cancelled) setLoyaltyBalance(overview);
-      })
-      .catch(() => {
-        if (!cancelled) setLoyaltyBalance(null);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [shouldShowLoyaltyStatus]);
+  const loyaltyStatusQuery = useQuery({
+    queryKey: LOYALTY_STATUS_QUERY_KEY,
+    queryFn: fetchLoyaltyStatus,
+    enabled: shouldShowLoyaltyStatus,
+    staleTime: LOYALTY_STATUS_STALE_TIME_MS,
+  });
+  const loyaltyBalance = loyaltyStatusQuery.data ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -405,6 +387,7 @@ export function ProfilePage() {
                         size="icon"
                         variant="outline"
                         className="h-10 w-10"
+                        disabled={deliveryPricing.rules.length === 1}
                         onClick={() => removeDeliveryPricingRule(index)}
                         title="Удалить условие"
                       >

@@ -7,6 +7,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
+import { VVO_ENABLED } from "../config";
 
 export type City = "vvo" | "blg";
 
@@ -127,6 +128,10 @@ function isCity(value: unknown): value is City {
   return value === "vvo" || value === "blg";
 }
 
+function isEnabledCity(value: unknown): value is City {
+  return isCity(value) && (value !== "vvo" || VVO_ENABLED);
+}
+
 function isCartItem(value: unknown): value is CartItem {
   if (!isRecord(value)) return false;
   return (
@@ -209,8 +214,9 @@ function sanitizeCheckoutDraft(value: unknown): CheckoutDraft {
 function sanitizeRestoreSnapshot(value: unknown): OrderEditRestoreSnapshot | null {
   if (!isRecord(value)) return null;
 
-  const city = value.city === null || isCity(value.city) ? value.city : null;
-  const cartCity = value.cartCity === null || isCity(value.cartCity) ? value.cartCity : null;
+  const city = value.city === null || isEnabledCity(value.city) ? value.city : null;
+  const cartCity =
+    value.cartCity === null || isEnabledCity(value.cartCity) ? value.cartCity : null;
   const cartRaw = Array.isArray(value.cart) ? value.cart : [];
   const cart = cartRaw.filter(isCartItem);
 
@@ -225,7 +231,7 @@ function sanitizeRestoreSnapshot(value: unknown): OrderEditRestoreSnapshot | nul
 function sanitizeOrderEditSession(value: unknown): OrderEditSession | null {
   if (!isRecord(value)) return null;
   if (typeof value.orderId !== "string" || value.orderId.trim().length === 0) return null;
-  if (!isCity(value.city)) return null;
+  if (!isEnabledCity(value.city)) return null;
   if (typeof value.expiresAt !== "string" || value.expiresAt.trim().length === 0) return null;
   if (typeof value.discountAmount !== "number" || !Number.isFinite(value.discountAmount)) {
     return null;
@@ -256,9 +262,9 @@ function loadStateFromStorage(): AppState {
       typeof parsed.isAdultConfirmed === "boolean"
         ? parsed.isAdultConfirmed
         : initialState.isAdultConfirmed;
-    const city = parsed.city === null || isCity(parsed.city) ? parsed.city : null;
+    const city = parsed.city === null || isEnabledCity(parsed.city) ? parsed.city : null;
     const cartCity =
-      parsed.cartCity === null || isCity(parsed.cartCity) ? parsed.cartCity : null;
+      parsed.cartCity === null || isEnabledCity(parsed.cartCity) ? parsed.cartCity : null;
 
     const cartRaw = Array.isArray(parsed.cart) ? parsed.cart : [];
     const parsedCart = cartRaw.filter(isCartItem);
@@ -288,6 +294,9 @@ function reducer(state: AppState, action: Action): AppState {
     case "adult/confirm":
       return { ...state, isAdultConfirmed: true };
     case "city/set":
+      if (!isEnabledCity(action.city)) {
+        return state;
+      }
       if (state.orderEditSession && state.orderEditSession.city !== action.city) {
         return state;
       }
@@ -352,6 +361,9 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
     case "cart/replace":
+      if (!isEnabledCity(action.city)) {
+        return state;
+      }
       return {
         ...state,
         city: action.city,
@@ -406,6 +418,9 @@ function reducer(state: AppState, action: Action): AppState {
         },
       };
     case "order-edit/start": {
+      if (!isEnabledCity(action.session.city)) {
+        return state;
+      }
       const restore =
         state.orderEditSession?.restore ?? {
           city: state.city,
@@ -432,9 +447,17 @@ function reducer(state: AppState, action: Action): AppState {
       }
       return {
         ...state,
-        city: state.orderEditSession.restore.city,
-        cartCity: state.orderEditSession.restore.cartCity,
-        cart: state.orderEditSession.restore.cart,
+        city: isEnabledCity(state.orderEditSession.restore.city)
+          ? state.orderEditSession.restore.city
+          : null,
+        cartCity: isEnabledCity(state.orderEditSession.restore.cartCity)
+          ? state.orderEditSession.restore.cartCity
+          : null,
+        cart:
+          isEnabledCity(state.orderEditSession.restore.city) &&
+          isEnabledCity(state.orderEditSession.restore.cartCity)
+            ? state.orderEditSession.restore.cart
+            : [],
         checkoutDraft: state.orderEditSession.restore.checkoutDraft,
         orderEditSession: null,
       };
