@@ -47,6 +47,15 @@ export const BLG_FREE_DELIVERY_THRESHOLD_RUB = 1500;
 export const BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB = 150;
 export const EXPRESS_DELIVERY_SURCHARGE_RUB = 200;
 
+// These thresholds deliberately match the customer-facing map zones:
+// up to 3 km is the base tariff, then the middle and far tariffs apply.
+// Keeping a non-empty fallback is important: a missing DB row must not
+// silently make every distant address cost the base 150 ₽.
+export const DEFAULT_BLG_DISTANCE_PRICING_RULES: readonly DeliveryPricingRule[] = [
+  { minDistanceKm: 3, feeRub: 200 },
+  { minDistanceKm: 5, feeRub: 250 },
+];
+
 const DEFAULT_DELIVERY_PRICING_BY_CITY: Record<DeliveryPricingCitySlug, DeliveryPricingSettings> = {
   vvo: {
     citySlug: "vvo",
@@ -59,7 +68,7 @@ const DEFAULT_DELIVERY_PRICING_BY_CITY: Record<DeliveryPricingCitySlug, Delivery
     citySlug: "blg",
     freeDeliveryThresholdRub: BLG_FREE_DELIVERY_THRESHOLD_RUB,
     baseFeeRub: DEFAULT_BLG_DELIVERY_FEE_RUB,
-    rules: [],
+    rules: DEFAULT_BLG_DISTANCE_PRICING_RULES.map((rule) => ({ ...rule })),
     peakSurchargeRules: [],
   },
 };
@@ -208,7 +217,7 @@ function defaultDeliveryPricingSettings(citySlug: DeliveryPricingCitySlug): Deli
     citySlug: fallback.citySlug,
     freeDeliveryThresholdRub: fallback.freeDeliveryThresholdRub,
     baseFeeRub: fallback.baseFeeRub,
-    rules: [...fallback.rules],
+    rules: fallback.rules.map((rule) => ({ ...rule })),
     peakSurchargeRules: [...fallback.peakSurchargeRules],
   };
 }

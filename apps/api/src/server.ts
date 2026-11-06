@@ -224,6 +224,48 @@ async function calculateBlgDeliveryLocationFromAddress(address: string): Promise
   };
 }
 
+async function resolveOrderDeliveryLocation(params: {
+  citySlug: CitySlug;
+  deliveryMethod: string;
+  address: string | null;
+  submittedLocation: CreateOrderPayload["deliveryLocation"];
+}): Promise<CreateOrderPayload["deliveryLocation"]> {
+  const allowedSubmittedLocation = getAllowedDeliveryLocation(
+    params.citySlug,
+    params.submittedLocation,
+  );
+
+  if (
+    params.citySlug !== "blg" ||
+    !isDeliveryAddressMethod(params.deliveryMethod) ||
+    params.address === null
+  ) {
+    return allowedSubmittedLocation;
+  }
+
+  try {
+    return await calculateBlgDeliveryLocationFromAddress(params.address);
+  } catch (error) {
+    // Never turn a distance-calculation failure into the base tariff. That
+    // undercharges remote addresses and also lets the browser and server show
+    // different prices. The customer can retry after correcting the address
+    // or when Yandex becomes available again.
+    if (isHttpError(error) && error.code === "ADDRESS_NOT_FOUND") {
+      throw new HttpError(
+        400,
+        "DELIVERY_ADDRESS_NOT_FOUND",
+        "Не удалось найти адрес для расчёта доставки. Проверьте улицу и номер дома.",
+      );
+    }
+
+    throw new HttpError(
+      503,
+      "DELIVERY_DISTANCE_UNAVAILABLE",
+      "Не удалось рассчитать расстояние доставки. Повторите попытку через минуту.",
+    );
+  }
+}
+
 function parseOptionalTrimmedString(value: unknown, fieldName: string): string | null {
   if (value === undefined || value === null) return null;
   if (typeof value !== "string") {
@@ -1258,10 +1300,12 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
         headers: request.headers as Record<string, unknown>,
         initDataFallback: body.initData,
       });
-      const deliveryLocation = getAllowedDeliveryLocation(
-        body.citySlug,
-        body.deliveryLocation,
-      );
+      const deliveryLocation = await resolveOrderDeliveryLocation({
+        citySlug: body.citySlug,
+        deliveryMethod: body.deliveryMethod,
+        address: body.address,
+        submittedLocation: body.deliveryLocation,
+      });
 
       const result = await applyOrderEdit({
         orderId,
@@ -1431,28 +1475,12 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           : useDevBypass
             ? { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" }
             : { id: 0, username: null };
-      let deliveryLocation = getAllowedDeliveryLocation(
-        body.citySlug,
-        body.deliveryLocation,
-      );
-      if (
-        body.citySlug === "blg" &&
-        isDeliveryAddressMethod(body.deliveryMethod) &&
-        body.address
-      ) {
-        try {
-          deliveryLocation = await calculateBlgDeliveryLocationFromAddress(body.address);
-        } catch (deliveryLocationError) {
-          // Checkout remains available if Yandex is temporarily unavailable.
-          // Do not fall back to a browser-provided point: it could be stale or
-          // belong to another settlement. Use the normal base tariff instead.
-          deliveryLocation = null;
-          request.log.warn(
-            { err: deliveryLocationError, address: body.address },
-            "Failed to recalculate Blagoveshchensk delivery distance",
-          );
-        }
-      }
+      const deliveryLocation = await resolveOrderDeliveryLocation({
+        citySlug: body.citySlug,
+        deliveryMethod: body.deliveryMethod,
+        address: body.address,
+        submittedLocation: body.deliveryLocation,
+      });
 
       if (verified) {
         try {

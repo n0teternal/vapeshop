@@ -1,7 +1,7 @@
 create table if not exists public.delivery_pricing_settings (
   city_slug text primary key,
   base_fee_rub numeric not null default 150,
-  rules jsonb not null default '[]'::jsonb,
+  rules jsonb not null default '[{"minDistanceKm":3,"feeRub":200},{"minDistanceKm":5,"feeRub":250}]'::jsonb,
   peak_surcharge_rules jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -25,7 +25,7 @@ exception
 end $$;
 
 insert into public.delivery_pricing_settings (city_slug, base_fee_rub, rules)
-values ('blg', 150, '[]'::jsonb)
+values ('blg', 150, '[{"minDistanceKm":3,"feeRub":200},{"minDistanceKm":5,"feeRub":250}]'::jsonb)
 on conflict (city_slug) do nothing;
 
 revoke all on public.delivery_pricing_settings from anon, authenticated;

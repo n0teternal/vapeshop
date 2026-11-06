@@ -135,7 +135,11 @@ const DEFAULT_BLG_DELIVERY_PRICING: DeliveryPricingSettings = {
   citySlug: "blg",
   freeDeliveryThresholdRub: BLG_FREE_DELIVERY_THRESHOLD_RUB,
   baseFeeRub: BLG_DELIVERY_FEE_RUB,
-  rules: [],
+  // Must stay aligned with the backend fallback and the zones shown on the map.
+  rules: [
+    { minDistanceKm: 3, feeRub: 200 },
+    { minDistanceKm: 5, feeRub: 250 },
+  ],
   peakSurchargeRules: [],
 };
 const FREE_DELIVERY_RECOMMENDATION_LIMIT = 8;
@@ -1503,7 +1507,8 @@ export function CartPage() {
                   <div className="mt-1 text-xs text-muted-foreground">
                     {state.city === "blg" ? (
                       <>
-                        Скидка {formatPriceRub(BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB)} от{" "}
+                        По времени: выберите дату и слот ниже. Скидка{" "}
+                        {formatPriceRub(BLG_DELIVERY_THRESHOLD_DISCOUNT_RUB)} от{" "}
                         {formatPriceRub(deliveryPricing.freeDeliveryThresholdRub)}
                       </>
                     ) : (

@@ -122,6 +122,7 @@ Dashboard → **SQL Editor** → выполните:
 - `supabase/alter_staff_inventory.sql` (остатки сотрудников и движения продаж)
 - `supabase/alter_order_inventory_reservations.sql` (безопасное резервирование и возврат конечных остатков)
 - `supabase/alter_order_completion_inventory.sql` (завершение заказа с учётом уже зарезервированного остатка)
+- `supabase/alter_delivery_distance_pricing.sql` (исправляет границы тарифов доставки BLG: >3 км — 200 ₽, >5 км — 250 ₽)
 
 ## Ежедневная проверка лояльности
 
