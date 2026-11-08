@@ -727,6 +727,10 @@ export function CartPage() {
       0,
     );
   }, [state.cart]);
+  const cartItemCount = useMemo(
+    () => state.cart.reduce((sum, item) => sum + item.qty, 0),
+    [state.cart],
+  );
   const itemsTotal = isExpressDelivery ? expressItemsTotal : regularItemsTotal;
   const showDeliveryTypeOptions = state.city === "blg" && isAddressDeliveryMethod;
   const confirmedDeliveryMapSelection = useMemo(() => {
@@ -1420,7 +1424,7 @@ export function CartPage() {
 
   if (state.cart.length === 0) {
     return (
-      <Card className="overflow-hidden border-border/70 bg-card">
+      <Card className="overflow-hidden rounded-[1.35rem] border border-white/[0.08] bg-card/76 shadow-[0_16px_34px_-26px_rgba(3,10,24,0.92)]">
         <CardContent className="flex flex-col items-center py-10 text-center">
           <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
             <ShoppingBag className="h-8 w-8" />
@@ -1435,33 +1439,58 @@ export function CartPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Корзина</h2>
-        <Badge variant="secondary">{state.cart.length} позиций</Badge>
+        <h2 className="text-xl font-semibold tracking-[-0.03em]">Корзина</h2>
+        <Badge variant="secondary" className="rounded-full border border-white/[0.08] bg-card/70 px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+          {cartItemCount} шт.
+        </Badge>
       </div>
 
-      <div className="space-y-3">
+      <button
+        type="button"
+        className="sticky top-[4.75rem] z-20 flex w-full items-center justify-between rounded-2xl border border-primary/25 bg-card/92 px-4 py-3 text-left shadow-[0_14px_32px_rgba(0,0,0,0.24)] backdrop-blur-xl xl:hidden"
+        onClick={() => document.getElementById("checkout")?.scrollIntoView({ block: "start" })}
+      >
+        <span className="flex items-center gap-3">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/15 text-primary">
+            <ShoppingBag className="h-4 w-4" />
+          </span>
+          <span>
+            <span className="block text-sm font-semibold">К оформлению</span>
+            <span className="block text-xs text-muted-foreground">{cartItemCount} товаров в корзине</span>
+          </span>
+        </span>
+        <span className="text-base font-bold tracking-[-0.02em] text-primary">
+          {formatPriceRub(totalToPay)}
+        </span>
+      </button>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)] xl:items-start xl:gap-6">
+        <div className="space-y-3">
         {state.cart.map((item) => {
           const itemUnitPrice = getCartItemUnitPrice(item);
 
           return (
-            <Card key={item.productId} className="border-border/70 bg-card">
-              <CardContent className="p-4">
+            <Card
+              key={item.productId}
+              className="rounded-[1.25rem] border border-white/[0.08] bg-card/76 shadow-[0_10px_26px_rgba(0,0,0,0.16)]"
+            >
+              <CardContent className="p-3.5 sm:p-4">
                 <div className="flex items-start gap-3">
                   <ProductImagePreview
                     imageUrl={item.imageUrl}
                     alt={item.title}
                     loading="lazy"
                     targetWidth={160}
-                    className="h-20 w-20 shrink-0 rounded-lg object-cover"
-                    placeholderClassName="flex h-20 w-20 shrink-0 items-center justify-center rounded-lg bg-muted text-[10px] font-semibold uppercase text-muted-foreground"
+                    className="h-20 w-20 shrink-0 rounded-xl object-cover sm:h-24 sm:w-24"
+                    placeholderClassName="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl bg-muted text-[10px] font-semibold uppercase text-muted-foreground sm:h-24 sm:w-24"
                   />
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold">{item.title}</div>
+                        <div className="line-clamp-2 text-sm font-semibold leading-snug">{item.title}</div>
                         <div className="mt-1 text-xs text-muted-foreground">
                           {formatPriceRub(itemUnitPrice)} / шт
                         </div>
@@ -1470,7 +1499,7 @@ export function CartPage() {
                         type="button"
                         size="sm"
                         variant="ghost"
-                        className="text-destructive hover:text-destructive"
+                        className="h-8 rounded-lg px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
                         onClick={() =>
                           dispatch({ type: "cart/remove", productId: item.productId })
                         }
@@ -1485,7 +1514,7 @@ export function CartPage() {
                           type="button"
                           size="icon"
                           variant="outline"
-                          className="h-8 w-8"
+                          className="h-8 w-8 rounded-lg border-white/[0.1] bg-background/50"
                           disabled={submitting}
                           onClick={() =>
                             dispatch({ type: "cart/dec", productId: item.productId })
@@ -1500,7 +1529,7 @@ export function CartPage() {
                           type="button"
                           size="icon"
                           variant="outline"
-                          className="h-8 w-8"
+                          className="h-8 w-8 rounded-lg border-white/[0.1] bg-background/50"
                           disabled={
                             submitting ||
                             item.stockQty === undefined ||
@@ -1513,7 +1542,7 @@ export function CartPage() {
                           <Plus className="h-3.5 w-3.5" />
                         </Button>
                       </div>
-                      <div className="text-sm font-semibold">
+                      <div className="text-base font-bold tracking-[-0.02em]">
                         {formatPriceRub(itemUnitPrice * item.qty)}
                       </div>
                     </div>
@@ -1530,11 +1559,11 @@ export function CartPage() {
               type="button"
               disabled={submitting || isAdminOrderEditSession}
               aria-pressed={!isExpressDelivery}
-              className={`w-full rounded-lg border p-4 text-left transition-colors ${
+              className={`w-full rounded-[1.15rem] border p-4 text-left transition-colors ${
                 !isExpressDelivery
-                  ? "border-sky-300/70 bg-sky-400/10"
-                  : "border-border/70 bg-card"
-              } ${submitting || isAdminOrderEditSession ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
+                  ? "border-primary/45 bg-primary/[0.09]"
+                  : "border-white/[0.08] bg-card/64"
+              } ${submitting || isAdminOrderEditSession ? "cursor-not-allowed opacity-60" : "hover:border-primary/45"}`}
               onClick={() => selectDeliveryMethod("delivery")}
             >
               <div className="flex items-center justify-between gap-3">
@@ -1568,11 +1597,11 @@ export function CartPage() {
                 type="button"
                 disabled={submitting || isAdminOrderEditSession}
                 aria-pressed={isExpressDelivery}
-                className={`w-full rounded-lg border p-4 text-left transition-colors ${
+                className={`w-full rounded-[1.15rem] border p-4 text-left transition-colors ${
                   isExpressDelivery
-                    ? "border-sky-300/70 bg-sky-400/10"
-                    : "border-border/70 bg-card"
-                } ${submitting || isAdminOrderEditSession ? "cursor-not-allowed opacity-60" : "hover:border-sky-300/70"}`}
+                    ? "border-primary/45 bg-primary/[0.09]"
+                    : "border-white/[0.08] bg-card/64"
+                } ${submitting || isAdminOrderEditSession ? "cursor-not-allowed opacity-60" : "hover:border-primary/45"}`}
                 onClick={() => selectDeliveryMethod("express")}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -1592,7 +1621,7 @@ export function CartPage() {
         ) : null}
 
         {promotionDiscountAmount > 0 ? (
-          <Card className="border-emerald-300/40 bg-emerald-400/10">
+          <Card className="rounded-[1.15rem] border border-emerald-300/35 bg-emerald-400/[0.08]">
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -1612,7 +1641,7 @@ export function CartPage() {
         ) : null}
 
         {promoCodesAvailable && couponDiscountAmount > 0 && couponPreview ? (
-          <Card className="border-sky-300/40 bg-sky-400/10">
+          <Card className="rounded-[1.15rem] border border-primary/30 bg-primary/[0.08]">
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -1627,9 +1656,10 @@ export function CartPage() {
             </CardContent>
           </Card>
         ) : null}
-      </div>
+        </div>
 
-      <Card className="border-border/70 bg-card">
+        <aside className="xl:sticky xl:top-20">
+      <Card id="checkout" className="rounded-[1.35rem] border border-white/[0.09] bg-card/78 shadow-[0_18px_42px_rgba(0,0,0,0.2)] backdrop-blur-sm">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Оформление</CardTitle>
@@ -1989,6 +2019,8 @@ export function CartPage() {
           ) : null}
         </CardContent>
       </Card>
+        </aside>
+      </div>
 
       {shouldShowFreeDeliveryRecommendations &&
       (recommendationsLoading || freeDeliveryRecommendations.length > 0) ? (

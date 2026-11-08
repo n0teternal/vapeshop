@@ -59,7 +59,8 @@ export function Layout() {
       : null;
   const orderEditSession = state.orderEditSession;
   const isAdminOrderEditSession = orderEditSession?.source === "admin";
-  const isWideCatalog = location.pathname === "/" || location.pathname === "/promos";
+  const isWideWorkspace =
+    location.pathname === "/" || location.pathname === "/promos" || location.pathname === "/cart";
 
   useEffect(() => {
     if (!orderEditSession) return;
@@ -99,21 +100,26 @@ export function Layout() {
   }
 
   return (
-    <div className="relative min-h-screen text-foreground xl:pl-28">
+    <div className="relative min-h-[100dvh] overflow-x-clip text-foreground xl:pl-28 2xl:pl-32">
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-        <div className="absolute -top-[22vh] left-[-24vw] h-[64vh] w-[94vw] rounded-full bg-accent/38 blur-[92px]" />
-        <div className="absolute top-[16vh] left-[-18vw] h-[24vh] w-[140vw] bg-primary/12 blur-[84px]" />
-        <div className="absolute -top-[14vh] right-[-12vw] h-[48vh] w-[72vw] rounded-full bg-primary/20 blur-[96px]" />
+        <div className="absolute -top-[28vh] left-[-28vw] h-[62vh] w-[88vw] rounded-full bg-primary/10 blur-[110px]" />
+        <div className="absolute top-[18vh] right-[-26vw] h-[42vh] w-[76vw] rounded-full bg-accent/20 blur-[120px]" />
+        <div className="absolute inset-x-0 top-0 h-[30rem] bg-[linear-gradient(180deg,rgba(30,64,99,0.14),transparent)]" />
       </div>
 
       <div className="relative z-10">
-        <header className="sticky top-0 z-30 border-b border-border/70 bg-background/78 backdrop-blur-xl">
-          <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 lg:max-w-7xl lg:px-8">
-            <div>
+        <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-background/76 backdrop-blur-2xl">
+          <div className="mx-auto flex h-16 w-full max-w-md items-center justify-between px-4 lg:max-w-7xl lg:px-8">
+            <div className="flex items-center gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-xl border border-primary/25 bg-primary/10 text-xs font-bold tracking-[-0.08em] text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.09)]">
+                MM
+              </div>
+              <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground/80">
                 Telegram Mini App
               </div>
-              <div className="mt-1 text-lg font-semibold leading-none">Mini Market</div>
+                <div className="mt-0.5 text-lg font-semibold leading-none tracking-[-0.035em]">Mini Market</div>
+              </div>
             </div>
           </div>
         </header>
@@ -155,14 +161,14 @@ export function Layout() {
         <main
           className={cn(
             "mx-auto w-full px-4 pb-[8.6rem] pt-5 lg:px-8 xl:pb-8",
-            isWideCatalog ? "max-w-md lg:max-w-7xl" : "max-w-md lg:max-w-3xl",
+            isWideWorkspace ? "max-w-md lg:max-w-7xl" : "max-w-md lg:max-w-3xl",
           )}
         >
           <Outlet />
         </main>
 
-        <nav className="fixed inset-x-0 bottom-0 z-40 px-2 pb-1 [padding-bottom:calc(env(safe-area-inset-bottom,0px)+0.35rem)] xl:inset-y-0 xl:left-0 xl:right-auto xl:flex xl:w-28 xl:items-center xl:px-3 xl:py-5">
-          <div className="mx-auto w-full max-w-md rounded-[2rem] border border-border/70 bg-card/78 px-2 py-1 shadow-[0_-14px_45px_-24px_rgba(15,23,42,0.65)] backdrop-blur-xl xl:mx-0 xl:max-w-none xl:rounded-[1.75rem] xl:px-2 xl:py-2">
+        <nav className="fixed inset-x-0 bottom-0 z-40 px-2 pb-1 [padding-bottom:calc(env(safe-area-inset-bottom,0px)+0.35rem)] xl:inset-y-0 xl:left-0 xl:right-auto xl:flex xl:w-28 xl:items-center xl:px-3 xl:py-5 2xl:w-32 2xl:px-4">
+          <div className="mx-auto w-full max-w-md rounded-[1.7rem] border border-white/[0.08] bg-card/82 px-2 py-1.5 shadow-[0_-16px_42px_-24px_rgba(3,10,24,0.9)] backdrop-blur-2xl xl:mx-0 xl:max-w-none xl:rounded-[1.75rem] xl:px-2 xl:py-2 xl:shadow-[0_18px_44px_-26px_rgba(3,10,24,0.78)]">
             <div className="grid grid-cols-5 gap-1 xl:grid-cols-1 xl:gap-2">
               <TabLink
                 to="/"

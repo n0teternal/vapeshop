@@ -5,6 +5,9 @@ import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 const MIN_COMPLETED_ORDERS_FOR_PERSONALIZATION = 5;
 const PERSONAL_RANKING_WEIGHT = 0.6;
 const POPULARITY_RANKING_WEIGHT = 0.4;
+const NEW_PRODUCT_WINDOW_DAYS = 21;
+const NEW_PRODUCT_INSERTION_POSITIONS = [4, 11, 20] as const;
+const NEW_PRODUCT_CATEGORIES = new Set(["liquid", "disposable", "pod", "cartridge"]);
 
 export type ProductRecommendation = {
   productId: string;
@@ -27,6 +30,16 @@ type RankedCandidate = {
   productId: string;
   popularityQty: number;
   personalScore: number;
+  personalCategoryQty: number;
+};
+
+type ProductMetadata = {
+  categorySlug: string;
+  createdAt: string;
+};
+
+type NewProductCandidate = RankedCandidate & {
+  createdAt: number;
 };
 
 function nonNegativeInteger(value: unknown): number {
@@ -51,6 +64,89 @@ function getPersonalRecencyBoost(lastBoughtAt: string | null): number {
   return Math.max(0, 14 - Math.floor(ageInDays / 14));
 }
 
+function isNewProductCategory(categorySlug: string): boolean {
+  const normalized = categorySlug.trim().toLowerCase();
+  const canonicalCategory =
+    normalized === "liquids"
+      ? "liquid"
+      : normalized === "disposables"
+        ? "disposable"
+        : normalized === "pods"
+          ? "pod"
+          : normalized === "cartridges" || normalized === "coils"
+            ? "cartridge"
+            : normalized;
+
+  return NEW_PRODUCT_CATEGORIES.has(canonicalCategory);
+}
+
+function buildNewProductCandidates(params: {
+  candidates: RankedCandidate[];
+  productMetadataById: Map<string, ProductMetadata>;
+  personalized: boolean;
+}): NewProductCandidate[] {
+  const oldestAllowedProductAt = Date.now() - NEW_PRODUCT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+
+  return params.candidates
+    .flatMap<NewProductCandidate>((candidate) => {
+      // A product which has started selling already participates naturally in
+      // the popularity ranking. This small exploration layer is exclusively
+      // for genuinely new, still unproven products.
+      if (candidate.popularityQty > 0) return [];
+
+      const metadata = params.productMetadataById.get(candidate.productId);
+      if (!metadata || !isNewProductCategory(metadata.categorySlug)) return [];
+
+      const createdAt = Date.parse(metadata.createdAt);
+      if (!Number.isFinite(createdAt) || createdAt < oldestAllowedProductAt) return [];
+
+      return [{ ...candidate, createdAt }];
+    })
+    .sort(
+      (left, right) =>
+        // For established customers, a fresh item in a familiar category gets
+        // the first chance. Everyone else sees the newest arrivals first.
+        (params.personalized ? right.personalCategoryQty - left.personalCategoryQty : 0) ||
+        right.createdAt - left.createdAt ||
+        left.productId.localeCompare(right.productId),
+    )
+    .slice(0, NEW_PRODUCT_INSERTION_POSITIONS.length);
+}
+
+function insertNewProducts(
+  ranked: RankedCandidate[],
+  newProducts: NewProductCandidate[],
+): RankedCandidate[] {
+  if (newProducts.length === 0) return ranked;
+
+  const result: RankedCandidate[] = [];
+  let rankedIndex = 0;
+  let newProductIndex = 0;
+
+  while (rankedIndex < ranked.length || newProductIndex < newProducts.length) {
+    const nextNewProduct = newProducts[newProductIndex];
+    const insertionPosition = NEW_PRODUCT_INSERTION_POSITIONS[newProductIndex];
+    if (
+      nextNewProduct !== undefined &&
+      insertionPosition !== undefined &&
+      (result.length === insertionPosition || rankedIndex >= ranked.length)
+    ) {
+      result.push(nextNewProduct);
+      newProductIndex += 1;
+      continue;
+    }
+
+    const nextRankedProduct = ranked[rankedIndex];
+    if (nextRankedProduct !== undefined) {
+      result.push(nextRankedProduct);
+      rankedIndex += 1;
+      continue;
+    }
+  }
+
+  return result;
+}
+
 async function hasEnoughCompletedOrders(customerId: number): Promise<boolean> {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
@@ -71,8 +167,9 @@ async function hasEnoughCompletedOrders(customerId: number): Promise<boolean> {
  * Ranks the whole catalogue instead of injecting a small special shelf. Before
  * five successful orders, sales popularity drives the order. Afterwards each
  * product gets a blended score: 60% personal affinity and 40% store-wide
- * popularity. Products with no signal remain in their normal catalogue order
- * on the client, rather than being arbitrarily shuffled by a UUID tie-breaker.
+ * popularity. A few fresh, unsold products from core categories are tested in
+ * fixed feed slots; all other products with no signal remain in their normal
+ * catalogue order rather than being arbitrarily shuffled by a UUID tie-breaker.
  */
 export async function getProductRecommendations(params: {
   citySlug: CatalogCitySlug;
@@ -102,6 +199,26 @@ export async function getProductRecommendations(params: {
     }
   }
 
+  const productIds = Array.from(signalsByProductId.keys());
+  const productMetadataById = new Map<string, ProductMetadata>();
+  if (productIds.length > 0) {
+    const { data: productRows, error: productsError } = await supabase
+      .from("products")
+      .select("id,category_slug,created_at")
+      .in("id", productIds);
+
+    if (productsError) {
+      throw new HttpError(500, "DB", `Failed to load product freshness data: ${productsError.message}`);
+    }
+
+    for (const product of productRows ?? []) {
+      productMetadataById.set(product.id, {
+        categorySlug: product.category_slug,
+        createdAt: product.created_at,
+      });
+    }
+  }
+
   const candidates = Array.from(signalsByProductId.values()).map<RankedCandidate>((signal) => {
     const popularityQty = nonNegativeInteger(signal.popularity_qty);
     const personalProductQty = nonNegativeInteger(signal.personal_product_qty);
@@ -114,6 +231,7 @@ export async function getProductRecommendations(params: {
       // Exact re-purchases are strongest; category affinity brings relevant
       // alternatives into the set instead of showing only the same SKUs.
       personalScore: personalProductQty * 100 + personalCategoryQty * 5 + recencyBoost,
+      personalCategoryQty,
     };
   });
 
@@ -145,8 +263,14 @@ export async function getProductRecommendations(params: {
         left.productId.localeCompare(right.productId),
     );
 
+  const newProducts = buildNewProductCandidates({
+    candidates,
+    productMetadataById,
+    personalized,
+  });
+
   return {
-    items: ranked.map((candidate) => ({ productId: candidate.productId })),
+    items: insertNewProducts(ranked, newProducts).map((candidate) => ({ productId: candidate.productId })),
     personalized,
   };
 }
