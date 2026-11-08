@@ -14,12 +14,15 @@ export type TelegramWebAppLike = Pick<
   | "platform"
   | "version"
   | "colorScheme"
+  | "isFullscreen"
   | "onEvent"
   | "offEvent"
   | "setHeaderColor"
   | "setBackgroundColor"
   | "ready"
   | "expand"
+  | "isVersionAtLeast"
+  | "requestFullscreen"
   | "close"
   | "showAlert"
   | "showPopup"
@@ -59,16 +62,23 @@ function createMockWebApp(): TelegramWebAppLike {
     platform: "unknown",
     version: "dev",
     colorScheme: "dark",
+    isFullscreen: false,
     onEvent: () => undefined,
     offEvent: () => undefined,
     setHeaderColor: () => undefined,
     setBackgroundColor: () => undefined,
     ready: () => undefined,
     expand: () => undefined,
+    isVersionAtLeast: () => false,
+    requestFullscreen: () => undefined,
     close: () => undefined,
     showAlert: () => undefined,
     showPopup: () => undefined,
   };
+}
+
+function isDesktopTelegram(platform: TelegramWebAppLike["platform"]): boolean {
+  return platform === "tdesktop" || platform === "macos" || platform === "unigram";
 }
 
 function applyThemeToDocument(): void {
@@ -99,12 +109,68 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isTelegram) return;
+
+    let frameId: number | undefined;
+    let retryId: number | undefined;
+    let fullscreenRequested = false;
+
+    const expand = () => {
+      try {
+        webApp.expand();
+      } catch {
+        // ignore
+      }
+    };
+
+    const requestDesktopFullscreen = () => {
+      if (
+        fullscreenRequested ||
+        webApp.isFullscreen ||
+        !isDesktopTelegram(webApp.platform) ||
+        !webApp.isVersionAtLeast("8.0")
+      ) {
+        return;
+      }
+
+      try {
+        fullscreenRequested = true;
+        webApp.requestFullscreen();
+      } catch {
+        // An older Desktop client can expose the bridge without supporting
+        // fullscreen. It will still use its normal maximized Mini App view.
+      }
+    };
+
+    const syncViewport = () => {
+      expand();
+      requestDesktopFullscreen();
+    };
+
+    const onViewportChanged = ({ isStateStable }: { isStateStable: boolean }) => {
+      if (isStateStable) {
+        frameId = window.requestAnimationFrame(syncViewport);
+      }
+    };
+
     try {
       webApp.ready();
-      webApp.expand();
+      syncViewport();
+
+      // Telegram can report the initial viewport before Desktop finishes
+      // opening the Mini App window. Sync once more on the next frame and
+      // after its first layout pass.
+      frameId = window.requestAnimationFrame(syncViewport);
+      retryId = window.setTimeout(syncViewport, 250);
+      webApp.onEvent("viewportChanged", onViewportChanged);
     } catch {
       // ignore
     }
+
+    return () => {
+      if (frameId !== undefined) window.cancelAnimationFrame(frameId);
+      if (retryId !== undefined) window.clearTimeout(retryId);
+      webApp.offEvent("viewportChanged", onViewportChanged);
+    };
   }, [isTelegram, webApp]);
 
   useEffect(() => {
