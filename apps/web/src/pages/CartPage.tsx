@@ -1449,7 +1449,7 @@ export function CartPage() {
 
       <button
         type="button"
-        className="sticky top-[4.75rem] z-20 flex w-full items-center justify-between rounded-2xl border border-primary/25 bg-card/92 px-4 py-3 text-left shadow-[0_14px_32px_rgba(0,0,0,0.24)] backdrop-blur-xl xl:hidden"
+        className="sticky top-3 z-20 flex w-full items-center justify-between rounded-2xl border border-primary/25 bg-card/92 px-4 py-3 text-left shadow-[0_14px_32px_rgba(0,0,0,0.24)] backdrop-blur-xl xl:hidden"
         onClick={() => document.getElementById("checkout")?.scrollIntoView({ block: "start" })}
       >
         <span className="flex items-center gap-3">

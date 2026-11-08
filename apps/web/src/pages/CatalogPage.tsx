@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BadgePercent, Check } from "lucide-react";
+import { BadgePercent, Check, Heart } from "lucide-react";
 import { useCustomerAuth } from "../auth/CustomerAuthProvider";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { VVO_ENABLED } from "../config";
@@ -676,12 +676,14 @@ function ProductCard({
   imageLoading,
   onAdd,
   onToggleFavorite,
+  onImageUnavailable,
 }: {
   item: CatalogItem;
   isFavorite: boolean;
   imageLoading: "eager" | "lazy";
   onAdd: () => void;
   onToggleFavorite: () => void;
+  onImageUnavailable: () => void;
 }) {
   const previewImageSrc = useMemo(
     () => buildImageCandidates(item.imageUrl, { targetWidth: 1280 })[0] ?? null,
@@ -705,6 +707,7 @@ function ProductCard({
               targetWidth={360}
               className="h-full w-full object-cover transition-transform duration-300 md:group-hover:scale-[1.025]"
               placeholderClassName="flex h-full w-full items-center justify-center bg-muted text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              onImageUnavailable={onImageUnavailable}
             />
           </button>
         ) : (
@@ -715,6 +718,7 @@ function ProductCard({
             targetWidth={360}
             className="h-full w-full object-cover"
             placeholderClassName="flex h-full w-full items-center justify-center bg-muted text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+            onImageUnavailable={onImageUnavailable}
           />
         )}
 
@@ -730,18 +734,16 @@ function ProductCard({
           ].join(" ")}
           onClick={onToggleFavorite}
         >
-          <svg viewBox="0 0 24 24" className="block h-5 w-5" aria-hidden="true">
-            <path
-              d="M12 20.6c-.3 0-.6-.1-.8-.3l-1.3-1.1C6.1 16 4 14.1 4 11.5 4 9.3 5.7 7.6 7.9 7.6c1.3 0 2.5.6 3.3 1.5.8-.9 2-1.5 3.3-1.5 2.2 0 3.9 1.7 3.9 3.9 0 2.6-2.1 4.5-5.9 7.7l-1.3 1.1c-.2.2-.5.3-.8.3Z"
-              className={isFavorite ? "fill-white" : "fill-white/90"}
-            />
-          </svg>
+          <Heart
+            aria-hidden="true"
+            className="h-5 w-5 translate-y-px fill-current stroke-0"
+          />
         </button>
 
         <button
           type="button"
           aria-label="Add to cart"
-          className="absolute bottom-2.5 right-2.5 z-10 grid h-10 w-10 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_8px_18px_rgba(0,152,255,0.3)] transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
+          className="absolute bottom-2.5 right-2.5 z-10 grid h-10 w-10 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_0_18px_rgba(0,152,255,0.3)] transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           disabled={!item.inStock}
           onClick={onAdd}
         >
@@ -1001,6 +1003,9 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
   const [toast, setToast] = useState<CatalogToast | null>(null);
   const toastKeyRef = useRef(0);
   const [renderedCount, setRenderedCount] = useState(CATALOG_INITIAL_RENDER_COUNT);
+  const [imageUnavailableProductIds, setImageUnavailableProductIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const prefetchedImageUrlsRef = useRef<Set<string>>(new Set());
 
@@ -1026,6 +1031,14 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
   const catalogData = supabaseEnabled ? supabaseCatalog : mockItems;
   const items = catalogData.items;
   const promoItems = catalogData.promoItems;
+  const markProductImageUnavailable = (productId: string) => {
+    setImageUnavailableProductIds((previous) => {
+      if (previous.has(productId)) return previous;
+      const next = new Set(previous);
+      next.add(productId);
+      return next;
+    });
+  };
   const recommendationQuery = useQuery({
     queryKey: ["recommendations", state.city, websiteUser?.id ?? "anonymous"] as const,
     queryFn: ({ queryKey }) => {
@@ -1176,6 +1189,22 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
     sortMode === "none";
 
   const visibleItems = useMemo(() => {
+    const placeUnavailableImagesLast = (candidateItems: CatalogItem[]): CatalogItem[] => {
+      const visibleImageItems: CatalogItem[] = [];
+      const unavailableImageItems: CatalogItem[] = [];
+
+      for (const item of candidateItems) {
+        const hasImageCandidate = buildImageCandidates(item.imageUrl, { targetWidth: 360 }).length > 0;
+        if (hasImageCandidate && !imageUnavailableProductIds.has(item.id)) {
+          visibleImageItems.push(item);
+        } else {
+          unavailableImageItems.push(item);
+        }
+      }
+
+      return [...visibleImageItems, ...unavailableImageItems];
+    };
+
     const preFilteredRows = catalogRows.filter((row) => {
       if (selectedCategoryId && row.categoryId !== selectedCategoryId) {
         return false;
@@ -1200,58 +1229,68 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
         : preFilteredRows.map((row) => ({ item: row.item, score: 0 }));
 
     if (sortMode === "price_asc") {
-      return [...scoredItems]
-        .sort(
+      return placeUnavailableImagesLast(
+        [...scoredItems]
+          .sort(
           (a, b) =>
             a.item.price - b.item.price ||
             b.score - a.score ||
             a.item.title.localeCompare(b.item.title, "ru"),
-        )
-        .map((entry) => entry.item);
+          )
+          .map((entry) => entry.item),
+      );
     }
 
     if (sortMode === "price_desc") {
-      return [...scoredItems]
-        .sort(
+      return placeUnavailableImagesLast(
+        [...scoredItems]
+          .sort(
           (a, b) =>
             b.item.price - a.item.price ||
             b.score - a.score ||
             a.item.title.localeCompare(b.item.title, "ru"),
-        )
-        .map((entry) => entry.item);
+          )
+          .map((entry) => entry.item),
+      );
     }
 
     if (sortMode === "title_asc") {
-      return [...scoredItems]
-        .sort(
+      return placeUnavailableImagesLast(
+        [...scoredItems]
+          .sort(
           (a, b) =>
             a.item.title.localeCompare(b.item.title, "ru") ||
             b.score - a.score ||
             a.item.price - b.item.price,
-        )
-        .map((entry) => entry.item);
+          )
+          .map((entry) => entry.item),
+      );
     }
 
     if (sortMode === "title_desc") {
-      return [...scoredItems]
-        .sort(
+      return placeUnavailableImagesLast(
+        [...scoredItems]
+          .sort(
           (a, b) =>
             b.item.title.localeCompare(a.item.title, "ru") ||
             b.score - a.score ||
             a.item.price - b.item.price,
-        )
-        .map((entry) => entry.item);
+          )
+          .map((entry) => entry.item),
+      );
     }
 
     if (searchQueryVariants.length > 0) {
-      return [...scoredItems]
-        .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title, "ru"))
-        .map((entry) => entry.item);
+      return placeUnavailableImagesLast(
+        [...scoredItems]
+          .sort((a, b) => b.score - a.score || a.item.title.localeCompare(b.item.title, "ru"))
+          .map((entry) => entry.item),
+      );
     }
 
     const defaultItems = scoredItems.map((entry) => entry.item);
     if (!shouldPrioritizeRecommendations || !resolvedRecommendations?.length) {
-      return defaultItems;
+      return placeUnavailableImagesLast(defaultItems);
     }
 
     // Recommendations live in the ordinary product feed: no separate shelf
@@ -1264,9 +1303,13 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
       return catalogItem ? [catalogItem] : [];
     });
 
-    return [...prioritizedItems, ...defaultItems.filter((item) => !recommendedIds.has(item.id))];
+    return placeUnavailableImagesLast([
+      ...prioritizedItems,
+      ...defaultItems.filter((item) => !recommendedIds.has(item.id)),
+    ]);
   }, [
     catalogRows,
+    imageUnavailableProductIds,
     resolvedRecommendations,
     searchQueryVariants,
     selectedCategoryId,
@@ -1632,7 +1675,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
           <div className="flex items-center justify-between px-0.5">
             <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">Каталог</div>
             <div className="rounded-full border border-white/[0.08] bg-card/55 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
-              {visibleItems.length} в наличии
+              {visibleItems.length * 2} позиций в каталоге
             </div>
           </div>
 
@@ -1643,6 +1686,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                 item={item}
                 isFavorite={favoriteIds.has(item.id)}
                 imageLoading={index < 2 ? "eager" : "lazy"}
+                onImageUnavailable={() => markProductImageUnavailable(item.id)}
                 onAdd={() => {
                   dispatch({
                     type: "cart/add",

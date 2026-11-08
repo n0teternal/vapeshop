@@ -9,6 +9,7 @@ type ProductImagePreviewProps = {
   placeholderLabel?: string;
   loading?: "eager" | "lazy";
   targetWidth?: number;
+  onImageUnavailable?: () => void;
 };
 
 export function ProductImagePreview({
@@ -19,6 +20,7 @@ export function ProductImagePreview({
   placeholderLabel = "Photo",
   loading = "lazy",
   targetWidth,
+  onImageUnavailable,
 }: ProductImagePreviewProps) {
   const imageCandidates = useMemo(
     () => buildImageCandidates(imageUrl, { targetWidth }),
@@ -50,10 +52,12 @@ export function ProductImagePreview({
       referrerPolicy="no-referrer"
       className={className}
       onError={() => {
-        setImageIndex((prev) => {
-          if (prev >= imageCandidates.length - 1) return prev;
-          return prev + 1;
-        });
+        if (imageIndex >= imageCandidates.length - 1) {
+          setImageIndex(imageCandidates.length);
+          onImageUnavailable?.();
+          return;
+        }
+        setImageIndex((prev) => prev + 1);
       }}
     />
   );

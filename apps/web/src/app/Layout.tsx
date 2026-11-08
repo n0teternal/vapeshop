@@ -108,24 +108,8 @@ export function Layout() {
       </div>
 
       <div className="relative z-10">
-        <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-background/76 backdrop-blur-2xl">
-          <div className="mx-auto flex h-16 w-full max-w-md items-center justify-between px-4 lg:max-w-7xl lg:px-8">
-            <div className="flex items-center gap-3">
-              <div className="grid h-9 w-9 place-items-center rounded-xl border border-primary/25 bg-primary/10 text-xs font-bold tracking-[-0.08em] text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.09)]">
-                MM
-              </div>
-              <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground/80">
-                Telegram Mini App
-              </div>
-                <div className="mt-0.5 text-lg font-semibold leading-none tracking-[-0.035em]">Mini Market</div>
-              </div>
-            </div>
-          </div>
-        </header>
-
         {orderEditSession ? (
-          <div className="sticky top-[69px] z-20 border-b border-amber-500/25 bg-amber-500/10 backdrop-blur-xl">
+          <div className="sticky top-0 z-20 border-b border-amber-500/25 bg-amber-500/10 backdrop-blur-xl">
             <div className="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 py-3 lg:max-w-7xl lg:px-8">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-white">
