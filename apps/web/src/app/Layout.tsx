@@ -101,6 +101,9 @@ export function Layout() {
 
   return (
     <div className="relative min-h-[100dvh] overflow-x-clip text-foreground xl:pl-28 2xl:pl-32">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-0 h-[54rem] overflow-hidden">
+        <div className="app-background-pattern absolute inset-0" />
+      </div>
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute -top-[28vh] left-[-28vw] h-[62vh] w-[88vw] rounded-full bg-primary/10 blur-[110px]" />
         <div className="absolute top-[18vh] right-[-26vw] h-[42vh] w-[76vw] rounded-full bg-accent/20 blur-[120px]" />

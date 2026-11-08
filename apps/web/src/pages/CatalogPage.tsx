@@ -691,7 +691,7 @@ function ProductCard({
   );
 
   return (
-    <article className="group flex h-full flex-col overflow-hidden rounded-[1.35rem] border border-white/[0.08] bg-card/76 shadow-[0_16px_34px_-26px_rgba(3,10,24,0.92)] transition-[border-color,transform,box-shadow] duration-200 hover:border-primary/30 hover:shadow-[0_22px_42px_-26px_rgba(3,10,24,0.94)] md:hover:-translate-y-0.5">
+    <article className="group flex h-full flex-col overflow-hidden rounded-[1.35rem] border border-white/[0.1] bg-card/90 shadow-[0_16px_34px_-26px_rgba(3,10,24,0.92)] backdrop-blur-xl transition-[border-color,transform,box-shadow] duration-200 hover:border-primary/30 hover:shadow-[0_22px_42px_-26px_rgba(3,10,24,0.94)] md:hover:-translate-y-0.5">
       <div className="relative aspect-[4/5] overflow-hidden bg-muted/45">
         {previewImageSrc ? (
           <button
@@ -783,7 +783,7 @@ function PromoProductsBanner({
   if (items.length === 0) return null;
 
   return (
-    <section className="rounded-2xl border border-primary/30 bg-[linear-gradient(135deg,hsl(var(--primary)/0.14),hsl(var(--accent)/0.2))] px-3 py-3 shadow-sm">
+    <section className="rounded-2xl border border-primary/30 bg-[linear-gradient(135deg,hsl(var(--primary)/0.18),hsl(var(--accent)/0.25))] px-3 py-3 shadow-sm backdrop-blur-xl">
       <div className="mb-3 flex items-center justify-between gap-3 px-1">
         <div className="flex items-center gap-2">
           <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary text-primary-foreground">
@@ -795,11 +795,11 @@ function PromoProductsBanner({
         </div>
       </div>
 
-      <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
+      <div className="promo-products-scroll -mx-1 flex gap-3 overflow-x-auto px-1 pb-1">
         {items.map((item) => (
           <article
             key={item.id}
-            className="w-[210px] shrink-0 overflow-hidden rounded-xl border border-border/70 bg-background/80"
+            className="w-[210px] shrink-0 overflow-hidden rounded-xl border border-border/70 bg-background/90 backdrop-blur-xl"
           >
             <div className="flex gap-3 p-2.5">
               <ProductImagePreview
@@ -879,7 +879,7 @@ function MainCategoryRoll({
           className={[
             "h-10 shrink-0 rounded-xl border px-4 text-sm font-semibold transition-colors",
             selectedCategoryId === null
-              ? "border-primary bg-primary text-primary-foreground shadow-[0_7px_16px_rgba(0,152,255,0.2)]"
+              ? "border-primary bg-primary text-primary-foreground"
               : "border-white/[0.08] bg-background/40 text-foreground/85 hover:bg-muted/55",
           ].join(" ")}
           onClick={() => onSelectCategory(null)}
@@ -897,7 +897,7 @@ function MainCategoryRoll({
               className={[
                 "h-10 shrink-0 rounded-xl border px-4 text-sm font-semibold transition-colors",
                 active
-                  ? "border-primary bg-primary text-primary-foreground shadow-[0_7px_16px_rgba(0,152,255,0.2)]"
+                  ? "border-primary bg-primary text-primary-foreground"
                   : "border-white/[0.08] bg-background/40 text-foreground/85 hover:bg-muted/55",
               ].join(" ")}
               onClick={() => onSelectCategory(category.id as CatalogFilterCategoryId)}
@@ -1452,7 +1452,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
 
   return (
     <div className="space-y-5">
-      <section className="flex items-start justify-between gap-3 rounded-[1.45rem] border border-white/[0.08] bg-card/62 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(3,10,24,0.9)] backdrop-blur-sm md:px-5">
+      <section className="flex items-start justify-between gap-3 rounded-[1.45rem] border border-white/[0.1] bg-card/78 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(3,10,24,0.9)] backdrop-blur-xl md:px-5">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/75">
             Город
@@ -1472,7 +1472,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
         </button>
       </section>
 
-      <section className="space-y-2.5 rounded-[1.45rem] border border-white/[0.07] bg-card/52 p-2.5 shadow-[0_14px_30px_-28px_rgba(3,10,24,0.78)] backdrop-blur-sm md:p-3">
+      <section className="space-y-2.5 rounded-[1.45rem] border border-white/[0.09] bg-card/74 p-2.5 shadow-[0_14px_30px_-28px_rgba(3,10,24,0.78)] backdrop-blur-xl md:p-3">
         <div className="flex items-center gap-2">
           <div className="min-w-0 flex flex-1 items-center gap-2">
               <button
@@ -1481,7 +1481,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                   "inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3.5 text-xs font-semibold transition-colors",
                   sortMode === "none"
                     ? "border-white/[0.08] bg-background/45 text-foreground/85 hover:bg-muted/55"
-                    : "border-primary bg-primary text-primary-foreground shadow-[0_7px_16px_rgba(0,152,255,0.2)]",
+                    : "border-primary bg-primary text-primary-foreground accent-chip-active",
                 ].join(" ")}
                 onClick={() => setSortOpen(true)}
               >
@@ -1503,7 +1503,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                   "inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3.5 text-xs font-semibold transition-colors",
                   activeFilterCount === 0
                     ? "border-white/[0.08] bg-background/45 text-foreground hover:bg-muted/55"
-                    : "border-primary bg-primary text-primary-foreground shadow-[0_7px_16px_rgba(0,152,255,0.2)]",
+                    : "border-primary bg-primary text-primary-foreground accent-chip-active",
                 ].join(" ")}
                 onClick={() => setFiltersOpen(true)}
               >
@@ -1530,7 +1530,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
             className={[
               "grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition-colors",
               searchOpen
-                ? "border-primary bg-primary text-primary-foreground shadow-[0_7px_16px_rgba(0,152,255,0.2)]"
+                ? "border-primary bg-primary text-primary-foreground accent-chip-active"
                 : "border-white/[0.08] bg-background/45 text-foreground/80 hover:bg-muted/55",
             ].join(" ")}
             onClick={() =>
@@ -1672,13 +1672,6 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
         </div>
       ) : (
         <>
-          <div className="flex items-center justify-between px-0.5">
-            <div className="text-sm font-semibold tracking-[-0.02em] text-foreground">Каталог</div>
-            <div className="rounded-full border border-white/[0.08] bg-card/55 px-2.5 py-1 text-[11px] font-semibold text-muted-foreground">
-              {visibleItems.length * 2} позиций в каталоге
-            </div>
-          </div>
-
           <div className="grid grid-cols-2 auto-rows-fr gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-4 xl:gap-5 2xl:grid-cols-5">
             {renderedItems.map((item, index) => (
               <ProductCard

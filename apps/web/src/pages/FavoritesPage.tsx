@@ -19,7 +19,7 @@ export function FavoritesPage() {
 
   if (state.favorites.length === 0) {
     return (
-      <Card className="overflow-hidden rounded-[1.35rem] border border-white/[0.1] bg-transparent shadow-[0_16px_34px_-26px_rgba(3,10,24,0.72)]">
+      <Card className="overflow-hidden rounded-[1.35rem] border border-white/[0.1] bg-card/72 shadow-[0_16px_34px_-26px_rgba(3,10,24,0.72)]">
         <CardContent className="flex flex-col items-center py-10 text-center">
           <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
             <Heart className="h-8 w-8" />

@@ -1424,7 +1424,7 @@ export function CartPage() {
 
   if (state.cart.length === 0) {
     return (
-      <Card className="overflow-hidden rounded-[1.35rem] border border-white/[0.08] bg-card/76 shadow-[0_16px_34px_-26px_rgba(3,10,24,0.92)]">
+      <Card className="overflow-hidden rounded-[1.35rem] border border-white/[0.1] bg-card/88 shadow-[0_16px_34px_-26px_rgba(3,10,24,0.92)]">
         <CardContent className="flex flex-col items-center py-10 text-center">
           <div className="mb-3 grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
             <ShoppingBag className="h-8 w-8" />
@@ -1442,7 +1442,7 @@ export function CartPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold tracking-[-0.03em]">Корзина</h2>
-        <Badge variant="secondary" className="rounded-full border border-white/[0.08] bg-card/70 px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+        <Badge variant="secondary" className="rounded-full border border-white/[0.1] bg-card/82 px-2.5 py-1 text-xs font-semibold text-muted-foreground backdrop-blur-xl">
           {cartItemCount} шт.
         </Badge>
       </div>
@@ -1474,7 +1474,7 @@ export function CartPage() {
           return (
             <Card
               key={item.productId}
-              className="rounded-[1.25rem] border border-white/[0.08] bg-card/76 shadow-[0_10px_26px_rgba(0,0,0,0.16)]"
+              className="rounded-[1.25rem] border border-white/[0.1] bg-card/88 shadow-[0_10px_26px_rgba(0,0,0,0.16)]"
             >
               <CardContent className="p-3.5 sm:p-4">
                 <div className="flex items-start gap-3">
@@ -1561,8 +1561,8 @@ export function CartPage() {
               aria-pressed={!isExpressDelivery}
               className={`w-full rounded-[1.15rem] border p-4 text-left transition-colors ${
                 !isExpressDelivery
-                  ? "border-primary/45 bg-primary/[0.09]"
-                  : "border-white/[0.08] bg-card/64"
+                  ? "border-primary/45 bg-primary/[0.12] backdrop-blur-xl"
+                  : "border-white/[0.1] bg-card/76 backdrop-blur-xl"
               } ${submitting || isAdminOrderEditSession ? "cursor-not-allowed opacity-60" : "hover:border-primary/45"}`}
               onClick={() => selectDeliveryMethod("delivery")}
             >
@@ -1599,8 +1599,8 @@ export function CartPage() {
                 aria-pressed={isExpressDelivery}
                 className={`w-full rounded-[1.15rem] border p-4 text-left transition-colors ${
                   isExpressDelivery
-                    ? "border-primary/45 bg-primary/[0.09]"
-                    : "border-white/[0.08] bg-card/64"
+                    ? "border-primary/45 bg-primary/[0.12] backdrop-blur-xl"
+                    : "border-white/[0.1] bg-card/76 backdrop-blur-xl"
                 } ${submitting || isAdminOrderEditSession ? "cursor-not-allowed opacity-60" : "hover:border-primary/45"}`}
                 onClick={() => selectDeliveryMethod("express")}
               >
@@ -1659,7 +1659,7 @@ export function CartPage() {
         </div>
 
         <aside className="xl:sticky xl:top-20">
-      <Card id="checkout" className="rounded-[1.35rem] border border-white/[0.09] bg-card/78 shadow-[0_18px_42px_rgba(0,0,0,0.2)] backdrop-blur-sm">
+      <Card id="checkout" className="rounded-[1.35rem] border border-white/[0.1] bg-card/88 shadow-[0_18px_42px_rgba(0,0,0,0.2)]">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Оформление</CardTitle>
@@ -2047,7 +2047,7 @@ export function CartPage() {
                   return (
                     <div
                       key={item.id}
-                      className="flex w-36 shrink-0 flex-col rounded-xl border border-border/70 bg-background/55 p-2"
+                      className="flex w-36 shrink-0 flex-col rounded-xl border border-border/70 bg-background/78 p-2 backdrop-blur-xl"
                     >
                       <ProductImagePreview
                         imageUrl={item.imageUrl}

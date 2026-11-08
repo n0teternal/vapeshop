@@ -167,6 +167,47 @@ textarea {
   will-change: transform, opacity;
 }
 
+.app-background-pattern {
+  background-image: url("data:image/svg+xml,%3Csvg width='1600' height='1000' viewBox='0 0 1600 1000' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cg stroke='%234a82b2' stroke-opacity='.12' stroke-width='2'%3E%3Cpath d='M-130 82C88 154 243-54 456 69C639 175 662 349 878 323C1096 297 1132-63 1371 22C1523 76 1596 204 1739 139'/%3E%3Cpath d='M-97 268C88 344 232 154 427 264C624 375 644 516 853 475C1075 432 1137 116 1355 183C1495 226 1586 340 1727 302'/%3E%3Cpath d='M-146 470C49 514 182 368 353 443C548 529 584 699 790 665C1004 631 1085 386 1260 433C1430 479 1538 640 1746 536'/%3E%3Cpath d='M-85 709C123 762 227 606 430 698C630 788 695 925 907 855C1074 800 1153 622 1335 676C1481 720 1575 832 1708 777'/%3E%3Cpath d='M176 -75C267 96 146 208 230 365C311 518 174 679 287 864C330 935 414 1004 480 1070'/%3E%3Cpath d='M1078 -86C963 91 1069 208 978 378C900 523 1012 674 919 862C880 940 810 1019 758 1081'/%3E%3Cpath d='M1442 -51C1342 77 1459 217 1362 382C1286 511 1406 666 1312 832C1264 916 1204 990 1150 1058'/%3E%3C/g%3E%3C/svg%3E");
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: max(100rem, 100vw) auto;
+  filter: blur(0.8px);
+  transform: scale(1.012);
+  mask-image: linear-gradient(to bottom, black 0%, rgb(0 0 0 / 0.58) 45%, transparent 82%);
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, rgb(0 0 0 / 0.58) 45%, transparent 82%);
+}
+
+.accent-chip-active {
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.1),
+    0 0 0.95rem rgb(0 152 255 / 0.24);
+}
+
+.promo-products-scroll {
+  scrollbar-color: hsl(var(--primary) / 0.82) rgb(7 20 35 / 0.76);
+  scrollbar-width: thin;
+}
+
+.promo-products-scroll::-webkit-scrollbar {
+  height: 0.6rem;
+}
+
+.promo-products-scroll::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgb(7 20 35 / 0.76);
+}
+
+.promo-products-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid rgb(7 20 35 / 0.76);
+  border-radius: 999px;
+  background: linear-gradient(90deg, hsl(var(--primary) / 0.76), hsl(var(--primary) / 0.96));
+}
+
+.promo-products-scroll::-webkit-scrollbar-button {
+  width: 0;
+}
+
 .empty-heart-stage {
   position: relative;
   margin: 0 auto 0.75rem;
