@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { BadgePercent, Heart, Home, ShoppingBag, UserRound } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { apiDelete } from "../api/client";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
@@ -25,7 +25,7 @@ function TabLink({ to, label, badge, end, icon, photoUrl }: TabLinkProps) {
       {({ isActive }) => (
         <span
           className={cn(
-            "flex min-h-[58px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-[10px] font-semibold leading-tight transition-colors sm:px-2 sm:text-[11px]",
+            "flex min-h-[58px] min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-[10px] font-semibold leading-tight transition-colors sm:px-2 sm:text-[11px] xl:min-h-[68px] xl:gap-1 xl:rounded-xl xl:px-1 xl:text-[11px]",
             isActive
               ? "bg-primary/12 text-primary"
               : "text-muted-foreground hover:bg-accent/55 hover:text-foreground",
@@ -47,6 +47,7 @@ function TabLink({ to, label, badge, end, icon, photoUrl }: TabLinkProps) {
 }
 
 export function Layout() {
+  const location = useLocation();
   const { webApp } = useTelegram();
   const { state, dispatch, cartCount, favoritesCount } = useAppState();
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -58,6 +59,7 @@ export function Layout() {
       : null;
   const orderEditSession = state.orderEditSession;
   const isAdminOrderEditSession = orderEditSession?.source === "admin";
+  const isWideCatalog = location.pathname === "/" || location.pathname === "/promos";
 
   useEffect(() => {
     if (!orderEditSession) return;
@@ -97,7 +99,7 @@ export function Layout() {
   }
 
   return (
-    <div className="relative min-h-screen text-foreground">
+    <div className="relative min-h-screen text-foreground xl:pl-28">
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute -top-[22vh] left-[-24vw] h-[64vh] w-[94vw] rounded-full bg-accent/38 blur-[92px]" />
         <div className="absolute top-[16vh] left-[-18vw] h-[24vh] w-[140vw] bg-primary/12 blur-[84px]" />
@@ -106,7 +108,7 @@ export function Layout() {
 
       <div className="relative z-10">
         <header className="sticky top-0 z-30 border-b border-border/70 bg-background/78 backdrop-blur-xl">
-          <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3">
+          <div className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-3 lg:max-w-7xl lg:px-8">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground/80">
                 Telegram Mini App
@@ -118,7 +120,7 @@ export function Layout() {
 
         {orderEditSession ? (
           <div className="sticky top-[69px] z-20 border-b border-amber-500/25 bg-amber-500/10 backdrop-blur-xl">
-            <div className="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 py-3">
+            <div className="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 py-3 lg:max-w-7xl lg:px-8">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-white">
                   {isAdminOrderEditSession
@@ -150,13 +152,18 @@ export function Layout() {
           </div>
         ) : null}
 
-        <main className="mx-auto w-full max-w-md px-4 pb-[8.6rem] pt-5">
+        <main
+          className={cn(
+            "mx-auto w-full px-4 pb-[8.6rem] pt-5 lg:px-8 xl:pb-8",
+            isWideCatalog ? "max-w-md lg:max-w-7xl" : "max-w-md lg:max-w-3xl",
+          )}
+        >
           <Outlet />
         </main>
 
-        <nav className="fixed inset-x-0 bottom-0 z-40 px-2 pb-1 [padding-bottom:calc(env(safe-area-inset-bottom,0px)+0.35rem)]">
-          <div className="mx-auto w-full max-w-md rounded-[2rem] border border-border/70 bg-card/78 px-2 py-1 shadow-[0_-14px_45px_-24px_rgba(15,23,42,0.65)] backdrop-blur-xl">
-            <div className="grid grid-cols-5 gap-1">
+        <nav className="fixed inset-x-0 bottom-0 z-40 px-2 pb-1 [padding-bottom:calc(env(safe-area-inset-bottom,0px)+0.35rem)] xl:inset-y-0 xl:left-0 xl:right-auto xl:flex xl:w-28 xl:items-center xl:px-3 xl:py-5">
+          <div className="mx-auto w-full max-w-md rounded-[2rem] border border-border/70 bg-card/78 px-2 py-1 shadow-[0_-14px_45px_-24px_rgba(15,23,42,0.65)] backdrop-blur-xl xl:mx-0 xl:max-w-none xl:rounded-[1.75rem] xl:px-2 xl:py-2">
+            <div className="grid grid-cols-5 gap-1 xl:grid-cols-1 xl:gap-2">
               <TabLink
                 to="/"
                 end

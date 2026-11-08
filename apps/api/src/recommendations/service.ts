@@ -3,14 +3,11 @@ import { HttpError } from "../httpError.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 
 const MIN_COMPLETED_ORDERS_FOR_PERSONALIZATION = 5;
-const RECOMMENDATION_LIMIT = 5;
-const PERSONAL_RECOMMENDATION_SHARE = 0.6;
-
-export type RecommendationSource = "personal" | "popular";
+const PERSONAL_RANKING_WEIGHT = 0.6;
+const POPULARITY_RANKING_WEIGHT = 0.4;
 
 export type ProductRecommendation = {
   productId: string;
-  source: RecommendationSource;
 };
 
 export type ProductRecommendations = {
@@ -54,37 +51,6 @@ function getPersonalRecencyBoost(lastBoughtAt: string | null): number {
   return Math.max(0, 14 - Math.floor(ageInDays / 14));
 }
 
-function interleaveCandidates(params: {
-  personal: RankedCandidate[];
-  popular: RankedCandidate[];
-}): ProductRecommendation[] {
-  const result: ProductRecommendation[] = [];
-  let personalIndex = 0;
-  let popularIndex = 0;
-
-  while (personalIndex < params.personal.length || popularIndex < params.popular.length) {
-    const hasPersonal = personalIndex < params.personal.length;
-    const hasPopular = popularIndex < params.popular.length;
-    const shouldUsePersonal =
-      hasPersonal &&
-      (!hasPopular ||
-        personalIndex / params.personal.length <= popularIndex / params.popular.length);
-
-    if (shouldUsePersonal) {
-      const candidate = params.personal[personalIndex];
-      personalIndex += 1;
-      if (candidate) result.push({ productId: candidate.productId, source: "personal" });
-      continue;
-    }
-
-    const candidate = params.popular[popularIndex];
-    popularIndex += 1;
-    if (candidate) result.push({ productId: candidate.productId, source: "popular" });
-  }
-
-  return result;
-}
-
 async function hasEnoughCompletedOrders(customerId: number): Promise<boolean> {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
@@ -102,9 +68,11 @@ async function hasEnoughCompletedOrders(customerId: number): Promise<boolean> {
 }
 
 /**
- * Keeps the catalogue useful before enough individual history exists. At the
- * fifth successful order and later, 60% of a five-card shelf comes from the
- * customer's product/category preferences and 40% remains popularity-driven.
+ * Ranks the whole catalogue instead of injecting a small special shelf. Before
+ * five successful orders, sales popularity drives the order. Afterwards each
+ * product gets a blended score: 60% personal affinity and 40% store-wide
+ * popularity. Products with no signal remain in their normal catalogue order
+ * on the client, rather than being arbitrarily shuffled by a UUID tie-breaker.
  */
 export async function getProductRecommendations(params: {
   citySlug: CatalogCitySlug;
@@ -149,42 +117,36 @@ export async function getProductRecommendations(params: {
     };
   });
 
-  const popular = [...candidates].sort(
-    (left, right) =>
-      right.popularityQty - left.popularityQty ||
-      left.productId.localeCompare(right.productId),
-  );
+  const maxPopularity = Math.max(0, ...candidates.map((candidate) => candidate.popularityQty));
+  const maxPersonalScore = Math.max(0, ...candidates.map((candidate) => candidate.personalScore));
+  const personalized = enoughHistory && maxPersonalScore > 0;
+  const ranked = candidates
+    .map((candidate) => {
+      // log1p prevents one historically dominant SKU from flattening all
+      // other useful signals while retaining the relative order of sales.
+      const popularityScore =
+        maxPopularity > 0 ? Math.log1p(candidate.popularityQty) / Math.log1p(maxPopularity) : 0;
+      const personalScore =
+        personalized && maxPersonalScore > 0
+          ? Math.log1p(candidate.personalScore) / Math.log1p(maxPersonalScore)
+          : 0;
+      const score = personalized
+        ? personalScore * PERSONAL_RANKING_WEIGHT + popularityScore * POPULARITY_RANKING_WEIGHT
+        : popularityScore;
 
-  if (!enoughHistory) {
-    return {
-      items: popular.slice(0, RECOMMENDATION_LIMIT).map((candidate) => ({
-        productId: candidate.productId,
-        source: "popular",
-      })),
-      personalized: false,
-    };
-  }
-
-  const personalTarget = Math.round(RECOMMENDATION_LIMIT * PERSONAL_RECOMMENDATION_SHARE);
-  const personal = candidates
-    .filter((candidate) => candidate.personalScore > 0)
+      return { ...candidate, score };
+    })
+    .filter((candidate) => candidate.score > 0)
     .sort(
       (left, right) =>
+        right.score - left.score ||
         right.personalScore - left.personalScore ||
         right.popularityQty - left.popularityQty ||
         left.productId.localeCompare(right.productId),
-    )
-    .slice(0, personalTarget);
-  const personalIds = new Set(personal.map((candidate) => candidate.productId));
-  const popularTarget = RECOMMENDATION_LIMIT - personal.length;
-  const popularRemainder = popular
-    .filter((candidate) => !personalIds.has(candidate.productId))
-    .slice(0, popularTarget);
+    );
 
-  // When a customer's preferred categories no longer have enough sellable
-  // products, fill the shelf with more genuinely popular choices.
   return {
-    items: interleaveCandidates({ personal, popular: popularRemainder }),
-    personalized: personal.length > 0,
+    items: ranked.map((candidate) => ({ productId: candidate.productId })),
+    personalized,
   };
 }

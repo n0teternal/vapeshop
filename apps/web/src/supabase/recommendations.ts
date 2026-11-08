@@ -1,11 +1,8 @@
 import { apiGet } from "../api/client";
 import type { CitySlug } from "./catalog";
 
-export type RecommendationSource = "personal" | "popular";
-
 export type ProductRecommendation = {
   productId: string;
-  source: RecommendationSource;
 };
 
 export type ProductRecommendations = {

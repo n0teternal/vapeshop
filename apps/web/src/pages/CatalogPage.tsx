@@ -56,7 +56,7 @@ function FullscreenGate({
 
 function CatalogSkeleton({ count }: { count: number }) {
   return (
-    <div className="grid grid-cols-2 auto-rows-fr gap-3">
+    <div className="grid grid-cols-2 auto-rows-fr gap-3 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
       {Array.from({ length: count }).map((_, idx) => (
         <div
           key={`sk-${idx}`}
@@ -870,8 +870,8 @@ function MainCategoryRoll({
   if (visibleCategories.length === 0) return null;
 
   return (
-    <div className="w-full overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="flex w-max min-w-full gap-2" aria-label="Основные разделы">
+    <div className="w-full overflow-x-auto py-1 [scrollbar-width:none] md:overflow-visible [&::-webkit-scrollbar]:hidden">
+      <div className="flex w-max min-w-full gap-2 md:w-full md:flex-wrap" aria-label="Основные разделы">
         <button
           type="button"
           className={[
@@ -1172,8 +1172,6 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
 
   const shouldPrioritizeRecommendations =
     mode === "catalog" &&
-    selectedCategoryId === null &&
-    selectedManufacturerIds.length === 0 &&
     searchQuery.trim().length === 0 &&
     sortMode === "none";
 
@@ -1257,7 +1255,8 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
     }
 
     // Recommendations live in the ordinary product feed: no separate shelf
-    // and no duplicate cards. Filters, search and an explicit sort still win.
+    // and no duplicate cards. Filters narrow this same smart order; search and
+    // an explicit sort still win.
     const recommendedIds = new Set(resolvedRecommendations.map((item) => item.id));
     const itemsById = new Map(defaultItems.map((item) => [item.id, item]));
     const prioritizedItems = resolvedRecommendations.flatMap((item) => {
@@ -1630,7 +1629,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 auto-rows-fr gap-3">
+          <div className="grid grid-cols-2 auto-rows-fr gap-3 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
             {renderedItems.map((item, index) => (
               <ProductCard
                 key={item.id}
