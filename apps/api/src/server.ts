@@ -57,11 +57,13 @@ import {
 import { config } from "./config.js";
 import { loadActivePromotionRules } from "./promotions/rules.js";
 import { previewPromoCode, type PromoCodeLine } from "./promoCodes/service.js";
+import { getProductRecommendations } from "./recommendations/service.js";
 import { bootstrapReferralProfile, getReferralOverview } from "./referral/service.js";
 import { createServiceSupabaseClient } from "./supabase/serviceClient.js";
 import { sendMessage } from "./telegram/api.js";
 import { registerTelegramWebhookRoutes } from "./telegram/webhookRoutes.js";
 import { ensureTelegramWebhook } from "./telegram/webhookSetup.js";
+import { readWebsiteCustomerUser, type CustomerUser } from "./auth/customerAuth.js";
 
 type ApiSuccess<T> = {
   ok: true;
@@ -137,31 +139,16 @@ function requireVerifiedTelegramRequest(params: {
   return verified;
 }
 
-function requireCustomerTelegramUser(params: {
+async function requireCustomerUser(params: {
   headers: Record<string, unknown>;
   initDataFallback?: string | undefined;
-}): { id: number; username: string | null } {
+}): Promise<CustomerUser> {
   const devHeaderOn = getHeaderString(params.headers["x-dev-admin"]) === "1";
   if (config.isDev && devHeaderOn && config.dev.adminTgUserId) {
-    return { id: config.dev.adminTgUserId, username: null };
+    return { id: config.dev.adminTgUserId, username: null, phone: null, email: null, source: "dev" };
   }
   if (config.isDev && devHeaderOn) {
-    return { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" };
-  }
-
-  return requireVerifiedTelegramRequest(params).user;
-}
-
-function readOptionalCustomerTelegramUser(params: {
-  headers: Record<string, unknown>;
-  initDataFallback?: string | undefined;
-}): { id: number; username: string | null } | null {
-  const devHeaderOn = getHeaderString(params.headers["x-dev-admin"]) === "1";
-  if (config.isDev && devHeaderOn && config.dev.adminTgUserId) {
-    return { id: config.dev.adminTgUserId, username: null };
-  }
-  if (config.isDev && devHeaderOn) {
-    return { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" };
+    return { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode", phone: null, email: null, source: "dev" };
   }
 
   const initData = (
@@ -169,28 +156,79 @@ function readOptionalCustomerTelegramUser(params: {
     params.initDataFallback ??
     ""
   ).trim();
-  if (!initData) return null;
+  if (initData) {
+    const telegramUser = requireVerifiedTelegramRequest(params).user;
+    return { ...telegramUser, phone: null, email: null, source: "telegram" };
+  }
 
-  return requireVerifiedTelegramRequest(params).user;
+  const websiteUser = await readWebsiteCustomerUser({ headers: params.headers });
+  if (websiteUser) return websiteUser;
+
+  throw new HttpError(401, "AUTH_REQUIRED", "Войдите через Telegram или аккаунт сайта.");
 }
 
-function requireReferralTelegramContext(params: {
+async function readOptionalCustomerUser(params: {
   headers: Record<string, unknown>;
   initDataFallback?: string | undefined;
-}): { user: { id: number; username: string | null }; startParam: string | null } {
+}): Promise<CustomerUser | null> {
   const devHeaderOn = getHeaderString(params.headers["x-dev-admin"]) === "1";
   if (config.isDev && devHeaderOn && config.dev.adminTgUserId) {
-    return { user: { id: config.dev.adminTgUserId, username: null }, startParam: null };
+    return { id: config.dev.adminTgUserId, username: null, phone: null, email: null, source: "dev" };
   }
   if (config.isDev && devHeaderOn) {
-    return { user: { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" }, startParam: null };
+    return { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode", phone: null, email: null, source: "dev" };
   }
 
-  const verified = requireVerifiedTelegramRequest(params);
-  const startParam =
-    typeof verified.params.start_param === "string" ? verified.params.start_param : null;
+  const initData = (
+    getHeaderString(params.headers["x-telegram-init-data"]) ??
+    params.initDataFallback ??
+    ""
+  ).trim();
+  if (initData) {
+    const telegramUser = requireVerifiedTelegramRequest(params).user;
+    return { ...telegramUser, phone: null, email: null, source: "telegram" };
+  }
 
-  return { user: verified.user, startParam };
+  return readWebsiteCustomerUser({ headers: params.headers });
+}
+
+async function requireReferralCustomerContext(params: {
+  headers: Record<string, unknown>;
+  initDataFallback?: string | undefined;
+}): Promise<{ user: CustomerUser; startParam: string | null }> {
+  const devHeaderOn = getHeaderString(params.headers["x-dev-admin"]) === "1";
+  if (config.isDev && devHeaderOn && config.dev.adminTgUserId) {
+    return {
+      user: { id: config.dev.adminTgUserId, username: null, phone: null, email: null, source: "dev" },
+      startParam: null,
+    };
+  }
+  if (config.isDev && devHeaderOn) {
+    return {
+      user: { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode", phone: null, email: null, source: "dev" },
+      startParam: null,
+    };
+  }
+
+  const initData = (
+    getHeaderString(params.headers["x-telegram-init-data"]) ??
+    params.initDataFallback ??
+    ""
+  ).trim();
+  if (initData) {
+    const verified = requireVerifiedTelegramRequest(params);
+    const startParam =
+      typeof verified.params.start_param === "string" ? verified.params.start_param : null;
+    return {
+      user: { ...verified.user, phone: null, email: null, source: "telegram" },
+      startParam,
+    };
+  }
+
+  const websiteUser = await readWebsiteCustomerUser({ headers: params.headers });
+  if (websiteUser) return { user: websiteUser, startParam: null };
+
+  throw new HttpError(401, "AUTH_REQUIRED", "Войдите через Telegram или аккаунт сайта.");
 }
 
 function getAllowedDeliveryLocation(
@@ -639,7 +677,7 @@ await app.register(cors, {
     return cb(null, config.corsOrigins.includes(origin));
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-telegram-init-data", "x-dev-admin"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-telegram-init-data", "x-dev-admin"],
   preflight: true,
   maxAge: 600,
   // IMPORTANT: browsers send OPTIONS preflight for PUT/JSON requests.
@@ -674,6 +712,38 @@ await registerTelegramWebhookRoutes(app);
 
 app.get("/health", async () => {
   return { ok: true };
+});
+
+// Called after website sign-in. It proves that the persisted
+// browser session is valid for this API and prepares the shared loyalty profile
+// before the customer opens the cart.
+app.post<{
+  Reply: ApiSuccess<{ source: CustomerUser["source"]; email: string | null }> | ErrorResponse;
+}>("/api/auth/bootstrap", async (request, reply) => {
+  try {
+    const user = await requireCustomerUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+
+    await bootstrapReferralProfile({
+      tgUserId: user.id,
+      tgUsername: user.username,
+      startParam: null,
+    });
+
+    return reply.code(200).send(ok({ source: user.source, email: user.email }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Customer auth bootstrap failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
 });
 
 app.post<{
@@ -826,6 +896,44 @@ app.get<{
 
 app.get<{
   Querystring: { citySlug?: string };
+  Reply: ApiSuccess<Awaited<ReturnType<typeof getProductRecommendations>>> | ErrorResponse;
+}>("/api/recommendations", async (request, reply) => {
+  try {
+    const citySlug = request.query.citySlug;
+    if (citySlug !== "vvo" && citySlug !== "blg") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'vvo' | 'blg'");
+    }
+
+    const customer = await readOptionalCustomerUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+    const recommendations = await getProductRecommendations({
+      citySlug,
+      customerId: customer?.id ?? null,
+    });
+
+    // Recommendations can depend on an Authorization header, so shared caches
+    // must never reuse one customer's shelf for another customer.
+    return reply
+      .header("Cache-Control", "private, max-age=180")
+      .code(200)
+      .send(ok(recommendations));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Recommendations request failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.get<{
+  Querystring: { citySlug?: string };
   Reply:
     | ApiSuccess<{
         items: Awaited<ReturnType<typeof loadActivePromotionRules>>;
@@ -917,7 +1025,7 @@ app.post<{
     }
 
     const lines = parsePromoCodePreviewLines(request.body.lines);
-    const user = readOptionalCustomerTelegramUser({
+    const user = await readOptionalCustomerUser({
       headers: request.headers as Record<string, unknown>,
       initDataFallback:
         typeof request.body.initData === "string" ? request.body.initData : undefined,
@@ -1015,7 +1123,7 @@ app.put<{
   Reply: ApiSuccess<DeliveryPricingSettings> | ErrorResponse;
 }>("/api/delivery/pricing", async (request, reply) => {
   try {
-    const context = requireReferralTelegramContext({
+    const context = await requireReferralCustomerContext({
       headers: request.headers as Record<string, unknown>,
     });
     if (context.user.id !== DELIVERY_PRICING_ALLOWED_TG_USER_ID) {
@@ -1098,7 +1206,7 @@ app.post<{
     | ErrorResponse;
 }>("/api/referrals/bootstrap", async (request, reply) => {
   try {
-    const context = requireReferralTelegramContext({
+    const context = await requireReferralCustomerContext({
       headers: request.headers as Record<string, unknown>,
     });
 
@@ -1128,7 +1236,7 @@ app.get<{
   Reply: ApiSuccess<Awaited<ReturnType<typeof getReferralOverview>>> | ErrorResponse;
 }>("/api/referrals/overview", async (request, reply) => {
   try {
-    const context = requireReferralTelegramContext({
+    const context = await requireReferralCustomerContext({
       headers: request.headers as Record<string, unknown>,
     });
 
@@ -1164,7 +1272,7 @@ app.get<{
   Reply: ApiSuccess<{ orders: Awaited<ReturnType<typeof listCustomerOrders>> }> | ErrorResponse;
 }>("/api/orders", async (request, reply) => {
   try {
-    const user = requireCustomerTelegramUser({
+    const user = await requireCustomerUser({
       headers: request.headers as Record<string, unknown>,
     });
 
@@ -1194,7 +1302,7 @@ app.put<{
       throw new HttpError(400, "BAD_REQUEST", "orderId is required");
     }
 
-    const user = requireCustomerTelegramUser({
+    const user = await requireCustomerUser({
       headers: request.headers as Record<string, unknown>,
     });
 
@@ -1243,7 +1351,7 @@ app.put<{
       throw new HttpError(400, "BAD_REQUEST", "orderId is required");
     }
 
-    const user = requireCustomerTelegramUser({
+    const user = await requireCustomerUser({
       headers: request.headers as Record<string, unknown>,
     });
 
@@ -1278,7 +1386,7 @@ app.delete<{
       throw new HttpError(400, "BAD_REQUEST", "orderId is required");
     }
 
-    const user = requireCustomerTelegramUser({
+    const user = await requireCustomerUser({
       headers: request.headers as Record<string, unknown>,
     });
 
@@ -1311,7 +1419,7 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
       }
 
       const body = parseOrderRequestBody(request.body);
-      const verified = requireVerifiedTelegramRequest({
+      const user = await requireCustomerUser({
         headers: request.headers as Record<string, unknown>,
         initDataFallback: body.initData,
       });
@@ -1324,7 +1432,7 @@ app.put<{ Params: { orderId: string }; Body: unknown; Reply: ErrorResponse | Suc
 
       const result = await applyOrderEdit({
         orderId,
-        expectedTgUserId: verified.user.id,
+        expectedTgUserId: user.id,
         allowPromoPrices: true,
         payload: {
           citySlug: body.citySlug,
@@ -1479,17 +1587,25 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
       const verified = initData
         ? requireVerifiedTelegramRequest({ headers, initDataFallback: body.initData })
         : null;
-      const isGuestOrder = !verified && !useDevBypass;
-      if (isGuestOrder && !body.phone) {
-        throw new HttpError(400, "PHONE_REQUIRED", "Укажите номер телефона.");
+      const websiteUser = !verified && !useDevBypass
+        ? await readWebsiteCustomerUser({ headers })
+        : null;
+      if (!verified && !useDevBypass && !websiteUser) {
+        throw new HttpError(
+          401,
+          "AUTH_REQUIRED",
+          "Войдите через Telegram или аккаунт сайта перед оформлением заказа.",
+        );
       }
       const orderUser = verified
-        ? verified.user
+        ? { ...verified.user, phone: null, email: null, source: "telegram" as const }
+        : websiteUser
+          ? websiteUser
         : useDevBypass && config.dev.adminTgUserId
-          ? { id: config.dev.adminTgUserId, username: null }
+          ? { id: config.dev.adminTgUserId, username: null, phone: null, email: null, source: "dev" as const }
           : useDevBypass
-            ? { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode" }
-            : { id: 0, username: null };
+            ? { id: DEV_FALLBACK_TG_USER_ID, username: "dev_mode", phone: null, email: null, source: "dev" as const }
+            : { id: 0, username: null, phone: null, email: null, source: "dev" as const };
       const deliveryLocation = await resolveOrderDeliveryLocation({
         citySlug: body.citySlug,
         deliveryMethod: body.deliveryMethod,
@@ -1497,13 +1613,15 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
         submittedLocation: body.deliveryLocation,
       });
 
-      if (verified) {
+      if (verified || websiteUser) {
         try {
           const startParam =
-            typeof verified.params.start_param === "string" ? verified.params.start_param : null;
+            verified && typeof verified.params.start_param === "string"
+              ? verified.params.start_param
+              : null;
           await bootstrapReferralProfile({
-            tgUserId: verified.user.id,
-            tgUsername: verified.user.username,
+            tgUserId: orderUser.id,
+            tgUsername: orderUser.username,
             startParam,
           });
         } catch (bootstrapError) {
@@ -1515,7 +1633,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
         payload: {
           citySlug: body.citySlug,
           deliveryMethod: body.deliveryMethod,
-          phone: body.phone,
+          phone: body.phone ?? orderUser.phone,
           address: body.address,
           comment: body.comment,
           deliveryDate: body.deliveryDate,

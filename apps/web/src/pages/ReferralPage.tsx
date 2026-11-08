@@ -153,8 +153,8 @@ export function ReferralPage() {
     if (!overviewQuery.error) return null;
     const err = overviewQuery.error;
     if (err instanceof ApiError) {
-      if (err.code === "TG_INIT_DATA_REQUIRED") {
-        return "Откройте рефералку внутри Telegram Mini App.";
+      if (err.code === "TG_INIT_DATA_REQUIRED" || err.code === "AUTH_REQUIRED") {
+        return "Войдите через Telegram или в аккаунт сайта в профиле.";
       }
       if (err.code === "NOT_FOUND") {
         return "Раздел недоступен.";

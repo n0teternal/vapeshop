@@ -143,7 +143,9 @@ async function assertPromoCodeCustomerCanUse(params: {
 }): Promise<void> {
   if (params.row.requires_previous_order !== true) return;
   const tgUserId = params.tgUserId;
-  if (!tgUserId || !Number.isFinite(tgUserId) || tgUserId <= 0) {
+  // Website accounts use negative internal customer ids; only `0` means an
+  // anonymous legacy checkout with no order history to verify.
+  if (!tgUserId || !Number.isSafeInteger(tgUserId) || tgUserId === 0) {
     throw new HttpError(
       400,
       "PROMO_CODE_REQUIRES_PREVIOUS_ORDER",

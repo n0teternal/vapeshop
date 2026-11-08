@@ -105,6 +105,9 @@ function formatApiErrorMessage(error: unknown): string {
     ) {
       return "Откройте мини-приложение внутри Telegram, чтобы управлять заказами.";
     }
+    if (error.code === "AUTH_REQUIRED" || error.code === "AUTH_SESSION_INVALID") {
+      return "Войдите в аккаунт сайта в профиле, чтобы увидеть свои заказы.";
+    }
     return error.message;
   }
 

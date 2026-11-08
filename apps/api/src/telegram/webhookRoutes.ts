@@ -1228,6 +1228,17 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
     }
 
     if (action.kind === "request_conversation") {
+      if (order.tg_user_id < 0) {
+        // Website-only accounts intentionally have no Telegram chat id. Do not
+        // attempt to send a Bot API message to their internal customer id.
+        await answerSafe(
+          parsed.callbackQueryId,
+          "Клиент оформил заказ через сайт: Telegram-чат недоступен.",
+          true,
+        );
+        return reply.code(200).send({ ok: true });
+      }
+
       try {
         const customerMessage = buildCustomerConversationRequestMessage({
           citySlug,

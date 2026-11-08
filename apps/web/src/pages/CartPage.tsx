@@ -1,7 +1,8 @@
 import { CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ApiError, apiGet, apiPost } from "../api/client";
+import { ApiError, apiGet, apiPost, buildApiHeaders } from "../api/client";
+import { useCustomerAuth } from "../auth/CustomerAuthProvider";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import {
   DeliveryAddressMap,
@@ -627,6 +628,7 @@ function isValidPhoneInput(value: string): boolean {
 export function CartPage() {
   const { state, dispatch } = useAppState();
   const { isTelegram, webApp } = useTelegram();
+  const { user: websiteUser } = useCustomerAuth();
   const deliveryDateInputRef = useRef<HTMLInputElement | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -680,6 +682,8 @@ export function CartPage() {
   const showDeliveryMap = deliveryUpgradesAvailable && isAddressDeliveryMethod;
   const showDeliveryDistanceDebug =
     isTelegram && webApp.initDataUnsafe?.user?.id === DELIVERY_DISTANCE_DEBUG_TG_USER_ID;
+  const canUseLoyalty = isTelegram || websiteUser !== null;
+  const requiresWebsiteSignIn = !isTelegram && websiteUser === null && !orderEditSession;
   const requiresGuestPhone = !isTelegram && !orderEditSession;
   const hasRequiredGuestPhone =
     !requiresGuestPhone || isValidPhoneInput(checkoutDraft.phone);
@@ -881,7 +885,14 @@ export function CartPage() {
     input.click();
   }
 
-  async function loadPointsBalance(): Promise<void> {
+  const loadPointsBalance = useCallback(async (): Promise<void> => {
+    if (!canUseLoyalty) {
+      setPointsBalance(0);
+      setPointsEnabled(false);
+      setPointsError(null);
+      return;
+    }
+
     setPointsLoading(true);
     setPointsError(null);
     try {
@@ -912,7 +923,9 @@ export function CartPage() {
         if (
           e.code === "TG_INIT_DATA_REQUIRED" ||
           e.code === "TG_INIT_DATA_INVALID" ||
-          e.code === "TG_INIT_DATA_EXPIRED"
+          e.code === "TG_INIT_DATA_EXPIRED" ||
+          e.code === "AUTH_REQUIRED" ||
+          e.code === "AUTH_SESSION_INVALID"
         ) {
           setPointsBalance(0);
           setPointsEnabled(false);
@@ -926,11 +939,11 @@ export function CartPage() {
     } finally {
       setPointsLoading(false);
     }
-  }
+  }, [canUseLoyalty]);
 
   useEffect(() => {
     void loadPointsBalance();
-  }, []);
+  }, [loadPointsBalance]);
 
   useEffect(() => {
     setDeliveryMapSelection(null);
@@ -1119,6 +1132,7 @@ export function CartPage() {
     !submitting &&
     !couponApplying &&
     !editSessionExpired &&
+    !requiresWebsiteSignIn &&
     hasRequiredGuestPhone &&
     hasRequiredBlgDeliverySchedule &&
     (!isAddressDeliveryMethod || checkoutDraft.address.trim().length > 0);
@@ -1217,6 +1231,11 @@ export function CartPage() {
         return;
       }
 
+      if (requiresWebsiteSignIn) {
+        setSubmitError("Войдите в аккаунт сайта в профиле, чтобы оформить заказ и сохранить бонусы.");
+        return;
+      }
+
       if (orderEditSession && editSessionExpired) {
         setSubmitError("Р’СЂРµРјСЏ РЅР° СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёРµ РёСЃС‚РµРєР»Рѕ. Р—Р°РїСѓСЃС‚РёС‚Рµ РµРіРѕ Р·Р°РЅРѕРІРѕ РІ СѓРїСЂР°РІР»РµРЅРёРё Р·Р°РєР°Р·Р°РјРё.");
         return;
@@ -1310,14 +1329,7 @@ export function CartPage() {
             : 0
         : 0;
       const tgInitData = window.Telegram?.WebApp?.initData ?? "";
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (tgInitData) {
-        headers["x-telegram-init-data"] = tgInitData;
-      } else if (import.meta.env.DEV) {
-        headers["x-dev-admin"] = "1";
-      }
+      const headers = await buildApiHeaders({ "Content-Type": "application/json" });
       const requestPath = orderEditSession
         ? isAdminOrderEditSession
           ? `/api/admin/orders/${orderEditSession.orderId}/edit`
@@ -1366,8 +1378,11 @@ export function CartPage() {
         const code = parsed.ok === false ? parsed.error.code : "HTTP_ERROR";
         const message = parsed.ok === false ? parsed.error.message : "Request failed";
 
-        if ((code === "TG_INIT_DATA_REQUIRED" || code === "TG_INIT_DATA_INVALID") && !tgInitData) {
-          setSubmitError("Откройте мини-приложение внутри Telegram, чтобы оформить заказ.");
+        if (
+          (code === "AUTH_REQUIRED" || code === "AUTH_SESSION_INVALID") &&
+          !tgInitData
+        ) {
+          setSubmitError("Войдите в аккаунт сайта в профиле, чтобы сохранить бонусы и историю заказов.");
         } else {
           setSubmitError(message);
         }
@@ -1632,6 +1647,16 @@ export function CartPage() {
         <CardContent className="space-y-3">
           {!isAdminOrderEditSession ? (
             <>
+              {requiresWebsiteSignIn ? (
+                <Alert>
+                  <AlertDescription>
+                    <Link to="/profile" className="font-semibold text-primary hover:underline">
+                      Войдите в аккаунт
+                    </Link>{" "}
+                    перед оформлением — так заказ и бонусы останутся в вашем аккаунте.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
               {requiresGuestPhone ? (
                 <label className="grid gap-1.5 text-sm">
               <span className="text-xs font-semibold text-muted-foreground">
@@ -1880,36 +1905,47 @@ export function CartPage() {
               ) : null
             ) : (
               <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
-                <label className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border-input"
-                    checked={pointsEnabled}
-                    disabled={submitting || pointsLoading || maxPointsToSpend <= 0}
-                    onChange={(e) => setPointsEnabled(e.target.checked)}
-                  />
-                  <span>
-                    Использовать баллы ({pointsBalance})
-                    {maxPointsToSpend > 0
-                      ? `, спишется до ${pointsToSpend || maxPointsToSpend}`
-                      : ""}
-                  </span>
-                </label>
-                <div className="text-xs text-muted-foreground">
-                  Можно оплатить до {pointsMaxSpendPercent}% корзины. Баллы действуют{" "}
-                  {pointsExpireAfterDays} дней после последнего успешного заказа.
-                </div>
-                {pointsToSpend > 0 ? (
-                  <div className="text-xs text-muted-foreground">
-                    Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате:{" "}
-                    {formatPriceRub(totalToPay)}.
+                {!canUseLoyalty ? (
+                  <div className="text-sm text-muted-foreground">
+                    <Link to="/profile" className="font-semibold text-primary hover:underline">
+                      Войдите в аккаунт
+                    </Link>{" "}
+                    — и бонусы будут доступны на сайте.
                   </div>
-                ) : null}
-                {pointsError ? (
-                  <div className="text-xs text-destructive">
-                    Баллы временно недоступны: {pointsError}
-                  </div>
-                ) : null}
+                ) : (
+                  <>
+                    <label className="flex items-start gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 rounded border-input"
+                        checked={pointsEnabled}
+                        disabled={submitting || pointsLoading || maxPointsToSpend <= 0}
+                        onChange={(e) => setPointsEnabled(e.target.checked)}
+                      />
+                      <span>
+                        Использовать баллы ({pointsBalance})
+                        {maxPointsToSpend > 0
+                          ? `, спишется до ${pointsToSpend || maxPointsToSpend}`
+                          : ""}
+                      </span>
+                    </label>
+                    <div className="text-xs text-muted-foreground">
+                      Можно оплатить до {pointsMaxSpendPercent}% корзины. Баллы действуют{" "}
+                      {pointsExpireAfterDays} дней после последнего успешного заказа.
+                    </div>
+                    {pointsToSpend > 0 ? (
+                      <div className="text-xs text-muted-foreground">
+                        Скидка баллами: -{formatPriceRub(pointsToSpend)}. К оплате:{" "}
+                        {formatPriceRub(totalToPay)}.
+                      </div>
+                    ) : null}
+                    {pointsError ? (
+                      <div className="text-xs text-destructive">
+                        Баллы временно недоступны: {pointsError}
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             )
           ) : null}

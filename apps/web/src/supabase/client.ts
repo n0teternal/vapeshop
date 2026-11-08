@@ -185,7 +185,16 @@ function extractProjectRef(url: string): string {
 
 export const supabase: SupabaseClient<Database> | null =
   supabaseUrl && supabaseAnonKey
-    ? createClient<Database>(supabaseUrl, supabaseAnonKey)
+    ? createClient<Database>(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          // The website account session is the "remember me" mechanism.
+          // Supabase refreshes it in the background and stores only its
+          // session tokens in this browser's local storage.
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+        },
+      })
     : null;
 
 export function isSupabaseConfigured(): boolean {

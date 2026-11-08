@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BadgePercent, Check } from "lucide-react";
+import { BadgePercent, Check, Sparkles, TrendingUp } from "lucide-react";
+import { useCustomerAuth } from "../auth/CustomerAuthProvider";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { VVO_ENABLED } from "../config";
 import { PRODUCTS } from "../data/products";
@@ -13,6 +14,10 @@ import {
   type PromoCatalogItem,
   SupabaseQueryError,
 } from "../supabase/catalog";
+import {
+  fetchProductRecommendations,
+  type RecommendationSource,
+} from "../supabase/recommendations";
 import { buildImageCandidates } from "../utils/imageCandidates";
 
 const CATALOG_INITIAL_RENDER_COUNT = 24;
@@ -832,6 +837,58 @@ function PromoProductsBanner({
   );
 }
 
+type ResolvedProductRecommendations = {
+  items: Array<CatalogItem & { source: RecommendationSource }>;
+  personalized: boolean;
+};
+
+function ProductRecommendationsShelf({
+  recommendations,
+  favoriteIds,
+  onAdd,
+  onToggleFavorite,
+}: {
+  recommendations: ResolvedProductRecommendations;
+  favoriteIds: Set<string>;
+  onAdd: (item: CatalogItem) => void;
+  onToggleFavorite: (item: CatalogItem) => void;
+}) {
+  if (recommendations.items.length === 0) return null;
+
+  const Icon = recommendations.personalized ? Sparkles : TrendingUp;
+  return (
+    <section className="rounded-2xl border border-primary/25 bg-[linear-gradient(135deg,hsl(var(--primary)/0.1),hsl(var(--secondary)/0.4))] px-3 py-3 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 px-1">
+        <span className="grid h-8 w-8 place-items-center rounded-xl bg-primary text-primary-foreground">
+          <Icon className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div>
+          <div className="text-base font-bold leading-none text-foreground">
+            {recommendations.personalized ? "Для вас" : "Сейчас популярно"}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {recommendations.personalized
+              ? "Подборка по вашим успешным заказам и популярным товарам"
+              : "По количеству успешных продаж"}
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 auto-rows-fr gap-3">
+        {recommendations.items.map((item, index) => (
+          <ProductCard
+            key={`recommendation-${item.id}`}
+            item={item}
+            isFavorite={favoriteIds.has(item.id)}
+            imageLoading={index < 2 ? "eager" : "lazy"}
+            onAdd={() => onAdd(item)}
+            onToggleFavorite={() => onToggleFavorite(item)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function mapMockCatalog(): CatalogData {
   return {
     items: PRODUCTS.map((p) => ({
@@ -983,6 +1040,7 @@ function mapCatalogLoadError(error: unknown): CatalogLoadError {
 
 export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {}) {
   const { state, dispatch } = useAppState();
+  const { user: websiteUser } = useCustomerAuth();
   const orderEditSessionActive = state.orderEditSession !== null;
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<CatalogFilterCategoryId | null>(
@@ -1023,6 +1081,28 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
   const catalogData = supabaseEnabled ? supabaseCatalog : mockItems;
   const items = catalogData.items;
   const promoItems = catalogData.promoItems;
+  const recommendationQuery = useQuery({
+    queryKey: ["recommendations", state.city, websiteUser?.id ?? "anonymous"] as const,
+    queryFn: ({ queryKey }) => {
+      const [, citySlug] = queryKey;
+      if (!citySlug) throw new Error("City is not selected");
+      return fetchProductRecommendations(citySlug);
+    },
+    enabled: supabaseEnabled && state.city !== null && mode === "catalog",
+    staleTime: 2 * 60 * 1000,
+  });
+  const resolvedRecommendations = useMemo<ResolvedProductRecommendations | null>(() => {
+    const recommendations = recommendationQuery.data;
+    if (!recommendations) return null;
+
+    const catalogItemById = new Map(items.map((item) => [item.id, item]));
+    const resolvedItems = recommendations.items.flatMap((recommendation) => {
+      const item = catalogItemById.get(recommendation.productId);
+      return item && item.inStock ? [{ ...item, source: recommendation.source }] : [];
+    });
+
+    return { items: resolvedItems, personalized: recommendations.personalized };
+  }, [items, recommendationQuery.data]);
 
   const cityLabel = useMemo(() => {
     if (state.city === "vvo") return "Владивосток (VVO)";
@@ -1335,6 +1415,48 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
     setToast({ key: toastKeyRef.current, message });
   }
 
+  function addCatalogItemToCart(item: CatalogItem): void {
+    dispatch({
+      type: "cart/add",
+      item: {
+        productId: item.id,
+        title: item.title,
+        price: item.price,
+        regularPrice: item.regularPrice ?? item.promoOldPrice ?? item.price,
+        categorySlug: item.categorySlug,
+        imageUrl: item.imageUrl,
+        stockQty: item.stockQty,
+      },
+    });
+    showToast("Товар добавлен в корзину");
+  }
+
+  function toggleCatalogItemFavorite(item: CatalogItem): void {
+    const wasFavorite = favoriteIds.has(item.id);
+    dispatch({
+      type: "favorite/toggle",
+      item: {
+        productId: item.id,
+        title: item.title,
+        price: item.price,
+        categorySlug: item.categorySlug,
+        imageUrl: item.imageUrl,
+        inStock: item.inStock,
+        stockQty: item.stockQty,
+      },
+    });
+    showToast(
+      wasFavorite ? "Товар удалён из избранного" : "Товар добавлен в избранное",
+    );
+  }
+
+  const shouldShowRecommendations =
+    mode === "catalog" &&
+    selectedCategoryId === null &&
+    selectedManufacturerIds.length === 0 &&
+    searchQuery.trim().length === 0 &&
+    sortMode === "none";
+
   if (!state.city) {
     return (
       <FullscreenGate title="Выберите город">
@@ -1525,6 +1647,15 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
             });
             showToast("Промо-товар добавлен в корзину");
           }}
+        />
+      ) : null}
+
+      {shouldShowRecommendations && resolvedRecommendations ? (
+        <ProductRecommendationsShelf
+          recommendations={resolvedRecommendations}
+          favoriteIds={favoriteIds}
+          onAdd={addCatalogItemToCart}
+          onToggleFavorite={toggleCatalogItemFavorite}
         />
       ) : null}
 

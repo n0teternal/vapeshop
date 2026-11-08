@@ -236,10 +236,9 @@ export async function processOrderCashback(params: {
     throw new HttpError(500, "DB", "Invalid cashback base for completed order");
   }
 
-  // Guest checkout deliberately stores `0` because there is no verified
-  // Telegram account to own points or a cashback level. Completing such an
-  // order must remain a normal order action, not a failed loyalty mutation.
-  if (!Number.isSafeInteger(params.tgUserId) || params.tgUserId <= 0) {
+  // Anonymous legacy checkout deliberately stores `0`, while verified website
+  // accounts use negative internal ids. Only the anonymous case is excluded.
+  if (!Number.isSafeInteger(params.tgUserId) || params.tgUserId === 0) {
     return { applied: false, cashbackPoints: 0, cashbackPercent: 0 };
   }
 
@@ -365,7 +364,15 @@ export async function runLoyaltyRetentionSweep(now = new Date()): Promise<Loyalt
       }
 
       const balance = Math.max(0, asInt(row.bonus_points, "customer_profiles.bonus_points"));
-      if (pointsExpiresAt && pointsDaysUntilExpiry === 15 && !row.loyalty_notice_45_sent_at) {
+      // Website-only accounts have no Telegram chat id. Their balances still
+      // expire correctly; we simply cannot deliver a Bot notification.
+      const canSendTelegramReminder = row.tg_user_id > 0;
+      if (
+        canSendTelegramReminder &&
+        pointsExpiresAt &&
+        pointsDaysUntilExpiry === 15 &&
+        !row.loyalty_notice_45_sent_at
+      ) {
         await sendMessage({
           botToken: config.telegram.botToken,
           chatId: String(row.tg_user_id),
@@ -379,7 +386,12 @@ export async function runLoyaltyRetentionSweep(now = new Date()): Promise<Loyalt
         result.reminded15Days += 1;
       }
 
-      if (pointsExpiresAt && pointsDaysUntilExpiry === 1 && !row.loyalty_notice_59_sent_at) {
+      if (
+        canSendTelegramReminder &&
+        pointsExpiresAt &&
+        pointsDaysUntilExpiry === 1 &&
+        !row.loyalty_notice_59_sent_at
+      ) {
         await sendMessage({
           botToken: config.telegram.botToken,
           chatId: String(row.tg_user_id),

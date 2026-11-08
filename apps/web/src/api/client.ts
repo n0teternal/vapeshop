@@ -1,4 +1,5 @@
 import { API_BASE_URL, buildApiUrl } from "../config";
+import { supabase } from "../supabase/client";
 
 export class ApiError extends Error {
   public readonly code: string;
@@ -100,7 +101,10 @@ type RequestOptions = {
   withTelegramAuth?: boolean;
 };
 
-function buildHeaders(extra?: HeadersInit, options?: RequestOptions): HeadersInit {
+export async function buildApiHeaders(
+  extra?: HeadersInit,
+  options?: RequestOptions,
+): Promise<Record<string, string>> {
   const withTelegramAuth = options?.withTelegramAuth !== false;
   if (!withTelegramAuth) {
     return mergeHeaders(extra);
@@ -113,7 +117,17 @@ function buildHeaders(extra?: HeadersInit, options?: RequestOptions): HeadersIni
     base["x-telegram-init-data"] = tgInitData;
   }
 
-  if (!tgInitData && shouldUseLocalDevBypass()) {
+  if (!tgInitData && supabase) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (accessToken) base.Authorization = `Bearer ${accessToken}`;
+    } catch {
+      // A broken local storage entry should not make public browsing fail.
+    }
+  }
+
+  if (!tgInitData && !base.Authorization && shouldUseLocalDevBypass()) {
     base["x-dev-admin"] = "1";
   }
 
@@ -127,7 +141,7 @@ async function requestJson<T>(
 ): Promise<T> {
   const res = await fetch(buildApiUrl(path), {
     ...init,
-    headers: buildHeaders(init.headers, options),
+    headers: await buildApiHeaders(init.headers, options),
   });
 
   const json = (await res.json().catch(() => null)) as unknown;
@@ -195,7 +209,7 @@ export async function apiDownloadBlob(
 ): Promise<{ blob: Blob; filename: string | null }> {
   const res = await fetch(buildApiUrl(path), {
     method: "POST",
-    headers: buildHeaders({ "Content-Type": "application/json" }),
+    headers: await buildApiHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
 

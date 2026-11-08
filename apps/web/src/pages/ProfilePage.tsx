@@ -8,6 +8,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { ProfileStatusBand } from "../components/ProfileStatusBand";
+import { PasswordAuthCard } from "../components/PasswordAuthCard";
 import {
   fetchLoyaltyStatus,
   LOYALTY_STATUS_QUERY_KEY,
@@ -20,6 +21,8 @@ import {
   type DeliveryPricingRule,
 } from "../lib/deliveryPricingCache";
 import { useTelegram } from "../telegram/TelegramProvider";
+import { useCustomerAuth } from "../auth/CustomerAuthProvider";
+import { useAppState } from "../state/AppStateProvider";
 
 type AdminMe = {
   tgUserId: number;
@@ -36,6 +39,8 @@ function normalizeNumericInput(value: string): number {
 
 export function ProfilePage() {
   const { webApp, isTelegram } = useTelegram();
+  const { status: authStatus, user: websiteUser } = useCustomerAuth();
+  const { dispatch } = useAppState();
 
   const [admin, setAdmin] = useState<AdminMe | null>(null);
   const [showCredit, setShowCredit] = useState(false);
@@ -75,7 +80,10 @@ export function ProfilePage() {
   }, []);
 
   const tgUser = webApp.initDataUnsafe?.user;
-  const shouldShowLoyaltyStatus = isTelegram && typeof tgUser?.id === "number";
+  const isWebsiteSignedIn =
+    !isTelegram && authStatus === "authenticated" && websiteUser !== null;
+  const shouldShowLoyaltyStatus =
+    (isTelegram && typeof tgUser?.id === "number") || isWebsiteSignedIn;
   const canManageDeliveryPricing =
     isTelegram && tgUser?.id === DELIVERY_PRICING_ALLOWED_TG_USER_ID;
 
@@ -124,6 +132,7 @@ export function ProfilePage() {
   }, [canManageDeliveryPricing]);
 
   const displayName = useMemo(() => {
+    if (!isTelegram) return websiteUser?.email ?? "Гость";
     if (typeof tgUser?.username === "string" && tgUser.username.length > 0) {
       return `@${tgUser.username}`;
     }
@@ -131,12 +140,19 @@ export function ProfilePage() {
       return tgUser.first_name;
     }
     return "Гость";
-  }, [tgUser?.first_name, tgUser?.username]);
+  }, [isTelegram, tgUser?.first_name, tgUser?.username, websiteUser?.email]);
 
   const photoUrl =
-    typeof tgUser?.photo_url === "string" && tgUser.photo_url.length > 0
+    isTelegram && typeof tgUser?.photo_url === "string" && tgUser.photo_url.length > 0
       ? tgUser.photo_url
       : null;
+
+  function handleWebsiteSignOut(): void {
+    // Keep the catalogue and favourite products, but do not leave an account
+    // phone number or an active order-edit session on a shared device.
+    dispatch({ type: "checkout/reset" });
+    dispatch({ type: "order-edit/cancel" });
+  }
 
   function patchDeliveryPricing(patch: Partial<DeliveryPricingSettings>): void {
     setDeliveryPricing((current) => (current ? { ...current, ...patch } : current));
@@ -275,7 +291,11 @@ export function ProfilePage() {
             <div>
               <div className="text-base font-semibold">{displayName}</div>
               <div className="text-xs text-muted-foreground">
-                {typeof tgUser?.id === "number" ? `ID: ${tgUser.id}` : "Telegram user"}
+                {typeof tgUser?.id === "number"
+                  ? `ID: ${tgUser.id}`
+                  : isWebsiteSignedIn
+                    ? "Аккаунт сайта"
+                    : "Войдите, чтобы копить баллы"}
               </div>
             </div>
           </div>
@@ -289,6 +309,8 @@ export function ProfilePage() {
           ) : null}
         </CardContent>
       </Card>
+
+      {!isTelegram ? <PasswordAuthCard onSignedOut={handleWebsiteSignOut} /> : null}
 
       {canManageDeliveryPricing ? (
         <Card className="border-border/80 bg-card/90">

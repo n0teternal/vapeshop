@@ -310,6 +310,9 @@ export type Database = {
       customer_profiles: {
         Row: {
           tg_user_id: number;
+          auth_user_id: string | null;
+          phone: string | null;
+          email: string | null;
           referral_code: string;
           referred_by_tg_user_id: number | null;
           referral_bound_at: string | null;
@@ -327,6 +330,9 @@ export type Database = {
         };
         Insert: {
           tg_user_id: number;
+          auth_user_id?: string | null;
+          phone?: string | null;
+          email?: string | null;
           referral_code: string;
           referred_by_tg_user_id?: number | null;
           referral_bound_at?: string | null;
@@ -344,6 +350,9 @@ export type Database = {
         };
         Update: {
           tg_user_id?: number;
+          auth_user_id?: string | null;
+          phone?: string | null;
+          email?: string | null;
           referral_code?: string;
           referred_by_tg_user_id?: number | null;
           referral_bound_at?: string | null;
@@ -713,6 +722,24 @@ export type Database = {
       complete_order_with_staff_sale: {
         Args: { p_order_id: string; p_staff_id: number; p_payment_method: string };
         Returns: boolean;
+      };
+      ensure_web_customer_profile: {
+        Args: { p_auth_user_id: string; p_phone: string };
+        Returns: Array<{ tg_user_id: number; phone: string | null }>;
+      };
+      ensure_web_customer_profile_by_email: {
+        Args: { p_auth_user_id: string; p_email: string };
+        Returns: Array<{ tg_user_id: number; email: string | null }>;
+      };
+      get_product_recommendation_signals: {
+        Args: { p_city_slug: string; p_tg_user_id?: number | null };
+        Returns: Array<{
+          product_id: string;
+          popularity_qty: number;
+          personal_product_qty: number;
+          personal_category_qty: number;
+          personal_last_bought_at: string | null;
+        }>;
       };
     };
     Enums: Record<string, never>;
