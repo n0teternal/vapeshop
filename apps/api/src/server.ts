@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -64,6 +65,7 @@ import { sendMessage } from "./telegram/api.js";
 import { registerTelegramWebhookRoutes } from "./telegram/webhookRoutes.js";
 import { ensureTelegramWebhook } from "./telegram/webhookSetup.js";
 import { readWebsiteCustomerUser, type CustomerUser } from "./auth/customerAuth.js";
+import { registerSecurityHardening } from "./security/hardening.js";
 
 type ApiSuccess<T> = {
   ok: true;
@@ -113,6 +115,15 @@ function getHeaderString(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return undefined;
+}
+
+function hasMatchingSecret(expected: string, supplied: string): boolean {
+  const expectedBytes = Buffer.from(expected, "utf8");
+  const suppliedBytes = Buffer.from(supplied, "utf8");
+  if (expectedBytes.length !== suppliedBytes.length) return false;
+
+  // A fixed-length comparison avoids leaking the secret through timing.
+  return timingSafeEqual(expectedBytes, suppliedBytes);
 }
 
 function requireVerifiedTelegramRequest(params: {
@@ -659,6 +670,14 @@ function parseUrlHost(rawUrl: string | null | undefined): string | null {
 }
 
 const imageProxyAllowedHosts = new Set<string>();
+const IMAGE_PROXY_MAX_BYTES = 10 * 1024 * 1024;
+const imageProxyAllowedContentTypes = new Set([
+  "image/avif",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 {
   const supabaseHost = parseUrlHost(config.supabase.url);
   if (supabaseHost) imageProxyAllowedHosts.add(supabaseHost);
@@ -667,7 +686,17 @@ const imageProxyAllowedHosts = new Set<string>();
   if (productImagesHost) imageProxyAllowedHosts.add(productImagesHost);
 }
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  // Public JSON endpoints do not need large request bodies. Multipart admin
+  // uploads have their own explicit limits below.
+  bodyLimit: 1 * 1024 * 1024,
+  connectionTimeout: 10_000,
+  requestTimeout: 30_000,
+  trustProxy: config.security.trustProxy,
+});
+
+registerSecurityHardening(app);
 
 await app.register(cors, {
   origin: (origin, cb) => {
@@ -678,6 +707,7 @@ await app.register(cors, {
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-telegram-init-data", "x-dev-admin"],
+  credentials: false,
   preflight: true,
   maxAge: 600,
   // IMPORTANT: browsers send OPTIONS preflight for PUT/JSON requests.
@@ -756,7 +786,7 @@ app.post<{
     const suppliedSecret =
       getHeaderString(request.headers["x-loyalty-cron-secret"])?.trim() ?? bearerToken;
 
-    if (!configuredSecret || suppliedSecret !== configuredSecret) {
+    if (!configuredSecret || !hasMatchingSecret(configuredSecret, suppliedSecret)) {
       throw new HttpError(401, "UNAUTHORIZED", "Invalid loyalty cron secret");
     }
 
@@ -805,10 +835,15 @@ app.get<{
 
     let upstream: Response;
     try {
-      upstream = await fetch(target.toString(), { redirect: "follow" });
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to fetch upstream image";
-      throw new HttpError(502, "UPSTREAM", message);
+      // Do not follow redirects: the allowed source could otherwise redirect
+      // this server to an internal address or an arbitrary third-party host.
+      upstream = await fetch(target.toString(), {
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+        headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/gif" },
+      });
+    } catch {
+      throw new HttpError(502, "UPSTREAM", "Unable to fetch the image");
     }
 
     if (!upstream.ok) {
@@ -818,11 +853,22 @@ app.get<{
       throw new HttpError(502, "UPSTREAM", `Upstream image request failed with ${upstream.status}`);
     }
 
-    const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
+    const contentType = upstream.headers.get("content-type") ?? "";
+    const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+    if (!imageProxyAllowedContentTypes.has(mediaType)) {
+      throw new HttpError(502, "UPSTREAM", "Upstream response is not a supported image");
+    }
     const cacheControl =
       upstream.headers.get("cache-control") ??
       "public, max-age=300, s-maxage=1800, stale-while-revalidate=3600";
     const contentLength = upstream.headers.get("content-length");
+    const contentLengthBytes = contentLength ? Number(contentLength) : null;
+    if (
+      contentLengthBytes !== null &&
+      (!Number.isSafeInteger(contentLengthBytes) || contentLengthBytes < 0 || contentLengthBytes > IMAGE_PROXY_MAX_BYTES)
+    ) {
+      throw new HttpError(413, "IMAGE_TOO_LARGE", "Image is too large");
+    }
     const etag = upstream.headers.get("etag");
     const lastModified = upstream.headers.get("last-modified");
     const stream = upstream.body;
@@ -831,7 +877,7 @@ app.get<{
     }
 
     const response = reply
-      .header("Content-Type", contentType)
+      .header("Content-Type", mediaType)
       .header("Cache-Control", cacheControl)
       .code(200);
 

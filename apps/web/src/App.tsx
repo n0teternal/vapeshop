@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { CustomerAuthProvider } from "./auth/CustomerAuthProvider";
 import { Layout } from "./app/Layout";
 import { ReferralBootstrap } from "./components/ReferralBootstrap";
+import { WebsiteAuthGate } from "./components/WebsiteAuthGate";
 import { AdminPage } from "./pages/AdminPage";
 import { CartPage } from "./pages/CartPage";
 import { CatalogPage } from "./pages/CatalogPage";
@@ -18,6 +19,7 @@ export default function App() {
       <CustomerAuthProvider>
         <AppStateProvider>
           <ReferralBootstrap />
+          <WebsiteAuthGate />
           <Routes>
             <Route element={<Layout />}>
               <Route path="/" element={<CatalogPage />} />

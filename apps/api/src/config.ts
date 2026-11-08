@@ -46,6 +46,9 @@ export type AppConfig = {
     deliveryUpgradesEnabled: boolean;
     vvoEnabled: boolean;
   };
+  security: {
+    trustProxy: boolean;
+  };
   productImagesBaseUrl: string | null;
   adminHistory: {
     ownerTgUserId: number;
@@ -267,6 +270,12 @@ export const config: AppConfig = (() => {
     features: {
       deliveryUpgradesEnabled: parseBooleanEnv("DELIVERY_UPGRADES_ENABLED", true),
       vvoEnabled: parseBooleanEnv("VVO_ENABLED", false),
+    },
+    security: {
+      // Hosted production deployments normally sit behind Railway/Render/etc.
+      // and need the real client IP for rate limiting. A direct deployment can
+      // opt out explicitly with TRUST_PROXY=false.
+      trustProxy: parseBooleanEnv("TRUST_PROXY", !isDev),
     },
     productImagesBaseUrl: readEnv("PRODUCT_IMAGES_BASE_URL"),
     adminHistory: {

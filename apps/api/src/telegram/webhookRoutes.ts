@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { config } from "../config.js";
 import { isHttpError } from "../httpError.js";
@@ -113,6 +114,14 @@ function getHeaderValue(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (Array.isArray(value) && typeof value[0] === "string") return value[0];
   return undefined;
+}
+
+function hasValidWebhookSecret(value: string | undefined): boolean {
+  if (!value) return false;
+
+  const received = Buffer.from(value, "utf8");
+  const expected = Buffer.from(config.telegram.webhookSecret, "utf8");
+  return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
 function parseCitySlug(value: unknown): CitySlug | null {
@@ -838,18 +847,10 @@ async function handlePendingInboundQuantity(message: ParsedTextMessage): Promise
 export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: unknown }>("/api/telegram/webhook", async (request, reply) => {
     const secretHeader = getHeaderValue(request.headers["x-telegram-bot-api-secret-token"]);
-    // If the webhook was configured with a secret token, Telegram will send it in a header.
-    // In practice it's easy to forget setting the secret on Telegram side; in that case we keep working
-    // (but log a warning) instead of silently breaking all admin buttons.
-    if (!secretHeader) {
-      request.log.warn("Telegram webhook called without x-telegram-bot-api-secret-token header");
-    } else if (secretHeader !== config.telegram.webhookSecret) {
-      // Stay permissive to avoid breaking the bot when TELEGRAM_WEBHOOK_SECRET changes but setWebhook wasn't updated.
-      // NOTE: Best practice is to keep the secret in sync and reject mismatches.
-      request.log.warn(
-        { got: secretHeader, expected: config.telegram.webhookSecret },
-        "Telegram webhook secret token mismatch; continuing anyway",
-      );
+    if (!hasValidWebhookSecret(secretHeader)) {
+      // Reject before parsing or acting on the update. Never log either secret.
+      request.log.warn("Rejected Telegram webhook with an invalid secret token");
+      return reply.code(401).send({ ok: false, error: { code: "UNAUTHORIZED", message: "Unauthorized" } });
     }
 
     const startCommand = parseStartCommand(request.body);
