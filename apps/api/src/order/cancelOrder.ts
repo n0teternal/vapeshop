@@ -16,25 +16,6 @@ type OrderRow = {
   coupon_id: string | null;
 };
 
-type OrderInventoryReservationRow = {
-  product_id: string | null;
-  qty: number;
-};
-
-type InventoryRow = {
-  product_id: string;
-  city_id: number;
-  in_stock: boolean;
-  stock_qty: number | null;
-};
-
-type RestoredInventory = {
-  productId: string;
-  previousStockQty: number;
-  previousInStock: boolean;
-  restoredQty: number;
-};
-
 type CityRow = {
   slug: string;
 };
@@ -44,133 +25,6 @@ function parseOrderStatus(value: unknown): OrderStatus {
     return value;
   }
   return "new";
-}
-
-function isPositiveInt(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value > 0;
-}
-
-async function rollbackRestoredInventory(params: {
-  supabase: ReturnType<typeof createServiceSupabaseClient>;
-  cityId: number;
-  restorations: RestoredInventory[];
-}): Promise<void> {
-  for (let i = params.restorations.length - 1; i >= 0; i -= 1) {
-    const row = params.restorations[i];
-    if (!row) continue;
-    const expectedQtyAfterRestore = row.previousStockQty + row.restoredQty;
-
-    try {
-      await params.supabase
-        .from("inventory")
-        .update({
-          stock_qty: row.previousStockQty,
-          in_stock: row.previousInStock,
-        })
-        .eq("city_id", params.cityId)
-        .eq("product_id", row.productId)
-        .eq("stock_qty", expectedQtyAfterRestore);
-    } catch {
-      // Best-effort rollback; original error is more important.
-    }
-  }
-}
-
-async function restoreOrderInventory(params: {
-  supabase: ReturnType<typeof createServiceSupabaseClient>;
-  orderId: string;
-  cityId: number;
-}): Promise<RestoredInventory[]> {
-  const { data: reservationRows, error: reservationsError } = await params.supabase
-    .from("order_inventory_reservations")
-    .select("product_id,qty")
-    .eq("order_id", params.orderId);
-
-  if (reservationsError) {
-    throw new HttpError(
-      500,
-      "DB",
-      `Failed to load inventory reservations for cancellation: ${reservationsError.message}`,
-    );
-  }
-
-  const qtyByProductId = new Map<string, number>();
-  for (const row of (reservationRows ?? []) as OrderInventoryReservationRow[]) {
-    if (typeof row.product_id !== "string") continue;
-    if (!isPositiveInt(row.qty)) continue;
-    qtyByProductId.set(row.product_id, (qtyByProductId.get(row.product_id) ?? 0) + row.qty);
-  }
-
-  const productIds = Array.from(qtyByProductId.keys());
-  if (productIds.length === 0) return [];
-
-  const { data: inventoryRows, error: inventoryError } = await params.supabase
-    .from("inventory")
-    .select("product_id,city_id,in_stock,stock_qty")
-    .eq("city_id", params.cityId)
-    .in("product_id", productIds);
-
-  if (inventoryError) {
-    throw new HttpError(500, "DB", `Failed to load inventory for cancellation: ${inventoryError.message}`);
-  }
-
-  const inventoryByProductId = new Map<string, InventoryRow>();
-  for (const row of (inventoryRows ?? []) as InventoryRow[]) {
-    inventoryByProductId.set(row.product_id, row);
-  }
-
-  const restorations: RestoredInventory[] = [];
-
-  for (const [productId, qty] of qtyByProductId.entries()) {
-    const inventoryRow = inventoryByProductId.get(productId);
-    if (!inventoryRow) {
-      throw new HttpError(
-        409,
-        "INVENTORY_MISSING",
-        `Inventory row missing for cancelled order item: ${productId}`,
-      );
-    }
-    if (inventoryRow.stock_qty === null) {
-      continue;
-    }
-
-    const nextStockQty = inventoryRow.stock_qty + qty;
-    const nextInStock = nextStockQty > 0;
-
-    const { data: updatedInventory, error: updateInventoryError } = await params.supabase
-      .from("inventory")
-      .update({
-        stock_qty: nextStockQty,
-        in_stock: nextInStock,
-      })
-      .eq("city_id", params.cityId)
-      .eq("product_id", productId)
-      .eq("stock_qty", inventoryRow.stock_qty)
-      .eq("in_stock", inventoryRow.in_stock)
-      .select("product_id")
-      .maybeSingle();
-
-    if (updateInventoryError || !updatedInventory) {
-      await rollbackRestoredInventory({
-        supabase: params.supabase,
-        cityId: params.cityId,
-        restorations,
-      });
-      throw new HttpError(409, "INVENTORY_CONFLICT", `Failed to restore stock for product: ${productId}`);
-    }
-
-    restorations.push({
-      productId,
-      previousStockQty: inventoryRow.stock_qty,
-      previousInStock: inventoryRow.in_stock,
-      restoredQty: qty,
-    });
-
-    inventoryRow.stock_qty = nextStockQty;
-    inventoryRow.in_stock = nextInStock;
-  }
-
-  return restorations;
 }
 
 export async function cancelOrderAndRestoreInventory(params: {
@@ -247,48 +101,30 @@ export async function cancelOrderAndRestoreInventory(params: {
     );
   }
 
-  let restorations: RestoredInventory[] = [];
-  if (typeof cityId === "number") {
-    restorations = await restoreOrderInventory({
-      supabase,
-      orderId: params.orderId,
-      cityId,
-    });
+  const { data: changed, error: cancellationError } = await supabase.rpc(
+    "cancel_order_and_restore_inventory",
+    { p_order_id: params.orderId },
+  );
+  if (cancellationError) {
+    const message = cancellationError.message ?? "Failed to cancel order";
+    if (cancellationError.code === "P0002" || message.includes("ORDER_NOT_FOUND")) {
+      throw new HttpError(404, "NOT_FOUND", "Order not found");
+    }
+    if (message.includes("ORDER_FINAL")) {
+      throw new HttpError(409, "ORDER_FINAL", "Completed order cannot be cancelled");
+    }
+    if (message.includes("ORDER_EDIT_IN_PROGRESS")) {
+      throw new HttpError(409, "ORDER_EDIT_IN_PROGRESS", "Order is being edited, try again in a moment");
+    }
+    if (message.includes("INVENTORY_MISSING")) {
+      throw new HttpError(409, "INVENTORY_MISSING", "Inventory row is missing for this order");
+    }
+    throw new HttpError(409, "ORDER_CONFLICT", `Failed to cancel order: ${message}`);
+  }
+  if (typeof changed !== "boolean") {
+    throw new HttpError(500, "DB", "Order cancellation returned an invalid result");
   }
 
-  let updateQuery = supabase.from("orders").update({ status: "cancelled" }).eq("id", params.orderId);
-  updateQuery = rawStatus === null ? updateQuery.is("status", null) : updateQuery.eq("status", rawStatus);
-
-  const { data: updatedOrder, error: updateOrderError } = await updateQuery
-    .select("status")
-    .maybeSingle();
-
-  if (updateOrderError || !updatedOrder) {
-    if (typeof cityId === "number" && restorations.length > 0) {
-      await rollbackRestoredInventory({
-        supabase,
-        cityId,
-        restorations,
-      });
-    }
-
-    const { data: freshOrder, error: freshOrderError } = await supabase
-      .from("orders")
-      .select("status")
-      .eq("id", params.orderId)
-      .maybeSingle();
-
-    if (!freshOrderError && freshOrder) {
-      const freshStatus = parseOrderStatus((freshOrder as Pick<OrderRow, "status">).status);
-      if (freshStatus === "cancelled") {
-        return { changed: false, status: "cancelled" };
-      }
-    }
-
-    throw new HttpError(409, "ORDER_CONFLICT", "Failed to mark order as cancelled");
-  }
-
-  await releasePromoCodeUsage((order as OrderRow).coupon_id);
-
-  return { changed: true, status: "cancelled" };
+  if (changed) await releasePromoCodeUsage((order as OrderRow).coupon_id);
+  return { changed, status: "cancelled" };
 }

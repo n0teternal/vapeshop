@@ -286,7 +286,7 @@ async function syncStaffInventoryFromWorkbook(params: {
   const productIds = Array.from(new Set(stockRows.map((row) => row.productId)));
   const productIdChunks = chunk(productIds, STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE);
   const staffIdChunks = chunk(staffIds, REPORT_IN_FILTER_CHUNK_SIZE);
-  const [staffResults, cityInventoryPages, allocationPages] = await Promise.all([
+  const [staffResults, cityInventoryPages, allocationPages, reservationPages] = await Promise.all([
     Promise.all(
       staffIdChunks.map((staffIdChunk) =>
         supabase.from("staff_members").select("id").in("id", staffIdChunk),
@@ -320,6 +320,21 @@ async function syncStaffInventoryFromWorkbook(params: {
         }),
       ),
     ),
+    Promise.all(
+      productIdChunks.map((productIdChunk) =>
+        fetchAllPages({
+          fetchPage: (from, to) =>
+            supabase
+              .from("order_inventory_reservations")
+              .select("product_id,qty,orders!inner(city_id,status)")
+              .eq("orders.city_id", params.cityId)
+              .in("orders.status", ["new", "processing"])
+              .in("product_id", productIdChunk)
+              .range(from, to),
+          onError: (message) => new HttpError(500, "DB", `Failed to load active reservations: ${message}`),
+        }),
+      ),
+    ),
   ]);
 
   const loadedStaffIds = new Set<number>();
@@ -337,6 +352,10 @@ async function syncStaffInventoryFromWorkbook(params: {
     product_id: string;
     stock_qty: number;
   }>;
+  const activeReservations = reservationPages.flat() as Array<{
+    product_id: string;
+    qty: number;
+  }>;
 
   if (loadedStaffIds.size !== staffIds.length) {
     throw new HttpError(400, "BAD_REQUEST", "Workbook references an unknown staff member");
@@ -349,100 +368,16 @@ async function syncStaffInventoryFromWorkbook(params: {
     (row) => !cityQtyByProductId.has(row.productId) && row.stockQty > 0,
   );
   if (missingRowsWithStock.length > 0) {
-    const missingProductIds = Array.from(
-      new Set(missingRowsWithStock.map((row) => row.productId)),
+    throw new HttpError(
+      400,
+      "INVENTORY_MISSING",
+      "Staff workbook contains positive stock for a product that is absent from city inventory. " +
+        "Add the city stock first; imports cannot restore products or stock automatically.",
     );
-    const existingProductIds = new Set<string>();
-    for (const productIdChunk of chunk(
-      missingProductIds,
-      STAFF_INVENTORY_IMPORT_PRODUCT_QUERY_CHUNK_SIZE,
-    )) {
-      const { data, error } = await supabase
-        .from("products")
-        .select("id")
-        .in("id", productIdChunk);
-      if (error) throw new HttpError(500, "DB", `Failed to load missing products: ${error.message}`);
-      for (const product of data ?? []) existingProductIds.add(product.id);
-    }
-
-    const sourceRowByProductId = new Map<string, ImportedStaffInventoryRow>();
-    for (const row of missingRowsWithStock) {
-      if (!sourceRowByProductId.has(row.productId)) sourceRowByProductId.set(row.productId, row);
-    }
-
-    const productsToRestore = missingProductIds
-      .filter((productId) => !existingProductIds.has(productId))
-      .map((productId) => {
-        const source = sourceRowByProductId.get(productId);
-        if (!source) throw new HttpError(500, "DB", "Missing staff product source row");
-        const product = source.product;
-        if (
-          product.title.length === 0 ||
-          !Number.isFinite(product.basePrice) ||
-          product.basePrice < 0 ||
-          !/^[a-z0-9][a-z0-9_-]*$/i.test(product.categorySlug)
-        ) {
-          throw new HttpError(
-            400,
-            "BAD_REQUEST",
-            `Cannot restore product ${productId} from staff sheet`,
-          );
-        }
-        return {
-          id: productId,
-          title: product.title,
-          description: product.description,
-          category_slug: product.categorySlug,
-          base_price: product.basePrice,
-          image_url: product.imageUrl,
-          is_active: product.isActive,
-        };
-      });
-    if (productsToRestore.length > 0) {
-      const { error } = await supabase.from("products").upsert(productsToRestore, { onConflict: "id" });
-      if (error) throw new HttpError(500, "DB", `Failed to restore staff products: ${error.message}`);
-    }
-
-    const importedQtyByMissingProductId = new Map<string, number>();
-    for (const row of missingRowsWithStock) {
-      importedQtyByMissingProductId.set(
-        row.productId,
-        (importedQtyByMissingProductId.get(row.productId) ?? 0) + row.stockQty,
-      );
-    }
-    const retainedQtyByMissingProductId = new Map<string, number>();
-    for (const allocation of currentAllocations) {
-      if (!importedQtyByMissingProductId.has(allocation.product_id)) continue;
-      if (staffIds.includes(allocation.staff_id)) continue;
-      retainedQtyByMissingProductId.set(
-        allocation.product_id,
-        (retainedQtyByMissingProductId.get(allocation.product_id) ?? 0) + allocation.stock_qty,
-      );
-    }
-
-    const restoredInventory = missingProductIds.map((productId) => {
-      const stockQty =
-        (importedQtyByMissingProductId.get(productId) ?? 0) +
-        (retainedQtyByMissingProductId.get(productId) ?? 0);
-      cityQtyByProductId.set(productId, stockQty);
-      return {
-        city_id: params.cityId,
-        product_id: productId,
-        in_stock: stockQty > 0,
-        stock_qty: stockQty,
-        price_override: null,
-      };
-    });
-    const { error: restoreInventoryError } = await supabase
-      .from("inventory")
-      .upsert(restoredInventory, { onConflict: "product_id,city_id" });
-    if (restoreInventoryError) {
-      throw new HttpError(500, "DB", `Failed to restore city inventory: ${restoreInventoryError.message}`);
-    }
   }
 
-  // Staff sheets include every product. Zero rows for products already removed from the city are stale
-  // bookkeeping entries and must not block a catalog import.
+  // Staff sheets include every product. A zero for a removed city product is
+  // harmless bookkeeping, but a positive value above was rejected explicitly.
   const rowsWithCityInventory = rows.filter((row) => cityQtyByProductId.has(row.productId));
   const productIdsWithCityInventory = Array.from(
     new Set(rowsWithCityInventory.map((row) => row.productId)),
@@ -461,24 +396,26 @@ async function syncStaffInventoryFromWorkbook(params: {
       (retainedQtyByProductId.get(allocation.product_id) ?? 0) + allocation.stock_qty,
     );
   }
+  const reservedQtyByProductId = new Map<string, number>();
+  for (const reservation of activeReservations) {
+    reservedQtyByProductId.set(
+      reservation.product_id,
+      (reservedQtyByProductId.get(reservation.product_id) ?? 0) + reservation.qty,
+    );
+  }
 
   for (const productId of productIdsWithCityInventory) {
     const cityQty = cityQtyByProductId.get(productId);
     if (cityQty === null || cityQty === undefined) continue;
     const totalStaffQty =
       (importedQtyByProductId.get(productId) ?? 0) + (retainedQtyByProductId.get(productId) ?? 0);
-    if (totalStaffQty > cityQty) {
-      // The workbook records staff stock separately. Keep the city total large enough to cover it
-      // so later staff sales cannot make the shared city balance negative.
-      const { error } = await supabase
-        .from("inventory")
-        .update({ stock_qty: totalStaffQty, in_stock: totalStaffQty > 0 })
-        .eq("city_id", params.cityId)
-        .eq("product_id", productId);
-      if (error) {
-        throw new HttpError(500, "DB", `Failed to align city stock with staff stock: ${error.message}`);
-      }
-      cityQtyByProductId.set(productId, totalStaffQty);
+    if (totalStaffQty > cityQty + (reservedQtyByProductId.get(productId) ?? 0)) {
+      throw new HttpError(
+        400,
+        "STAFF_STOCK_EXCEEDS_CITY",
+        "Staff stock in the workbook exceeds the existing city stock. " +
+          "Correct the quantities instead of increasing city stock automatically.",
+      );
     }
   }
 
@@ -2312,15 +2249,6 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
         if (!cityInventory) throw new HttpError(404, "INVENTORY_MISSING", "City inventory row is missing");
 
-        if (cityInventory.stock_qty !== null) {
-          const otherStaffQty = (allocations ?? [])
-            .filter((row) => row.staff_id !== parsed.data.staffId)
-            .reduce((sum, row) => sum + row.stock_qty, 0);
-          if (otherStaffQty + parsed.data.stockQty > cityInventory.stock_qty) {
-            throw new HttpError(400, "STAFF_STOCK_EXCEEDS_CITY", "Staff stock cannot exceed city stock");
-          }
-        }
-
         const currentStaffQty =
           (allocations ?? []).find((row) => row.staff_id === parsed.data.staffId)?.stock_qty ?? 0;
         if (parsed.data.stockQty > currentStaffQty) {
@@ -3176,6 +3104,46 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
         if (!city) {
           throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
+        }
+
+        // City quantity plus active order reservations is the physical upper
+        // bound for stock already issued to people. Without this guard an
+        // inventory edit could silently make the shared balance smaller than
+        // goods that are physically assigned to staff.
+        const [
+          { data: allocations, error: allocationsError },
+          { data: activeReservations, error: reservationsError },
+        ] = await Promise.all([
+          supabase
+            .from("staff_inventory")
+            .select("stock_qty")
+            .eq("city_id", city.id)
+            .eq("product_id", parsed.data.productId),
+          supabase
+            .from("order_inventory_reservations")
+            .select("qty,orders!inner(city_id,status)")
+            .eq("product_id", parsed.data.productId)
+            .eq("orders.city_id", city.id)
+            .in("orders.status", ["new", "processing"]),
+        ]);
+        if (allocationsError) {
+          throw new HttpError(500, "DB", `Failed to load staff allocations: ${allocationsError.message}`);
+        }
+        if (reservationsError) {
+          throw new HttpError(500, "DB", `Failed to load active reservations: ${reservationsError.message}`);
+        }
+        const allocatedQty = (allocations ?? []).reduce((sum, row) => sum + row.stock_qty, 0);
+        const reservedQty = (activeReservations ?? []).reduce((sum, row) => sum + row.qty, 0);
+        if (
+          parsed.data.stockQty !== null &&
+          parsed.data.stockQty !== undefined &&
+          parsed.data.stockQty + reservedQty < allocatedQty
+        ) {
+          throw new HttpError(
+            400,
+            "STAFF_STOCK_EXCEEDS_CITY",
+            "City stock cannot be less than the quantity already assigned to staff",
+          );
         }
 
         const { error } = await supabase.from("inventory").upsert(

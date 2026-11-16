@@ -965,7 +965,7 @@ export async function applyOrderEdit(params: {
 
   const orderComment = buildOrderComment(payload);
   const nowIso = new Date().toISOString();
-  const { error: updateOrderError } = await supabase
+  const { data: updatedOrder, error: updateOrderError } = await supabase
     .from("orders")
     .update({
       delivery_method: payload.deliveryMethod,
@@ -980,9 +980,12 @@ export async function applyOrderEdit(params: {
       edited_at: nowIso,
       edit_session_expires_at: null,
     })
-    .eq("id", order.id);
+    .eq("id", order.id)
+    .in("status", ["new", "processing"])
+    .select("id")
+    .maybeSingle();
 
-  if (updateOrderError) {
+  if (updateOrderError || !updatedOrder) {
     if (reservationRowsChanged) {
       try {
         await replaceOrderInventoryReservations({
@@ -1002,7 +1005,13 @@ export async function applyOrderEdit(params: {
       cityId: city.id,
       updates: inventoryUpdates,
     });
-    throw new HttpError(500, "DB", `Failed to update order after edit: ${updateOrderError.message}`);
+    throw new HttpError(
+      updateOrderError ? 500 : 409,
+      updateOrderError ? "DB" : "ORDER_FINAL",
+      updateOrderError
+        ? `Failed to update order after edit: ${updateOrderError.message}`
+        : "Order was completed or cancelled while it was being edited",
+    );
   }
 
   return { orderId: order.id };

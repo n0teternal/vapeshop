@@ -141,6 +141,70 @@ export async function listActiveStaffForCity(cityId: number): Promise<StaffMembe
   return (data ?? []).map((staff) => ({ id: staff.id, name: staff.name, isActive: staff.is_active }));
 }
 
+// This is a UI pre-check only; complete_order_with_staff_sale repeats the
+// check while holding row locks.  Keeping it here means the bot does not offer
+// a seller who is missing even one line of the order.
+export async function listStaffAbleToCompleteOrder(params: {
+  cityId: number;
+  orderId: string;
+}): Promise<StaffMember[]> {
+  const supabase = createServiceSupabaseClient();
+  const { data: orderItems, error: orderItemsError } = await supabase
+    .from("order_items")
+    .select("product_id,qty")
+    .eq("order_id", params.orderId);
+  if (orderItemsError) {
+    throw new HttpError(500, "DB", `Failed to load order items: ${orderItemsError.message}`);
+  }
+
+  const neededByProductId = new Map<string, number>();
+  for (const row of orderItems ?? []) {
+    if (typeof row.product_id !== "string" || !Number.isInteger(row.qty) || row.qty <= 0) continue;
+    neededByProductId.set(row.product_id, (neededByProductId.get(row.product_id) ?? 0) + row.qty);
+  }
+  const productIds = Array.from(neededByProductId.keys());
+  if (productIds.length === 0) return [];
+
+  const { data: allocations, error: allocationsError } = await supabase
+    .from("staff_inventory")
+    .select("staff_id,product_id,stock_qty")
+    .eq("city_id", params.cityId)
+    .in("product_id", productIds)
+    .gt("stock_qty", 0);
+  if (allocationsError) {
+    throw new HttpError(500, "DB", `Failed to load staff inventory: ${allocationsError.message}`);
+  }
+
+  const stockByStaffId = new Map<number, Map<string, number>>();
+  for (const row of allocations ?? []) {
+    const stockByProductId = stockByStaffId.get(row.staff_id) ?? new Map<string, number>();
+    stockByProductId.set(row.product_id, (stockByProductId.get(row.product_id) ?? 0) + row.stock_qty);
+    stockByStaffId.set(row.staff_id, stockByProductId);
+  }
+  const eligibleIds = Array.from(stockByStaffId.entries())
+    .filter(([, stockByProductId]) =>
+      Array.from(neededByProductId.entries()).every(
+        ([productId, neededQty]) => (stockByProductId.get(productId) ?? 0) >= neededQty,
+      ),
+    )
+    .map(([staffId]) => staffId);
+  if (eligibleIds.length === 0) return [];
+
+  const { data: staff, error: staffError } = await supabase
+    .from("staff_members")
+    .select("id,name,is_active")
+    .eq("is_active", true)
+    .in("id", eligibleIds)
+    .order("name", { ascending: true });
+  if (staffError) throw new HttpError(500, "DB", `Failed to load staff: ${staffError.message}`);
+
+  return (staff ?? []).map((member) => ({
+    id: member.id,
+    name: member.name,
+    isActive: member.is_active,
+  }));
+}
+
 export async function getStaffInventoryLines(params: {
   cityId: number;
   staffId: number;
@@ -173,7 +237,11 @@ export async function getStaffInventoryLines(params: {
 
 export async function listIssuableInventoryProducts(cityId: number): Promise<IssuableInventoryProduct[]> {
   const supabase = createServiceSupabaseClient();
-  const [{ data: cityInventory, error: cityInventoryError }, { data: allocations, error: allocationsError }] =
+  const [
+    { data: cityInventory, error: cityInventoryError },
+    { data: allocations, error: allocationsError },
+    { data: activeReservations, error: reservationsError },
+  ] =
     await Promise.all([
       supabase
         .from("inventory")
@@ -183,12 +251,20 @@ export async function listIssuableInventoryProducts(cityId: number): Promise<Iss
         .from("staff_inventory")
         .select("product_id,stock_qty")
         .eq("city_id", cityId),
+      supabase
+        .from("order_inventory_reservations")
+        .select("product_id,qty,orders!inner(city_id,status)")
+        .eq("orders.city_id", cityId)
+        .in("orders.status", ["new", "processing"]),
     ]);
   if (cityInventoryError) {
     throw new HttpError(500, "DB", `Failed to load city inventory: ${cityInventoryError.message}`);
   }
   if (allocationsError) {
     throw new HttpError(500, "DB", `Failed to load staff allocations: ${allocationsError.message}`);
+  }
+  if (reservationsError) {
+    throw new HttpError(500, "DB", `Failed to load active reservations: ${reservationsError.message}`);
   }
 
   const allocatedQtyByProductId = new Map<string, number>();
@@ -198,10 +274,22 @@ export async function listIssuableInventoryProducts(cityId: number): Promise<Iss
       (allocatedQtyByProductId.get(row.product_id) ?? 0) + row.stock_qty,
     );
   }
+  const reservedQtyByProductId = new Map<string, number>();
+  for (const row of activeReservations ?? []) {
+    reservedQtyByProductId.set(
+      row.product_id,
+      (reservedQtyByProductId.get(row.product_id) ?? 0) + row.qty,
+    );
+  }
   const rows = (cityInventory ?? []).filter((row) => {
     if (!row.in_stock) return false;
     if (row.stock_qty === null) return true;
-    return row.stock_qty - (allocatedQtyByProductId.get(row.product_id) ?? 0) > 0;
+    return (
+      row.stock_qty +
+        (reservedQtyByProductId.get(row.product_id) ?? 0) -
+        (allocatedQtyByProductId.get(row.product_id) ?? 0) >
+      0
+    );
   });
   if (rows.length === 0) return [];
 
@@ -220,7 +308,9 @@ export async function listIssuableInventoryProducts(cityId: number): Promise<Iss
         availableQty:
           row.stock_qty === null
             ? null
-            : row.stock_qty - (allocatedQtyByProductId.get(row.product_id) ?? 0),
+            : row.stock_qty +
+              (reservedQtyByProductId.get(row.product_id) ?? 0) -
+              (allocatedQtyByProductId.get(row.product_id) ?? 0),
         isActive: product?.is_active ?? false,
       };
     })
@@ -241,77 +331,29 @@ export async function issueStockToStaff(params: {
   }
 
   const supabase = createServiceSupabaseClient();
-  const [{ data: staff, error: staffError }, { data: cityStock, error: cityStockError }, { data: allocations, error: allocationsError }] =
-    await Promise.all([
-      supabase.from("staff_members").select("id,is_active").eq("id", params.staffId).maybeSingle(),
-      supabase
-        .from("inventory")
-        .select("stock_qty,in_stock")
-        .eq("city_id", params.cityId)
-        .eq("product_id", params.productId)
-        .maybeSingle(),
-      supabase
-        .from("staff_inventory")
-        .select("staff_id,stock_qty")
-        .eq("city_id", params.cityId)
-        .eq("product_id", params.productId),
-    ]);
-  if (staffError) throw new HttpError(500, "DB", `Failed to load staff member: ${staffError.message}`);
-  if (cityStockError) throw new HttpError(500, "DB", `Failed to load city stock: ${cityStockError.message}`);
-  if (allocationsError) throw new HttpError(500, "DB", `Failed to load staff allocations: ${allocationsError.message}`);
-  if (!staff || !staff.is_active) throw new HttpError(400, "STAFF_UNAVAILABLE", "Staff member is unavailable");
-  if (!cityStock || !cityStock.in_stock) {
-    throw new HttpError(400, "OUT_OF_STOCK", "Product is unavailable in this city");
-  }
+  const { data, error } = await supabase.rpc("issue_stock_to_staff", {
+    p_city_id: params.cityId,
+    p_staff_id: params.staffId,
+    p_product_id: params.productId,
+    p_qty: params.qty,
+    p_note: params.note?.trim() || null,
+  });
+  if (!error && data === true) return;
 
-  const currentStaffQty = (allocations ?? []).find((row) => row.staff_id === params.staffId)?.stock_qty ?? 0;
-  const allocatedTotal = (allocations ?? []).reduce((sum, row) => sum + row.stock_qty, 0);
-  if (cityStock.stock_qty !== null && allocatedTotal + params.qty > cityStock.stock_qty) {
+  const message = error?.message ?? "Failed to issue staff stock";
+  if (message.includes("STAFF_UNAVAILABLE")) {
+    throw new HttpError(400, "STAFF_UNAVAILABLE", "Staff member is unavailable");
+  }
+  if (message.includes("STAFF_STOCK_EXCEEDS_CITY")) {
     throw new HttpError(400, "STAFF_STOCK_EXCEEDS_CITY", "Not enough unallocated city stock");
   }
-
-  const nextQty = currentStaffQty + params.qty;
-  const { error: upsertError } = await supabase.from("staff_inventory").upsert(
-    {
-      city_id: params.cityId,
-      staff_id: params.staffId,
-      product_id: params.productId,
-      stock_qty: nextQty,
-    },
-    { onConflict: "staff_id,city_id,product_id" },
-  );
-  if (upsertError) {
-    throw new HttpError(500, "DB", `Failed to issue staff stock: ${upsertError.message}`);
+  if (message.includes("INVENTORY_MISSING")) {
+    throw new HttpError(400, "INVENTORY_MISSING", "City inventory row is missing");
   }
-
-  const { error: movementError } = await supabase.from("inventory_movements").insert({
-    city_id: params.cityId,
-    staff_id: params.staffId,
-    product_id: params.productId,
-    kind: "inbound",
-    qty: params.qty,
-    note: params.note?.trim() || null,
-  });
-  if (!movementError) return;
-
-  if (currentStaffQty === 0) {
-    await supabase
-      .from("staff_inventory")
-      .delete()
-      .eq("city_id", params.cityId)
-      .eq("staff_id", params.staffId)
-      .eq("product_id", params.productId)
-      .eq("stock_qty", nextQty);
-  } else {
-    await supabase
-      .from("staff_inventory")
-      .update({ stock_qty: currentStaffQty })
-      .eq("city_id", params.cityId)
-      .eq("staff_id", params.staffId)
-      .eq("product_id", params.productId)
-      .eq("stock_qty", nextQty);
+  if (message.includes("OUT_OF_STOCK")) {
+    throw new HttpError(400, "OUT_OF_STOCK", "Product is unavailable in this city");
   }
-  throw new HttpError(500, "DB", `Failed to record inbound movement: ${movementError.message}`);
+  throw new HttpError(500, "DB", `Failed to issue staff stock: ${message}`);
 }
 
 export async function exportInventoryMovementsXlsx(): Promise<Buffer> {
@@ -456,6 +498,9 @@ export async function completeOrderWithStaffSale(params: {
   }
   if (errorMessage.includes("STAFF_UNAVAILABLE")) {
     throw new HttpError(400, "STAFF_UNAVAILABLE", "Staff member is unavailable");
+  }
+  if (errorMessage.includes("ORDER_EDIT_IN_PROGRESS")) {
+    throw new HttpError(409, "ORDER_EDIT_IN_PROGRESS", "Order is being edited, try again in a moment");
   }
   if (errorMessage.includes("ORDER_CITY_MISSING")) {
     throw new HttpError(400, "BAD_REQUEST", "Order city is missing");

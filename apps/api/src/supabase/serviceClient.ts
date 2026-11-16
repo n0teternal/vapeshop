@@ -741,6 +741,20 @@ export type Database = {
           personal_last_bought_at: string | null;
         }>;
       };
+      cancel_order_and_restore_inventory: {
+        Args: { p_order_id: string };
+        Returns: boolean;
+      };
+      issue_stock_to_staff: {
+        Args: {
+          p_city_id: number;
+          p_staff_id: number;
+          p_product_id: string;
+          p_qty: number;
+          p_note?: string | null;
+        };
+        Returns: boolean;
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
