@@ -299,13 +299,28 @@ export function ProfilePage() {
               </div>
             </div>
           </div>
-          {shouldShowLoyaltyStatus ? (
-              <ProfileStatusBand
-                pointsBalance={loyaltyBalance?.pointsBalance ?? null}
-                pointsNextExpiresAt={loyaltyBalance?.pointsNextExpiresAt ?? null}
+          {shouldShowLoyaltyStatus && loyaltyStatusQuery.isError && !loyaltyBalance ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/80 bg-muted/30 p-4" role="alert">
+              <span className="text-sm text-muted-foreground">
+                Не удалось загрузить кэшбек и баллы. Попробуйте ещё раз.
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={loyaltyStatusQuery.isFetching}
+                onClick={() => void loyaltyStatusQuery.refetch()}
+              >
+                {loyaltyStatusQuery.isFetching ? "Загружаем…" : "Повторить"}
+              </Button>
+            </div>
+          ) : shouldShowLoyaltyStatus ? (
+            <ProfileStatusBand
+              pointsBalance={loyaltyBalance?.pointsBalance ?? null}
+              pointsNextExpiresAt={loyaltyBalance?.pointsNextExpiresAt ?? null}
               monthlySpent={loyaltyBalance?.monthlySpent ?? null}
-                cashbackLevel={loyaltyBalance?.cashbackLevel ?? null}
-              />
+              cashbackLevel={loyaltyBalance?.cashbackLevel ?? null}
+            />
           ) : null}
         </CardContent>
       </Card>

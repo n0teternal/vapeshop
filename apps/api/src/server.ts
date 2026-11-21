@@ -47,7 +47,7 @@ import {
   syncFinalOrderTelegramState,
 } from "./order/telegramFinalStatus.js";
 import { HttpError, isHttpError } from "./httpError.js";
-import { runLoyaltyRetentionSweep } from "./loyalty/service.js";
+import { getLoyaltySummary, runLoyaltyRetentionSweep } from "./loyalty/service.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { requireAdmin } from "./admin/requireAdmin.js";
 import {
@@ -1273,6 +1273,42 @@ app.post<{
         : "Unexpected error";
 
     request.log.error({ err: e }, "Referral bootstrap failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.get<{
+  Reply:
+    | ApiSuccess<{
+        pointsBalance: number;
+        pointsNextExpiresAt: string | null;
+        monthlySpent: number;
+        cashbackLevel: number;
+      }>
+    | ErrorResponse;
+}>("/api/loyalty/status", async (request, reply) => {
+  try {
+    const user = await requireCustomerUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+    const summary = await getLoyaltySummary(user.id);
+
+    return reply.code(200).send(ok({
+      pointsBalance: summary.pointsBalance,
+      pointsNextExpiresAt: summary.pointsNextExpiresAt,
+      monthlySpent: summary.monthlySpent,
+      cashbackLevel: summary.cashbackLevel,
+    }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+
+    request.log.error({ err: e }, "Loyalty status request failed");
     return reply.code(statusCode).send({ ok: false, error: { code, message } });
   }
 });
