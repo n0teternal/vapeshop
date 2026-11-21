@@ -25,6 +25,7 @@ import {
   getStaffInventoryLines,
   issueStockToStaff,
   listActiveStaffForCity,
+  listStaffAbleToCompleteOrder,
   listStaffMembers,
   listIssuableInventoryProducts,
   type StaffMember,
@@ -1192,9 +1193,12 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       }
 
       try {
-        const staff = await listActiveStaffForCity(city.id);
+        const staff = await listStaffAbleToCompleteOrder({ cityId: city.id, orderId: order.id });
         if (staff.length === 0) {
-          await answerSafe(parsed.callbackQueryId, "Для этого города ещё не добавлены остатки сотрудников");
+          await answerSafe(
+            parsed.callbackQueryId,
+            "Ни у кого нет полного комплекта для этого заказа. Сначала переведите товар между сотрудниками.",
+          );
           return reply.code(200).send({ ok: true });
         }
 
