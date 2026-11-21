@@ -94,6 +94,15 @@ export function ProfilePage() {
     staleTime: LOYALTY_STATUS_STALE_TIME_MS,
   });
   const loyaltyBalance = loyaltyStatusQuery.data ?? null;
+  const loyaltyErrorCode =
+    loyaltyStatusQuery.error instanceof ApiError
+      ? `${loyaltyStatusQuery.error.code} · HTTP ${loyaltyStatusQuery.error.status}`
+      : loyaltyStatusQuery.error
+        ? "NO_API_RESPONSE"
+        : null;
+  const isLoyaltyTelegramSessionExpired =
+    loyaltyStatusQuery.error instanceof ApiError &&
+    loyaltyStatusQuery.error.code === "TG_INIT_DATA_EXPIRED";
 
   useEffect(() => {
     let cancelled = false;
@@ -302,7 +311,12 @@ export function ProfilePage() {
           {shouldShowLoyaltyStatus && loyaltyStatusQuery.isError && !loyaltyBalance ? (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/80 bg-muted/30 p-4" role="alert">
               <span className="text-sm text-muted-foreground">
-                Не удалось загрузить кэшбек и баллы. Попробуйте ещё раз.
+                {isLoyaltyTelegramSessionExpired
+                  ? "Сеанс Telegram устарел. Закройте магазин и откройте его заново."
+                  : "Не удалось загрузить кэшбек и баллы. Попробуйте ещё раз."}
+                {loyaltyErrorCode ? (
+                  <span className="mt-1 block text-xs opacity-70">Код: {loyaltyErrorCode}</span>
+                ) : null}
               </span>
               <Button
                 type="button"
