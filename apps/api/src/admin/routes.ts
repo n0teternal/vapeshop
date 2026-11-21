@@ -271,6 +271,11 @@ async function syncStaffInventoryFromWorkbook(params: {
   buffer: Buffer;
   cityId: number;
   productIdRemap: Readonly<Record<string, string>>;
+  // The products import runs immediately before this sync. Comparing its
+  // resulting city quantities with this snapshot lets us validate only the
+  // products actually touched by this workbook, rather than rejecting a
+  // catalog update because of an older, unrelated allocation discrepancy.
+  previousCityQtyByProductId?: ReadonlyMap<string, number | null>;
 }): Promise<number> {
   const importedRows = readStaffInventorySheets(params.buffer).map((row) => ({
     ...row,
@@ -364,8 +369,46 @@ async function syncStaffInventoryFromWorkbook(params: {
   const cityQtyByProductId = new Map(cityInventory.map((row) => [row.product_id, row.stock_qty]));
   const rows = stockRows;
 
-  const missingRowsWithStock = rows.filter(
-    (row) => !cityQtyByProductId.has(row.productId) && row.stockQty > 0,
+  const currentStaffQtyByKey = new Map(
+    currentAllocations.map((row) => [`${row.staff_id}:${row.product_id}`, row.stock_qty]),
+  );
+  const changedRows = rows.filter(
+    (row) =>
+      (currentStaffQtyByKey.get(`${row.staffId}:${row.productId}`) ?? 0) !== row.stockQty,
+  );
+
+  const changedCityProductIds = new Set<string>();
+  const previousCityQtyByProductId = params.previousCityQtyByProductId;
+  if (previousCityQtyByProductId) {
+    for (const [productId, cityQty] of cityQtyByProductId) {
+      if (
+        !previousCityQtyByProductId.has(productId) ||
+        previousCityQtyByProductId.get(productId) !== cityQty
+      ) {
+        changedCityProductIds.add(productId);
+      }
+    }
+    for (const productId of previousCityQtyByProductId.keys()) {
+      if (!cityQtyByProductId.has(productId)) changedCityProductIds.add(productId);
+    }
+  }
+
+  // A workbook has one staff tab per person and therefore repeats every
+  // product. Existing inconsistencies in untouched rows must not prevent an
+  // admin from adding or editing another product. Any edited staff row or
+  // changed city quantity still receives the full integrity check below.
+  const productIdsToValidate = previousCityQtyByProductId
+    ? new Set([
+        ...changedRows.map((row) => row.productId),
+        ...changedCityProductIds,
+      ])
+    : new Set(rows.map((row) => row.productId));
+
+  const missingRowsWithStock = changedRows.filter(
+    (row) =>
+      productIdsToValidate.has(row.productId) &&
+      !cityQtyByProductId.has(row.productId) &&
+      row.stockQty > 0,
   );
   if (missingRowsWithStock.length > 0) {
     throw new HttpError(
@@ -379,8 +422,8 @@ async function syncStaffInventoryFromWorkbook(params: {
   // Staff sheets include every product. A zero for a removed city product is
   // harmless bookkeeping, but a positive value above was rejected explicitly.
   const rowsWithCityInventory = rows.filter((row) => cityQtyByProductId.has(row.productId));
-  const productIdsWithCityInventory = Array.from(
-    new Set(rowsWithCityInventory.map((row) => row.productId)),
+  const productIdsWithCityInventory = Array.from(productIdsToValidate).filter((productId) =>
+    cityQtyByProductId.has(productId),
   );
 
   const importedQtyByProductId = new Map<string, number>();
@@ -404,23 +447,39 @@ async function syncStaffInventoryFromWorkbook(params: {
     );
   }
 
+  const staffStockConflicts: string[] = [];
+  const titleByProductId = new Map(rows.map((row) => [row.productId, row.product.title]));
   for (const productId of productIdsWithCityInventory) {
     const cityQty = cityQtyByProductId.get(productId);
     if (cityQty === null || cityQty === undefined) continue;
     const totalStaffQty =
       (importedQtyByProductId.get(productId) ?? 0) + (retainedQtyByProductId.get(productId) ?? 0);
     if (totalStaffQty > cityQty + (reservedQtyByProductId.get(productId) ?? 0)) {
-      throw new HttpError(
-        400,
-        "STAFF_STOCK_EXCEEDS_CITY",
-        "Staff stock in the workbook exceeds the existing city stock. " +
-          "Correct the quantities instead of increasing city stock automatically.",
+      const reservedQty = reservedQtyByProductId.get(productId) ?? 0;
+      const title = titleByProductId.get(productId) ?? productId;
+      staffStockConflicts.push(
+        `${title}: staff ${totalStaffQty}, city ${cityQty}, reserved ${reservedQty}`,
       );
     }
   }
+  if (staffStockConflicts.length > 0) {
+    const listedConflicts = staffStockConflicts.slice(0, 5).join("; ");
+    const remaining = staffStockConflicts.length - 5;
+    throw new HttpError(
+      400,
+      "STAFF_STOCK_EXCEEDS_CITY",
+      "Staff stock exceeds the city stock after active reservations. " +
+        `${listedConflicts}${remaining > 0 ? `; and ${remaining} more` : ""}`,
+    );
+  }
+
+  const changedRowsWithCityInventory = changedRows.filter((row) =>
+    cityQtyByProductId.has(row.productId),
+  );
+  if (changedRowsWithCityInventory.length === 0) return 0;
 
   const { error: upsertError } = await supabase.from("staff_inventory").upsert(
-    rowsWithCityInventory.map((row) => ({
+    changedRowsWithCityInventory.map((row) => ({
       city_id: params.cityId,
       staff_id: row.staffId,
       product_id: row.productId,
@@ -432,7 +491,7 @@ async function syncStaffInventoryFromWorkbook(params: {
     throw new HttpError(500, "DB", `Failed to import staff inventory: ${upsertError.message}`);
   }
 
-  return rowsWithCityInventory.length;
+  return changedRowsWithCityInventory.length;
 }
 
 function sanitizeFileName(filename: string): string {
@@ -3807,6 +3866,31 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         }
         request.log.info({ encoding, fileName, mimeType }, "Decoded imported products file");
         const supabase = createServiceSupabaseClient();
+        let previousCityQtyByProductId: Map<string, number | null> | undefined;
+        if (isSpreadsheet && parsedQuery.data.citySlug) {
+          const { data: importCity, error: importCityError } = await supabase
+            .from("cities")
+            .select("id")
+            .eq("slug", parsedQuery.data.citySlug)
+            .maybeSingle();
+          if (importCityError) {
+            throw new HttpError(500, "DB", `Failed to load import city: ${importCityError.message}`);
+          }
+          if (importCity) {
+            const beforeImportInventory = await fetchAllPages({
+              fetchPage: (from, to) =>
+                supabase
+                  .from("inventory")
+                  .select("product_id,stock_qty")
+                  .eq("city_id", importCity.id)
+                  .range(from, to),
+              onError: (message) => new HttpError(500, "DB", `Failed to load city inventory: ${message}`),
+            });
+            previousCityQtyByProductId = new Map(
+              beforeImportInventory.map((row) => [row.product_id, row.stock_qty]),
+            );
+          }
+        }
         const useImagePrefix = parsedQuery.data.imageMode === "filename";
         if (useImagePrefix && !config.productImagesBaseUrl) {
           throw new HttpError(
@@ -3857,6 +3941,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
                 buffer,
                 cityId: selectedCity.id,
                 productIdRemap: result.productIdRemap,
+                ...(previousCityQtyByProductId ? { previousCityQtyByProductId } : {}),
               })
             : 0;
 
