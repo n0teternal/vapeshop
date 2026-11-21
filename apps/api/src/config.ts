@@ -259,7 +259,7 @@ export const config: AppConfig = (() => {
       pointsMaxSpendPercent: parsePercentIntEnv("REFERRAL_POINTS_MAX_SPEND_PERCENT", 50),
     },
     loyalty: {
-      expirationDays: 60,
+      expirationDays: 30,
       timezone: readEnv("LOYALTY_TIMEZONE") ?? "Asia/Vladivostok",
       cronSecret: readEnv("LOYALTY_CRON_SECRET"),
     },

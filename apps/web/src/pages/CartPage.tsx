@@ -1961,7 +1961,7 @@ export function CartPage() {
                     </label>
                     <div className="text-xs text-muted-foreground">
                       Можно оплатить до {pointsMaxSpendPercent}% корзины. Баллы действуют{" "}
-                      {pointsExpireAfterDays} дней после последнего успешного заказа.
+                      {pointsExpireAfterDays} дней с даты начисления. Новый заказ не продлевает срок уже начисленных баллов.
                     </div>
                     {pointsToSpend > 0 ? (
                       <div className="text-xs text-muted-foreground">

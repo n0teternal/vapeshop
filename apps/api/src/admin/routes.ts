@@ -1089,15 +1089,10 @@ function reportCustomerLoyaltyFields(
     rawPoints === undefined || rawPoints === null
       ? null
       : Math.max(0, Math.trunc(toNumber(rawPoints, "customer_profiles.bonus_points")));
-  const pointsExpiryMs = profile?.loyalty_expires_at
-    ? Date.parse(profile.loyalty_expires_at)
-    : Number.NaN;
-  const pointsExpired =
-    storedPoints !== null &&
-    storedPoints > 0 &&
-    Number.isFinite(pointsExpiryMs) &&
-    pointsExpiryMs <= nowMs;
-  const activePoints = storedPoints === null ? null : pointsExpired ? 0 : storedPoints;
+  // `loyalty_expires_at` is the nearest expiry batch. With per-accrual
+  // expiry, it no longer means that the whole balance becomes invalid at
+  // that instant. The loyalty RPC performs the actual FIFO write-off.
+  const activePoints = storedPoints;
 
   return {
     "Уровень лояльности":
@@ -1107,7 +1102,7 @@ function reportCustomerLoyaltyFields(
     "Кэшбэк, %": activeLevel ?? "",
     "Уровень действует до": storedLevel && tierExpiresAt ? formatReportDate(tierExpiresAt) : "",
     "Баллы на балансе": activePoints ?? "Нет данных",
-    "Баллы сгорают":
+    "Ближайшая часть баллов сгорит":
       storedPoints !== null && storedPoints > 0 && profile?.loyalty_expires_at
         ? formatReportDate(profile.loyalty_expires_at)
         : "",

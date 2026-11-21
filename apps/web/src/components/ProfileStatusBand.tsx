@@ -165,7 +165,7 @@ export function ProfileStatusBand({
           <strong>{formatPointsBalance(pointsBalance)}</strong>
         </div>
         <div className="loyalty-points-summary__row loyalty-points-summary__expiry">
-          <span>{expiryDate ? "Сгорят, если не заказать до" : "Баллы пока не сгорают"}</span>
+          <span>{expiryDate ? "Ближайшая часть баллов сгорит" : "Баллы пока не сгорают"}</span>
           {expiryDate ? <strong>{expiryDate}</strong> : null}
         </div>
       </div>

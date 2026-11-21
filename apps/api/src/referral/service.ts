@@ -544,7 +544,12 @@ export async function getReferralOverview(params: {
       referralId: row.referral_id,
       comment: row.comment,
       createdAt: row.created_at,
-      expiresAt: row.delta_points > 0 ? points.pointsNextExpiresAt : null,
+      expiresAt:
+        row.delta_points > 0
+          ? new Date(
+              Date.parse(row.created_at) + config.loyalty.expirationDays * 86_400_000,
+            ).toISOString()
+          : null,
     })),
     referrals: referralRows.map((row) => {
       const firstOrder = firstOrderByInviteeId.get(row.invitee_tg_user_id) ?? null;

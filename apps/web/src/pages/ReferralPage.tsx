@@ -230,7 +230,7 @@ export function ReferralPage() {
             <span className="text-primary">+{reward.invitee}</span> приглашенному.
           </div>
           <div className="mt-2 text-xs leading-5 text-muted-foreground">
-            Баллы сгорают через {reward.pointsExpireAfterDays} дней без успешного заказа. Ими можно оплатить до{" "}
+            Каждые начисленные баллы действуют {reward.pointsExpireAfterDays} дней. Новый заказ не продлевает срок уже начисленных баллов. Ими можно оплатить до{" "}
             {reward.pointsMaxSpendPercent}% корзины.
           </div>
         </CardContent>
@@ -245,7 +245,7 @@ export function ReferralPage() {
 
           {firstPage.pointsNextExpiresAt ? (
             <div className="text-xs text-muted-foreground">
-              Срок действия обновится после следующего успешного заказа. Сейчас баллы сгорят {formatDate(firstPage.pointsNextExpiresAt)}.
+              Ближайшая часть баллов сгорит {formatDate(firstPage.pointsNextExpiresAt)}.
             </div>
           ) : null}
 
