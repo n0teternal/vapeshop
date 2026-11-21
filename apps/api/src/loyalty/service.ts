@@ -125,8 +125,27 @@ async function expireIfDue(profile: LoyaltyProfileRow): Promise<LoyaltyProfileRo
     (!lastOrderMs || lastOrderMs + LOYALTY_STATUS_RETENTION_MS <= Date.now());
   if (!hasExpiredPoints && !hasExpiredStatus) return profile;
 
-  await expireLoyaltyPoints(profile.tg_user_id);
-  return (await loadProfile(profile.tg_user_id)) ?? profile;
+  try {
+    await expireLoyaltyPoints(profile.tg_user_id);
+    return (await loadProfile(profile.tg_user_id)) ?? profile;
+  } catch (error) {
+    // A status request must still be readable if the expiry worker is
+    // temporarily unavailable. The in-memory result applies the same expiry
+    // rules, so the customer never sees or spends expired benefits.
+    console.error("Failed to persist loyalty expiry", {
+      tgUserId: profile.tg_user_id,
+      hasExpiredPoints,
+      hasExpiredStatus,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      ...profile,
+      bonus_points: hasExpiredPoints ? 0 : profile.bonus_points,
+      loyalty_expires_at: hasExpiredPoints ? null : profile.loyalty_expires_at,
+      current_cashback_level: hasExpiredStatus ? 0 : profile.current_cashback_level,
+      monthly_spent: hasExpiredStatus ? 0 : profile.monthly_spent,
+    };
+  }
 }
 
 export async function getLoyaltySummary(tgUserId: number): Promise<LoyaltySummary> {

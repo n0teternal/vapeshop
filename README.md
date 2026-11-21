@@ -124,6 +124,7 @@ Dashboard → **SQL Editor** → выполните:
 - `supabase/alter_referrals_loyalty.sql` (ledger баллов + индексы + `tg_username`)
 - `supabase/alter_loyalty_program.sql` (кэшбек 3/5/7%, баланс, сгорание через 60 дней и атомарные операции)
 - `supabase/alter_loyalty_monthly_tiers.sql` (скользящие 30 дней для уровней и удержание статуса заказом раз в 60 дней)
+- `supabase/alter_loyalty_expiry_function_fix.sql` (исправление функции автоматического сгорания баллов и статуса)
 - `supabase/alter_promo_products.sql` (admin-only промо-товары по городам: старая/новая цена)
 - `supabase/alter_promotion_rules.sql` (правила автоматических скидок и типы акций)
 - `supabase/alter_staff_inventory.sql` (остатки сотрудников и движения продаж)

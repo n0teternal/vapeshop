@@ -344,14 +344,14 @@ begin
     );
   end if;
 
-  update public.customer_profiles
+  update public.customer_profiles as profile
   set
-    bonus_points = case when v_points_expired then 0 else bonus_points end,
-    loyalty_expires_at = case when v_points_expired then null else loyalty_expires_at end,
-    loyalty_notice_45_sent_at = case when v_points_expired then null else loyalty_notice_45_sent_at end,
-    loyalty_notice_59_sent_at = case when v_points_expired then null else loyalty_notice_59_sent_at end,
-    current_cashback_level = case when v_status_expired then 0 else current_cashback_level end,
-    monthly_spent = case when v_status_expired then 0 else monthly_spent end,
+    bonus_points = case when v_points_expired then 0 else profile.bonus_points end,
+    loyalty_expires_at = case when v_points_expired then null else profile.loyalty_expires_at end,
+    loyalty_notice_45_sent_at = case when v_points_expired then null else profile.loyalty_notice_45_sent_at end,
+    loyalty_notice_59_sent_at = case when v_points_expired then null else profile.loyalty_notice_59_sent_at end,
+    current_cashback_level = case when v_status_expired then 0 else profile.current_cashback_level end,
+    monthly_spent = case when v_status_expired then 0 else profile.monthly_spent end,
     updated_at = now()
   where tg_user_id = p_tg_user_id;
 
