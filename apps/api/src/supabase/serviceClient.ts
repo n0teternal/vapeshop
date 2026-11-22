@@ -317,6 +317,7 @@ export type Database = {
           referred_by_tg_user_id: number | null;
           referral_bound_at: string | null;
           tg_username: string | null;
+          tg_first_name: string | null;
           total_spent: number;
           monthly_spent: number;
           bonus_points: number;
@@ -337,6 +338,7 @@ export type Database = {
           referred_by_tg_user_id?: number | null;
           referral_bound_at?: string | null;
           tg_username?: string | null;
+          tg_first_name?: string | null;
           total_spent?: number;
           monthly_spent?: number;
           bonus_points?: number;
@@ -357,6 +359,7 @@ export type Database = {
           referred_by_tg_user_id?: number | null;
           referral_bound_at?: string | null;
           tg_username?: string | null;
+          tg_first_name?: string | null;
           total_spent?: number;
           monthly_spent?: number;
           bonus_points?: number;
@@ -379,6 +382,7 @@ export type Database = {
           qualified_order_id: string | null;
           qualified_at: string | null;
           rewarded_at: string | null;
+          inviter_reward_notified_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -389,6 +393,7 @@ export type Database = {
           qualified_order_id?: string | null;
           qualified_at?: string | null;
           rewarded_at?: string | null;
+          inviter_reward_notified_at?: string | null;
           created_at?: string;
         };
         Update: {
@@ -399,6 +404,7 @@ export type Database = {
           qualified_order_id?: string | null;
           qualified_at?: string | null;
           rewarded_at?: string | null;
+          inviter_reward_notified_at?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -413,6 +419,7 @@ export type Database = {
           max_discount: number | null;
           source: string;
           referral_id: number | null;
+          campaign_key: string | null;
           is_used: boolean;
           used_order_id: string | null;
           expires_at: string | null;
@@ -428,6 +435,7 @@ export type Database = {
           max_discount?: number | null;
           source?: string;
           referral_id?: number | null;
+          campaign_key?: string | null;
           is_used?: boolean;
           used_order_id?: string | null;
           expires_at?: string | null;
@@ -443,11 +451,51 @@ export type Database = {
           max_discount?: number | null;
           source?: string;
           referral_id?: number | null;
+          campaign_key?: string | null;
           is_used?: boolean;
           used_order_id?: string | null;
           expires_at?: string | null;
           created_at?: string;
           used_at?: string | null;
+        };
+        Relationships: [];
+      };
+      customer_reactivation_campaigns: {
+        Row: {
+          id: number;
+          tg_user_id: number;
+          last_completed_order_at: string;
+          coupon_id: string;
+          expires_at: string;
+          send_attempts: number;
+          last_send_attempt_at: string | null;
+          sent_at: string | null;
+          cancelled_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          tg_user_id: number;
+          last_completed_order_at: string;
+          coupon_id: string;
+          expires_at: string;
+          send_attempts?: number;
+          last_send_attempt_at?: string | null;
+          sent_at?: string | null;
+          cancelled_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          tg_user_id?: number;
+          last_completed_order_at?: string;
+          coupon_id?: string;
+          expires_at?: string;
+          send_attempts?: number;
+          last_send_attempt_at?: string | null;
+          sent_at?: string | null;
+          cancelled_at?: string | null;
+          created_at?: string;
         };
         Relationships: [];
       };

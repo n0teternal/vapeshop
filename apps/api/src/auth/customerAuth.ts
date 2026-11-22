@@ -4,6 +4,7 @@ import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 export type CustomerUser = {
   id: number;
   username: string | null;
+  firstName?: string | null;
   phone: string | null;
   email: string | null;
   source: "telegram" | "website" | "dev";

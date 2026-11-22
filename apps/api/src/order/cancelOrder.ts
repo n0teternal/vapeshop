@@ -1,5 +1,5 @@
 import { HttpError } from "../httpError.js";
-import { releasePromoCodeUsage } from "../promoCodes/service.js";
+import { releaseDiscountUsage } from "../coupons/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
 import {
   isCancellationLockedByDeliveryWindow,
@@ -125,6 +125,6 @@ export async function cancelOrderAndRestoreInventory(params: {
     throw new HttpError(500, "DB", "Order cancellation returned an invalid result");
   }
 
-  if (changed) await releasePromoCodeUsage((order as OrderRow).coupon_id);
+  if (changed) await releaseDiscountUsage((order as OrderRow).coupon_id);
   return { changed, status: "cancelled" };
 }

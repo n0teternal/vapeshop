@@ -19,8 +19,7 @@ type ReferralOverview = {
   referralLink: string;
   rewardPoints: {
     inviter: number;
-    invitee: number;
-    minFirstOrderTotalRub: number;
+    inviteeDiscountPercent: number;
     pointsExpireAfterDays: number;
     pointsMaxSpendPercent: number;
   };
@@ -75,8 +74,8 @@ function formatDate(value: string): string {
 
 function statusLabel(status: ReferralStatus): string {
   if (status === "joined_no_order") return "Присоединился, заказа нет";
-  if (status === "first_order_created_not_paid") return "Первый заказ создан, не оплачен";
-  return "Первый заказ done, бонус начислен обоим";
+  if (status === "first_order_created_not_paid") return "Первый заказ создан, ждём завершения";
+  return "Первый заказ завершён, бонус начислен";
 }
 
 function inviteeDisplayName(row: ReferralOverview["referrals"][number]): string {
@@ -224,10 +223,9 @@ export function ReferralPage() {
       <Card className="border-primary/60 bg-primary/10">
         <CardContent className="p-4">
           <div className="text-sm font-semibold leading-6 text-foreground">
-            Если приглашенный оформит заказ от{" "}
-            <span className="text-primary">{reward.minFirstOrderTotalRub} ₽</span> и оплатит его:{" "}
-            <span className="text-primary">+{reward.inviter}</span> пригласившему,{" "}
-            <span className="text-primary">+{reward.invitee}</span> приглашенному.
+            Приглашённый получает <span className="text-primary">{reward.inviteeDiscountPercent}%</span>{" "}
+            на первый заказ. Когда он успешно заберёт первый заказ, вам начислится{" "}
+            <span className="text-primary">+{reward.inviter} баллов</span>.
           </div>
           <div className="mt-2 text-xs leading-5 text-muted-foreground">
             Каждые начисленные баллы действуют {reward.pointsExpireAfterDays} дней. Новый заказ не продлевает срок уже начисленных баллов. Ими можно оплатить до{" "}

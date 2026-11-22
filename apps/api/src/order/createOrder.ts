@@ -1,6 +1,12 @@
 import { HttpError } from "../httpError.js";
 import { getMaxPointsDiscountForTotal, spendPointsForOrder } from "../referral/service.js";
-import { releasePromoCodeUsage, reservePromoCode } from "../promoCodes/service.js";
+import { reservePromoCode } from "../promoCodes/service.js";
+import {
+  releaseDiscountUsage,
+  reserveAutomaticCoupon,
+  reserveCoupon,
+  normalizeCouponId,
+} from "../coupons/service.js";
 import {
   calculatePromotionDiscount,
   loadActivePromotionRules,
@@ -288,7 +294,12 @@ export async function createOrder(params: {
   if (!city) {
     throw new HttpError(400, "CITY_NOT_FOUND", "City not found");
   }
-  if (discountsAllowed && params.payload.citySlug === "vvo" && params.payload.couponCode) {
+  if (
+    discountsAllowed &&
+    params.payload.citySlug === "vvo" &&
+    params.payload.couponCode &&
+    !normalizeCouponId(params.payload.couponCode)
+  ) {
     throw new HttpError(
       400,
       "PROMO_CODES_CITY_DISABLED",
@@ -444,18 +455,32 @@ export async function createOrder(params: {
     inv.in_stock = nextInStock;
   }
 
-  let promoReservation: Awaited<ReturnType<typeof reservePromoCode>> = null;
+  let promoReservation: Awaited<ReturnType<typeof reservePromoCode>> | Awaited<ReturnType<typeof reserveCoupon>> = null;
   const couponCodeForOrder = discountsAllowed ? params.payload.couponCode : null;
   try {
-    promoReservation = await reservePromoCode({
-      code: couponCodeForOrder,
-      orderTotal: itemsAfterPromotionDiscount,
-      lines: lines.map((line) => ({
-        categorySlug: line.categorySlug,
-        total: line.unitPrice * line.qty,
-      })),
-      tgUserId: effectiveTgUser.id,
-    });
+    if (couponCodeForOrder) {
+      promoReservation = await reserveCoupon({
+        couponId: couponCodeForOrder,
+        tgUserId: effectiveTgUser.id,
+        orderTotal: itemsAfterPromotionDiscount,
+      });
+      if (!promoReservation) {
+        promoReservation = await reservePromoCode({
+          code: couponCodeForOrder,
+          orderTotal: itemsAfterPromotionDiscount,
+          lines: lines.map((line) => ({
+            categorySlug: line.categorySlug,
+            total: line.unitPrice * line.qty,
+          })),
+          tgUserId: effectiveTgUser.id,
+        });
+      }
+    } else {
+      promoReservation = await reserveAutomaticCoupon({
+        tgUserId: effectiveTgUser.id,
+        orderTotal: itemsAfterPromotionDiscount,
+      });
+    }
   } catch (e) {
     await rollbackReservedInventory({
       supabase,
@@ -504,7 +529,7 @@ export async function createOrder(params: {
     .single();
 
   if (orderError) {
-    await releasePromoCodeUsage(promoReservation?.code);
+    await releaseDiscountUsage(promoReservation?.code);
     await rollbackReservedInventory({
       supabase,
       cityId: city.id,
@@ -513,7 +538,7 @@ export async function createOrder(params: {
     throw new HttpError(500, "DB", `Failed to create order: ${orderError.message}`);
   }
   if (!createdOrder) {
-    await releasePromoCodeUsage(promoReservation?.code);
+    await releaseDiscountUsage(promoReservation?.code);
     await rollbackReservedInventory({
       supabase,
       cityId: city.id,
@@ -534,7 +559,7 @@ export async function createOrder(params: {
   if (orderItemsError) {
     // Best-effort cleanup to avoid dangling order without items.
     await supabase.from("orders").delete().eq("id", createdOrder.id);
-    await releasePromoCodeUsage(promoReservation?.code);
+    await releaseDiscountUsage(promoReservation?.code);
     await rollbackReservedInventory({
       supabase,
       cityId: city.id,
@@ -558,7 +583,7 @@ export async function createOrder(params: {
       // Deleting the order also deletes its order items and any partially
       // inserted reservation rows via the foreign-key cascade.
       await supabase.from("orders").delete().eq("id", createdOrder.id);
-      await releasePromoCodeUsage(promoReservation?.code);
+      await releaseDiscountUsage(promoReservation?.code);
       await rollbackReservedInventory({
         supabase,
         cityId: city.id,
@@ -581,7 +606,7 @@ export async function createOrder(params: {
       });
     } catch (e) {
       await supabase.from("orders").delete().eq("id", createdOrder.id);
-      await releasePromoCodeUsage(promoReservation?.code);
+      await releaseDiscountUsage(promoReservation?.code);
       await rollbackReservedInventory({
         supabase,
         cityId: city.id,

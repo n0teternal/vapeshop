@@ -58,6 +58,7 @@ type ParsedStartCommand = {
   chatId: number;
   fromId: number;
   fromUsername: string | null;
+  fromFirstName: string | null;
   startParam: string | null;
 };
 
@@ -190,12 +191,15 @@ function parseStartCommand(update: unknown): ParsedStartCommand | null {
 
   const usernameRaw =
     isRecord(from) && typeof from.username === "string" ? from.username.trim() : "";
+  const firstNameRaw =
+    isRecord(from) && typeof from.first_name === "string" ? from.first_name.trim() : "";
   const startParamRaw = typeof match[1] === "string" ? match[1].trim() : "";
 
   return {
     chatId,
     fromId,
     fromUsername: usernameRaw.length > 0 ? usernameRaw : null,
+    fromFirstName: firstNameRaw.length > 0 ? firstNameRaw : null,
     startParam: startParamRaw.length > 0 ? startParamRaw : null,
   };
 }
@@ -463,6 +467,9 @@ async function buildCustomerMenuView(params: {
     });
     return buildCustomerReferralMenuMessage({
       referralLink: referral.referralLink,
+      invitedCount: referral.invitedCount,
+      rewardedCount: referral.rewardedCount,
+      earnedPoints: referral.earnedPoints,
     });
   }
 
@@ -860,6 +867,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
         await bootstrapReferralProfile({
           tgUserId: startCommand.fromId,
           tgUsername: startCommand.fromUsername,
+          tgFirstName: startCommand.fromFirstName,
           startParam: startCommand.startParam,
         });
       } catch (e) {

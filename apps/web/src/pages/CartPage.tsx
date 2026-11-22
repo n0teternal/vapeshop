@@ -74,9 +74,12 @@ type CouponPreviewResponse = {
   discountAmount: number;
   categorySlug: string | null;
   requiresPreviousOrder: boolean;
+  source?: "referral_first_order" | "reactivation_30d";
+  label?: string;
+  expiresAt?: string | null;
 };
 
-const DEFAULT_POINTS_EXPIRE_AFTER_DAYS = 60;
+const DEFAULT_POINTS_EXPIRE_AFTER_DAYS = 30;
 const DEFAULT_POINTS_MAX_SPEND_PERCENT = 50;
 const BLG_JUNE_2026_DELIVERY_TIME_SLOTS = [
   "11:00-13:00",
@@ -645,6 +648,8 @@ export function CartPage() {
   const [activePromotionRules, setActivePromotionRules] = useState<ActivePromotionRule[]>([]);
   const [couponCode, setCouponCode] = useState("");
   const [couponPreview, setCouponPreview] = useState<CouponPreviewResponse | null>(null);
+  const [automaticCouponPreview, setAutomaticCouponPreview] =
+    useState<CouponPreviewResponse | null>(null);
   const [couponApplying, setCouponApplying] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [recommendationCatalogItems, setRecommendationCatalogItems] = useState<CatalogItem[]>([]);
@@ -697,6 +702,7 @@ export function CartPage() {
   // hidden regular-delivery fields.
   const requiresBlgDeliverySchedule = showBlgDeliverySchedule && !isAdminOrderEditSession;
   const promoCodesAvailable = state.city === "blg" && discountsAllowed;
+  const personalCouponsAvailable = discountsAllowed;
   const availableDeliveryTimeSlots = useMemo(
     () =>
       getBlgDeliveryTimeSlotsForDate(checkoutDraft.deliveryDate).filter((slot) =>
@@ -835,9 +841,10 @@ export function CartPage() {
     : 0;
   const itemsAfterPromotionDiscount = Math.max(0, itemsTotal - promotionDiscountAmount);
   const totalAfterPromotionDiscount = itemsAfterPromotionDiscount + deliveryFee;
-  const couponDiscountAmount = orderEditSession || !promoCodesAvailable
+  const appliedCouponPreview = couponPreview ?? automaticCouponPreview;
+  const couponDiscountAmount = orderEditSession || !personalCouponsAvailable
     ? 0
-    : Math.min(itemsAfterPromotionDiscount, couponPreview?.discountAmount ?? 0);
+    : Math.min(itemsAfterPromotionDiscount, appliedCouponPreview?.discountAmount ?? 0);
   const totalAfterCouponDiscount = Math.max(
     0,
     totalAfterPromotionDiscount - couponDiscountAmount,
@@ -1092,6 +1099,43 @@ export function CartPage() {
   }, [promoCodesAvailable]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (
+      !personalCouponsAvailable ||
+      !canUseLoyalty ||
+      orderEditSession ||
+      !state.city ||
+      itemsAfterPromotionDiscount <= 0
+    ) {
+      setAutomaticCouponPreview(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void apiPost<CouponPreviewResponse | null>("/api/coupons/preview-active", {
+      citySlug: state.city,
+      total: itemsAfterPromotionDiscount,
+    })
+      .then((data) => {
+        if (!cancelled) setAutomaticCouponPreview(data);
+      })
+      .catch(() => {
+        if (!cancelled) setAutomaticCouponPreview(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    canUseLoyalty,
+    itemsAfterPromotionDiscount,
+    orderEditSession,
+    personalCouponsAvailable,
+    state.city,
+  ]);
+
+  useEffect(() => {
     const intervalId = window.setInterval(() => {
       setNowMs(Date.now());
     }, 30_000);
@@ -1312,14 +1356,14 @@ export function CartPage() {
       }
 
       const couponCodeForOrder =
-        !discountsAllowed || orderEditSession || !promoCodesAvailable
+        !discountsAllowed || orderEditSession
           ? null
-          : couponPreview?.code ?? null;
+          : couponPreview?.code ?? automaticCouponPreview?.code ?? null;
       if (
         !orderEditSession &&
         promoCodesAvailable &&
         couponCode.trim().length > 0 &&
-        !couponCodeForOrder
+        !couponPreview
       ) {
         setSubmitError("Примените промокод или очистите поле промокода.");
         return;
@@ -1640,13 +1684,13 @@ export function CartPage() {
           </Card>
         ) : null}
 
-        {promoCodesAvailable && couponDiscountAmount > 0 && couponPreview ? (
+        {personalCouponsAvailable && couponDiscountAmount > 0 && appliedCouponPreview ? (
           <Card className="rounded-[1.15rem] border border-primary/30 bg-primary/[0.08]">
             <CardContent className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold">
-                    Промокод {couponPreview.code}
+                    {appliedCouponPreview.label ?? `Промокод ${appliedCouponPreview.code}`}
                   </div>
                 </div>
                 <div className="shrink-0 text-sm font-semibold text-sky-500">
@@ -1908,9 +1952,9 @@ export function CartPage() {
                 </div>
               </label>
 
-              {couponPreview && couponDiscountAmount > 0 ? (
+              {appliedCouponPreview && couponDiscountAmount > 0 ? (
                 <div className="text-xs text-emerald-500">
-                  {couponPreview.code}: -{formatPriceRub(couponDiscountAmount)}
+                  {appliedCouponPreview.label ?? appliedCouponPreview.code}: -{formatPriceRub(couponDiscountAmount)}
                 </div>
               ) : null}
 

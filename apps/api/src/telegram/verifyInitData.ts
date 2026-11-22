@@ -6,6 +6,7 @@ type InitDataParams = Readonly<Record<string, string>>;
 export type TelegramUser = {
   id: number;
   username: string | null;
+  firstName: string | null;
 };
 
 export type VerifiedTelegramInitData = {
@@ -46,6 +47,7 @@ export function parseInitDataUser(userJson: string): TelegramUser {
 
   const id = parsed.id;
   const username = parsed.username;
+  const firstName = parsed.first_name;
 
   if (typeof id !== "number" || !Number.isInteger(id) || id <= 0) {
     throw new HttpError(401, "TG_INIT_DATA_INVALID", "Invalid user.id");
@@ -54,6 +56,7 @@ export function parseInitDataUser(userJson: string): TelegramUser {
   return {
     id,
     username: typeof username === "string" && username.length > 0 ? username : null,
+    firstName: typeof firstName === "string" && firstName.trim().length > 0 ? firstName.trim() : null,
   };
 }
 

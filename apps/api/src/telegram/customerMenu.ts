@@ -70,7 +70,7 @@ export function buildCustomerMainMenuMessage(): CustomerMenuMessage {
     inlineKeyboard.push([{ text: "🛍 Магазин", url: shopUrl }]);
   }
   inlineKeyboard.push([{ text: "📦 Мои заказы", callback_data: "menu:orders" }]);
-  inlineKeyboard.push([{ text: "👥 Пригласить друга", callback_data: "menu:referral" }]);
+  inlineKeyboard.push([{ text: "🎁 Подарки друзьям", callback_data: "menu:referral" }]);
 
   return {
     text: "<b>Главное меню</b>\n\nВыберите, что открыть.",
@@ -110,8 +110,11 @@ export function buildCustomerOrdersMenuMessage(
 
 export function buildCustomerReferralMenuMessage(params: {
   referralLink: string;
+  invitedCount: number;
+  rewardedCount: number;
+  earnedPoints: number;
 }): CustomerMenuMessage {
-  const shareText = "Рады видеть тебя в магазине SDFG!";
+  const shareText = "Дарю тебе 10% на первый заказ в Smoke_Diller 🎁";
   const shareUrl =
     `https://t.me/share/url?url=${encodeURIComponent(params.referralLink)}` +
     `&text=${encodeURIComponent(shareText)}`;
@@ -130,8 +133,10 @@ export function buildCustomerReferralMenuMessage(params: {
 
   return {
     text:
-      "<b>Пригласить друга</b>\n\n" +
-      "Нажмите кнопку ниже, чтобы открыть список чатов и отправить приглашение.\n\n" +
+      "<b>🎁 Подарки друзьям</b>\n\n" +
+      "Друг получает <b>10% на первый заказ</b>. Когда он успешно заберёт заказ, вам автоматически начислится <b>+200 баллов</b>.\n\n" +
+      `<b>Статистика:</b> приглашено — ${params.invitedCount}, заказ завершили — ${params.rewardedCount}, заработано — ${params.earnedPoints} баллов.\n\n` +
+      "Отправьте свою ссылку другу:\n" +
       `<code>${escapeHtml(params.referralLink)}</code>`,
     reply_markup: {
       inline_keyboard: inlineKeyboard,

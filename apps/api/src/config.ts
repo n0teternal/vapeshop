@@ -29,8 +29,6 @@ export type AppConfig = {
   };
   referrals: {
     pointsInviter: number;
-    pointsInvitee: number;
-    minFirstOrderTotalRub: number;
     pointsMaxSpendPercent: number;
   };
   loyalty: {
@@ -253,9 +251,9 @@ export const config: AppConfig = (() => {
       ),
     },
     referrals: {
-      pointsInviter: parsePositiveIntEnv("REFERRAL_POINTS_INVITER", 100),
-      pointsInvitee: parsePositiveIntEnv("REFERRAL_POINTS_INVITEE", 100),
-      minFirstOrderTotalRub: parsePositiveIntEnv("REFERRAL_MIN_FIRST_ORDER_TOTAL", 1200),
+      // Product rule: the friend receives a personal 10% first-order
+      // coupon; only the inviter gets loyalty points after completion.
+      pointsInviter: 200,
       pointsMaxSpendPercent: parsePercentIntEnv("REFERRAL_POINTS_MAX_SPEND_PERCENT", 50),
     },
     loyalty: {

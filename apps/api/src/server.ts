@@ -48,6 +48,7 @@ import {
 } from "./order/telegramFinalStatus.js";
 import { HttpError, isHttpError } from "./httpError.js";
 import { getLoyaltySummary, runLoyaltyRetentionSweep } from "./loyalty/service.js";
+import { runReactivationSweep } from "./reactivation/service.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { requireAdmin } from "./admin/requireAdmin.js";
 import {
@@ -58,6 +59,7 @@ import {
 import { config } from "./config.js";
 import { loadActivePromotionRules } from "./promotions/rules.js";
 import { previewPromoCode, type PromoCodeLine } from "./promoCodes/service.js";
+import { getAutomaticCoupon, previewCoupon } from "./coupons/service.js";
 import { getProductRecommendations } from "./recommendations/service.js";
 import { bootstrapReferralProfile, getReferralOverview } from "./referral/service.js";
 import { createServiceSupabaseClient } from "./supabase/serviceClient.js";
@@ -758,6 +760,7 @@ app.post<{
     await bootstrapReferralProfile({
       tgUserId: user.id,
       tgUsername: user.username,
+      tgFirstName: user.firstName ?? null,
       startParam: null,
     });
 
@@ -777,7 +780,9 @@ app.post<{
 });
 
 app.post<{
-  Reply: ApiSuccess<Awaited<ReturnType<typeof runLoyaltyRetentionSweep>>> | ErrorResponse;
+  Reply: ApiSuccess<Awaited<ReturnType<typeof runLoyaltyRetentionSweep>> & {
+    reactivation: Awaited<ReturnType<typeof runReactivationSweep>>;
+  }> | ErrorResponse;
 }>("/api/internal/loyalty/retention", async (request, reply) => {
   try {
     const configuredSecret = config.loyalty.cronSecret;
@@ -790,7 +795,11 @@ app.post<{
       throw new HttpError(401, "UNAUTHORIZED", "Invalid loyalty cron secret");
     }
 
-    return reply.code(200).send(ok(await runLoyaltyRetentionSweep()));
+    const [loyalty, reactivation] = await Promise.all([
+      runLoyaltyRetentionSweep(),
+      runReactivationSweep(),
+    ]);
+    return reply.code(200).send(ok({ ...loyalty, reactivation }));
   } catch (e: unknown) {
     const statusCode = isHttpError(e) ? e.statusCode : 500;
     const code = isHttpError(e) ? e.code : "INTERNAL";
@@ -1077,12 +1086,17 @@ app.post<{
         typeof request.body.initData === "string" ? request.body.initData : undefined,
     });
 
-    const result = await previewPromoCode({
-      code,
-      orderTotal: total,
-      lines,
-      tgUserId: user?.id ?? null,
-    });
+    const personalCoupon = user
+      ? await previewCoupon({ couponId: code, tgUserId: user.id, orderTotal: total })
+      : null;
+    const result =
+      personalCoupon ??
+      (await previewPromoCode({
+        code,
+        orderTotal: total,
+        lines,
+        tgUserId: user?.id ?? null,
+      }));
     return reply.code(200).send(ok(result));
   } catch (e: unknown) {
     const statusCode = isHttpError(e) ? e.statusCode : 500;
@@ -1094,6 +1108,50 @@ app.post<{
         : "Unexpected error";
 
     request.log.error({ err: e }, "Promo code preview failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.post<{
+  Body: unknown;
+  Reply:
+    | ApiSuccess<{
+        code: string;
+        discountAmount: number;
+        categorySlug: null;
+        requiresPreviousOrder: false;
+        source: "referral_first_order" | "reactivation_30d";
+        label: string;
+        expiresAt: string | null;
+      } | null>
+    | ErrorResponse;
+}>("/api/coupons/preview-active", async (request, reply) => {
+  try {
+    if (!isRecord(request.body)) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid JSON body");
+    }
+    if (request.body.citySlug !== "blg" && request.body.citySlug !== "vvo") {
+      throw new HttpError(400, "BAD_REQUEST", "citySlug must be 'blg' or 'vvo'");
+    }
+    const totalRaw = request.body.total;
+    const total = typeof totalRaw === "number" ? totalRaw : typeof totalRaw === "string" ? Number(totalRaw) : Number.NaN;
+    if (!Number.isFinite(total) || total < 0) {
+      throw new HttpError(400, "BAD_REQUEST", "total must be a non-negative number");
+    }
+    const user = await requireCustomerUser({
+      headers: request.headers as Record<string, unknown>,
+      initDataFallback: typeof request.body.initData === "string" ? request.body.initData : undefined,
+    });
+    return reply.code(200).send(ok(await getAutomaticCoupon({ tgUserId: user.id, orderTotal: total })));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+    request.log.error({ err: e }, "Automatic coupon preview failed");
     return reply.code(statusCode).send({ ok: false, error: { code, message } });
   }
 });
@@ -1259,6 +1317,7 @@ app.post<{
     const result = await bootstrapReferralProfile({
       tgUserId: context.user.id,
       tgUsername: context.user.username,
+      tgFirstName: context.user.firstName ?? null,
       startParam: context.startParam,
     });
 
@@ -1330,6 +1389,7 @@ app.get<{
     const overview = await getReferralOverview({
       tgUserId: context.user.id,
       tgUsername: context.user.username,
+      tgFirstName: context.user.firstName ?? null,
       startParam: context.startParam,
       limit,
       offset,
@@ -1704,6 +1764,7 @@ app.post<{ Body: unknown; Reply: ErrorResponse | SuccessResponse }>(
           await bootstrapReferralProfile({
             tgUserId: orderUser.id,
             tgUsername: orderUser.username,
+            tgFirstName: orderUser.firstName ?? null,
             startParam,
           });
         } catch (bootstrapError) {

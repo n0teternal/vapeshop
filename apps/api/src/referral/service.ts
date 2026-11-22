@@ -7,8 +7,9 @@ import {
   getPointsBalance as getProgramPointsBalance,
   spendPointsForOrder as spendProgramPointsForOrder,
 } from "../loyalty/service.js";
+import { createPersonalCoupon } from "../coupons/service.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
-import { getBotUsername } from "../telegram/api.js";
+import { getBotUsername, sendMessage } from "../telegram/api.js";
 
 const REFERRAL_CODE_PREFIX = "ref_";
 const REFERRAL_CODE_LENGTH = 8;
@@ -16,7 +17,6 @@ const REFERRALS_MAX_PAGE_LIMIT = 100;
 const POINTS_HISTORY_LIMIT = 30;
 
 const REFERRAL_INVITER_BONUS_KIND = "referral_inviter_bonus";
-const REFERRAL_INVITEE_BONUS_KIND = "referral_invitee_bonus";
 
 let cachedBotUsername: string | null | undefined;
 
@@ -26,6 +26,7 @@ type CustomerProfileRow = {
   referred_by_tg_user_id: number | null;
   referral_bound_at: string | null;
   tg_username: string | null;
+  tg_first_name: string | null;
   created_at: string;
 };
 
@@ -71,8 +72,7 @@ export type ReferralOverview = {
   referralLink: string;
   rewardPoints: {
     inviter: number;
-    invitee: number;
-    minFirstOrderTotalRub: number;
+    inviteeDiscountPercent: number;
     pointsExpireAfterDays: number;
     pointsMaxSpendPercent: number;
   };
@@ -152,21 +152,6 @@ function sanitizeMiniAppShortName(value: string | null): string | null {
   return cleaned;
 }
 
-function numberFromUnknown(value: unknown): number {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value)
-        : Number.NaN;
-
-  if (!Number.isFinite(parsed)) {
-    throw new HttpError(500, "DB", `Invalid numeric value: ${String(value)}`);
-  }
-
-  return parsed;
-}
-
 export function getMaxPointsDiscountForTotal(totalRub: number): number {
   if (!Number.isFinite(totalRub) || totalRub <= 0) return 0;
   return Math.max(0, Math.floor((totalRub * config.referrals.pointsMaxSpendPercent) / 100));
@@ -212,7 +197,7 @@ async function loadCustomerProfile(tgUserId: number): Promise<CustomerProfileRow
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
     .from("customer_profiles")
-    .select("tg_user_id,referral_code,referred_by_tg_user_id,referral_bound_at,tg_username,created_at")
+    .select("tg_user_id,referral_code,referred_by_tg_user_id,referral_bound_at,tg_username,tg_first_name,created_at")
     .eq("tg_user_id", tgUserId)
     .maybeSingle();
 
@@ -226,6 +211,7 @@ async function loadCustomerProfile(tgUserId: number): Promise<CustomerProfileRow
 async function insertCustomerProfile(params: {
   tgUserId: number;
   tgUsername: string | null;
+  tgFirstName: string | null;
 }): Promise<CustomerProfileRow> {
   const supabase = createServiceSupabaseClient();
 
@@ -237,11 +223,12 @@ async function insertCustomerProfile(params: {
       .insert({
         tg_user_id: params.tgUserId,
         tg_username: params.tgUsername,
+        tg_first_name: params.tgFirstName,
         referral_code: referralCode,
         created_at: nowIso,
         updated_at: nowIso,
       })
-      .select("tg_user_id,referral_code,referred_by_tg_user_id,referral_bound_at,tg_username,created_at")
+      .select("tg_user_id,referral_code,referred_by_tg_user_id,referral_bound_at,tg_username,tg_first_name,created_at")
       .single();
 
     if (!error && data) {
@@ -274,24 +261,38 @@ async function insertCustomerProfile(params: {
 async function ensureCustomerProfile(params: {
   tgUserId: number;
   tgUsername: string | null;
+  tgFirstName?: string | null;
 }): Promise<CustomerProfileRow> {
   const current = await loadCustomerProfile(params.tgUserId);
   if (!current) {
-    return insertCustomerProfile(params);
+    return insertCustomerProfile({
+      tgUserId: params.tgUserId,
+      tgUsername: params.tgUsername,
+      tgFirstName: params.tgFirstName ?? null,
+    });
   }
 
   const nextUsername = params.tgUsername;
-  if (nextUsername && nextUsername !== current.tg_username) {
+  const nextFirstName = params.tgFirstName?.trim() || null;
+  if (
+    (nextUsername && nextUsername !== current.tg_username) ||
+    (nextFirstName && nextFirstName !== current.tg_first_name)
+  ) {
     const supabase = createServiceSupabaseClient();
     const { error } = await supabase
       .from("customer_profiles")
       .update({
         tg_username: nextUsername,
+        tg_first_name: nextFirstName ?? current.tg_first_name,
         updated_at: new Date().toISOString(),
       })
       .eq("tg_user_id", params.tgUserId);
     if (!error) {
-      return { ...current, tg_username: nextUsername };
+      return {
+        ...current,
+        tg_username: nextUsername ?? current.tg_username,
+        tg_first_name: nextFirstName ?? current.tg_first_name,
+      };
     }
   }
 
@@ -365,17 +366,38 @@ async function bindReferralByStartParam(params: {
     throw new HttpError(500, "DB", `Failed to create referral link: ${referralInsertError.message}`);
   }
 
+  const { data: referral, error: referralLoadError } = await supabase
+    .from("referrals")
+    .select("id")
+    .eq("invitee_tg_user_id", params.profile.tg_user_id)
+    .maybeSingle();
+  if (referralLoadError) {
+    throw new HttpError(500, "DB", `Failed to load referral link: ${referralLoadError.message}`);
+  }
+  const referralId = (referral as { id?: unknown } | null)?.id;
+  if (typeof referralId !== "number" || !Number.isSafeInteger(referralId)) {
+    throw new HttpError(500, "DB", "Failed to create referral link (missing id)");
+  }
+
+  await createPersonalCoupon({
+    tgUserId: params.profile.tg_user_id,
+    source: "referral_first_order",
+    referralId,
+  });
+
   return true;
 }
 
 export async function bootstrapReferralProfile(params: {
   tgUserId: number;
   tgUsername: string | null;
+  tgFirstName?: string | null;
   startParam: string | null | undefined;
 }): Promise<{ referralCode: string; referralLink: string; referralBound: boolean }> {
   const profile = await ensureCustomerProfile({
     tgUserId: params.tgUserId,
     tgUsername: params.tgUsername,
+    tgFirstName: params.tgFirstName ?? null,
   });
 
   const referralBound = await bindReferralByStartParam({
@@ -393,17 +415,39 @@ export async function bootstrapReferralProfile(params: {
 export async function getCustomerReferralShare(params: {
   tgUserId: number;
   tgUsername: string | null;
+  tgFirstName?: string | null;
   startParam?: string | null | undefined;
-}): Promise<{ referralCode: string; referralLink: string }> {
+}): Promise<{
+  referralCode: string;
+  referralLink: string;
+  invitedCount: number;
+  rewardedCount: number;
+  earnedPoints: number;
+}> {
   const bootstrap = await bootstrapReferralProfile({
     tgUserId: params.tgUserId,
     tgUsername: params.tgUsername,
+    tgFirstName: params.tgFirstName ?? null,
     startParam: params.startParam ?? null,
   });
+
+  const supabase = createServiceSupabaseClient();
+  const { data: referrals, error } = await supabase
+    .from("referrals")
+    .select("status")
+    .eq("inviter_tg_user_id", params.tgUserId);
+  if (error) {
+    throw new HttpError(500, "DB", `Failed to load referral statistics: ${error.message}`);
+  }
+  const referralRows = (referrals ?? []) as Array<{ status: string }>;
+  const rewardedCount = referralRows.filter((row) => row.status === "rewarded").length;
 
   return {
     referralCode: bootstrap.referralCode,
     referralLink: bootstrap.referralLink,
+    invitedCount: referralRows.length,
+    rewardedCount,
+    earnedPoints: rewardedCount * config.referrals.pointsInviter,
   };
 }
 
@@ -435,6 +479,7 @@ function mapInviteeStatus(params: {
 export async function getReferralOverview(params: {
   tgUserId: number;
   tgUsername: string | null;
+  tgFirstName?: string | null;
   startParam: string | null | undefined;
   limit: number;
   offset: number;
@@ -445,6 +490,7 @@ export async function getReferralOverview(params: {
   const bootstrap = await bootstrapReferralProfile({
     tgUserId: params.tgUserId,
     tgUsername: params.tgUsername,
+    tgFirstName: params.tgFirstName ?? null,
     startParam: params.startParam,
   });
 
@@ -526,8 +572,7 @@ export async function getReferralOverview(params: {
     referralLink: bootstrap.referralLink,
     rewardPoints: {
       inviter: config.referrals.pointsInviter,
-      invitee: config.referrals.pointsInvitee,
-      minFirstOrderTotalRub: config.referrals.minFirstOrderTotalRub,
+      inviteeDiscountPercent: 10,
       pointsExpireAfterDays: config.loyalty.expirationDays,
       pointsMaxSpendPercent: config.referrals.pointsMaxSpendPercent,
     },
@@ -591,11 +636,6 @@ export async function processReferralRewardForOrderDone(params: {
   if (!order) return { awarded: false };
   if (order.status !== "done") return { awarded: false };
 
-  const effectiveTotal = numberFromUnknown(order.total_after_discount ?? order.total_price);
-  if (effectiveTotal < config.referrals.minFirstOrderTotalRub) {
-    return { awarded: false };
-  }
-
   const { data: referral, error: referralError } = await supabase
     .from("referrals")
     .select("id,inviter_tg_user_id,invitee_tg_user_id,status")
@@ -606,12 +646,12 @@ export async function processReferralRewardForOrderDone(params: {
     throw new HttpError(500, "DB", `Failed to load referral row: ${referralError.message}`);
   }
   if (!referral) return { awarded: false };
-  if (referral.status === "rewarded") return { awarded: false };
 
   const { data: inviteeOrders, error: inviteeOrdersError } = await supabase
     .from("orders")
     .select("id,status,created_at")
     .eq("tg_user_id", referral.invitee_tg_user_id)
+    .eq("status", "done")
     .order("created_at", { ascending: true })
     .limit(1);
 
@@ -622,27 +662,20 @@ export async function processReferralRewardForOrderDone(params: {
   const firstOrder = inviteeOrders?.[0] ?? null;
   if (!firstOrder) return { awarded: false };
   if (firstOrder.id !== order.id) return { awarded: false };
-  if (firstOrder.status !== "done") return { awarded: false };
 
   const nowIso = new Date().toISOString();
-  await applyLoyaltyPointsTransaction({
-    tgUserId: referral.inviter_tg_user_id,
-    deltaPoints: config.referrals.pointsInviter,
-    kind: REFERRAL_INVITER_BONUS_KIND,
-    orderId: order.id,
-    referralId: referral.id,
-    comment: "Referral reward for a first completed order",
-  });
-  await applyLoyaltyPointsTransaction({
-    tgUserId: referral.invitee_tg_user_id,
-    deltaPoints: config.referrals.pointsInvitee,
-    kind: REFERRAL_INVITEE_BONUS_KIND,
-    orderId: order.id,
-    referralId: referral.id,
-    comment: "Referral reward for a first completed order",
-  });
+  if (referral.status !== "rewarded") {
+    await applyLoyaltyPointsTransaction({
+      tgUserId: referral.inviter_tg_user_id,
+      deltaPoints: config.referrals.pointsInviter,
+      kind: REFERRAL_INVITER_BONUS_KIND,
+      orderId: order.id,
+      referralId: referral.id,
+      comment: "Referral reward for a first completed order",
+    });
+  }
 
-  const { error: referralUpdateError } = await supabase
+  const { data: newlyRewarded, error: referralUpdateError } = await supabase
     .from("referrals")
     .update({
       status: "rewarded",
@@ -651,11 +684,55 @@ export async function processReferralRewardForOrderDone(params: {
       rewarded_at: nowIso,
     })
     .eq("id", referral.id)
-    .neq("status", "rewarded");
+    .neq("status", "rewarded")
+    .select("id")
+    .maybeSingle();
 
   if (referralUpdateError) {
     throw new HttpError(500, "DB", `Failed to update referral status: ${referralUpdateError.message}`);
   }
 
-  return { awarded: true };
+  // Claim the notification before calling Telegram so concurrent completion
+  // handlers cannot send it twice.  If Telegram rejects it, release the
+  // claim; a later retry of the completion action will make one more attempt.
+  const { data: notificationClaim, error: notificationClaimError } = await supabase
+    .from("referrals")
+    .update({ inviter_reward_notified_at: nowIso })
+    .eq("id", referral.id)
+    .is("inviter_reward_notified_at", null)
+    .select("id")
+    .maybeSingle();
+  if (notificationClaimError) {
+    throw new HttpError(500, "DB", `Failed to mark referral notification: ${notificationClaimError.message}`);
+  }
+
+  if (notificationClaim) {
+    try {
+      const { data: inviteeProfile, error: inviteeProfileError } = await supabase
+        .from("customer_profiles")
+        .select("tg_username,tg_first_name")
+        .eq("tg_user_id", referral.invitee_tg_user_id)
+        .maybeSingle();
+      if (inviteeProfileError) {
+        throw new Error(inviteeProfileError.message);
+      }
+      const username = typeof inviteeProfile?.tg_username === "string" ? inviteeProfile.tg_username.trim() : "";
+      const firstName =
+        typeof inviteeProfile?.tg_first_name === "string" ? inviteeProfile.tg_first_name.trim() : "";
+      const friendName = username ? `@${username.replace(/^@+/, "")}` : firstName || "Ваш друг";
+      await sendMessage({
+        botToken: config.telegram.botToken,
+        chatId: String(referral.inviter_tg_user_id),
+        text: `${friendName} забрал заказ! Вам начислено <b>+${config.referrals.pointsInviter} баллов</b> 🎁`,
+      });
+    } catch {
+      await supabase
+        .from("referrals")
+        .update({ inviter_reward_notified_at: null })
+        .eq("id", referral.id)
+        .eq("inviter_reward_notified_at", nowIso);
+    }
+  }
+
+  return { awarded: Boolean(newlyRewarded) };
 }
