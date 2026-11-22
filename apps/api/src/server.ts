@@ -92,13 +92,6 @@ const ADMIN_ORDER_EDIT_SESSION_MS = 100 * 365 * 24 * 60 * 60 * 1_000;
 const BLG_DELIVERY_ORIGIN = { lat: 50.258119, lon: 127.534845 };
 
 function assertPublicCityEnabled(citySlug: CitySlug): void {
-  if (citySlug === "blg" && !config.features.blgStorefrontEnabled) {
-    throw new HttpError(
-      409,
-      "CITY_DISABLED",
-      "Благовещенск временно не принимает заказы. Загляните немного позже.",
-    );
-  }
   if (citySlug === "vvo" && !config.features.vvoEnabled) {
     throw new HttpError(
       409,
