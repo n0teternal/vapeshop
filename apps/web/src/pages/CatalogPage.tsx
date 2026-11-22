@@ -1476,18 +1476,12 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
 
         <Link
           to="/referrals"
-          className="mt-4 flex items-center gap-3 rounded-xl border border-sky-300/20 bg-sky-400/[0.08] px-3.5 py-3 transition-colors hover:border-sky-300/35 hover:bg-sky-400/[0.13]"
+          className="group mt-4 flex items-center justify-between gap-3 border-t border-white/[0.08] pt-3 text-sm transition-colors"
         >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-300/15 text-lg">
-            🎁
+          <span className="text-muted-foreground transition-colors group-hover:text-foreground">
+            Пригласить друга
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold text-foreground">Подарки друзьям</span>
-            <span className="mt-0.5 block text-xs text-muted-foreground">
-              Другу — 10% на первый заказ, вам — 200 баллов
-            </span>
-          </span>
-          <span className="shrink-0 text-xs font-semibold text-sky-200">Пригласить →</span>
+          <span className="shrink-0 font-medium text-primary">+200 баллов →</span>
         </Link>
       </section>
 
