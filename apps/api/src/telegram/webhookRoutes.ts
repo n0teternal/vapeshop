@@ -12,7 +12,7 @@ import {
   type OrderPaymentMethod,
   type OrderStatus,
 } from "../order/telegramMessage.js";
-import { syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
+import { readNotifyTargets, syncFinalOrderTelegramState } from "../order/telegramFinalStatus.js";
 import {
   bootstrapReferralProfile,
   getCustomerReferralShare,
@@ -1207,20 +1207,27 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
           paymentMethod: action.paymentMethod,
           staff,
         });
-        const editTarget =
-          parsed.message ??
-          (order.notify_chat_id !== null && order.notify_message_id !== null
-            ? { chatId: order.notify_chat_id, messageId: order.notify_message_id }
-            : undefined);
-
-        if (editTarget) {
-          await editMessageText({
-            botToken: config.telegram.botToken,
-            chatId: editTarget.chatId,
-            messageId: editTarget.messageId,
-            text: sellerMessage.text,
-            replyMarkup: sellerMessage.reply_markup,
-          });
+        const editTargets = readNotifyTargets({
+          notifyTargets: order.notify_targets,
+          notifyChatId: order.notify_chat_id,
+          notifyMessageId: order.notify_message_id,
+          fallbackTarget: parsed.message ?? null,
+        });
+        for (const editTarget of editTargets) {
+          try {
+            await editMessageText({
+              botToken: config.telegram.botToken,
+              chatId: editTarget.chatId,
+              messageId: editTarget.messageId,
+              text: sellerMessage.text,
+              replyMarkup: sellerMessage.reply_markup,
+            });
+          } catch (editError) {
+            request.log.error(
+              { err: editError, orderId: order.id, chatId: editTarget.chatId },
+              "Failed to sync staff selection to Telegram order message",
+            );
+          }
         }
 
         await answerSafe(parsed.callbackQueryId, "Выберите сотрудника");
@@ -1354,15 +1361,13 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
       isEdited,
     });
 
-    const notifyChatId = order.notify_chat_id;
-    const notifyMessageId = order.notify_message_id;
-    const editTarget =
-      parsed.message ??
-      (notifyChatId !== null && notifyMessageId !== null
-        ? { chatId: notifyChatId, messageId: notifyMessageId }
-        : undefined);
-
-    if (editTarget) {
+    const editTargets = readNotifyTargets({
+      notifyTargets: order.notify_targets,
+      notifyChatId: order.notify_chat_id,
+      notifyMessageId: order.notify_message_id,
+      fallbackTarget: parsed.message ?? null,
+    });
+    for (const editTarget of editTargets) {
       try {
         await editMessageText({
           botToken: config.telegram.botToken,
@@ -1372,7 +1377,10 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
           replyMarkup: telegramMessage.reply_markup,
         });
       } catch (e) {
-        request.log.error({ err: e }, "Failed to edit Telegram message");
+        request.log.error(
+          { err: e, orderId: order.id, chatId: editTarget.chatId },
+          "Failed to edit Telegram order message",
+        );
       }
     }
 
