@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BadgePercent, Check, Heart } from "lucide-react";
 import { useCustomerAuth } from "../auth/CustomerAuthProvider";
 import { ProductImagePreview } from "../components/ProductImagePreview";
-import { VVO_ENABLED } from "../config";
+import { BLG_STOREFRONT_ENABLED, VVO_ENABLED } from "../config";
 import { PRODUCTS } from "../data/products";
 import { useAppState } from "../state/AppStateProvider";
 import { isSupabaseConfigured } from "../supabase/client";
@@ -1011,6 +1011,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
 
   const mockItems = useMemo(() => mapMockCatalog(), []);
   const supabaseEnabled = isSupabaseConfigured();
+  const blgStorefrontDisabled = state.city === "blg" && !BLG_STOREFRONT_ENABLED;
   const catalogQuery = useQuery({
     queryKey: ["catalog", state.city, true] as const,
     queryFn: ({ queryKey }) => {
@@ -1020,7 +1021,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
       }
       return fetchCatalog(citySlug, { includePromos });
     },
-    enabled: supabaseEnabled && state.city !== null,
+    enabled: supabaseEnabled && state.city !== null && !blgStorefrontDisabled,
   });
   const supabaseCatalog = catalogQuery.data ?? { items: [], promoItems: [] };
   const loading = supabaseEnabled && catalogQuery.isPending;
@@ -1046,7 +1047,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
       if (!citySlug) throw new Error("City is not selected");
       return fetchProductRecommendations(citySlug);
     },
-    enabled: supabaseEnabled && state.city !== null && mode === "catalog",
+    enabled: supabaseEnabled && state.city !== null && mode === "catalog" && !blgStorefrontDisabled,
     staleTime: 2 * 60 * 1000,
   });
   const resolvedRecommendations = useMemo<CatalogItem[] | null>(() => {
@@ -1450,27 +1451,59 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
     );
   }
 
+  const cityHeader = (
+    <section className="flex items-start justify-between gap-3 rounded-[1.45rem] border border-white/[0.1] bg-card/78 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(3,10,24,0.9)] backdrop-blur-xl md:px-5">
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/75">
+          Город
+        </div>
+        <div className="mt-1.5 text-[1.15rem] font-semibold tracking-[-0.035em] text-foreground">
+          {cityLabel ?? "Не выбран"}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        className="rounded-xl border border-white/[0.09] bg-background/45 px-3.5 py-2.5 text-xs font-semibold text-foreground transition-colors hover:bg-background/80"
+        disabled={orderEditSessionActive}
+        onClick={() => dispatch({ type: "city/clear" })}
+      >
+        {orderEditSessionActive ? "Город зафиксирован" : "Сменить город"}
+      </button>
+    </section>
+  );
+
+  if (blgStorefrontDisabled) {
+    return (
+      <div className="space-y-5">
+        {cityHeader}
+        <section className="overflow-hidden rounded-[1.45rem] border border-primary/25 bg-[radial-gradient(circle_at_top_right,rgba(90,180,255,0.18),transparent_46%),rgba(19,36,57,0.82)] p-6 shadow-[0_18px_42px_-26px_rgba(3,10,24,0.92)] backdrop-blur-xl md:p-8">
+          <div className="max-w-xl">
+            <div className="text-3xl" aria-hidden="true">💨</div>
+            <h1 className="mt-5 text-2xl font-semibold tracking-[-0.045em] text-foreground md:text-3xl">
+              Благовещенск временно на паузе
+            </h1>
+            <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground md:text-base">
+              Готовим обновление магазина. Пока заказы в Благовещенске не принимаем — скоро вернёмся.
+            </p>
+            {!orderEditSessionActive ? (
+              <button
+                type="button"
+                className="mt-6 rounded-xl border border-white/[0.12] bg-background/55 px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-background/80"
+                onClick={() => dispatch({ type: "city/clear" })}
+              >
+                Сменить город
+              </button>
+            ) : null}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
-      <section className="flex items-start justify-between gap-3 rounded-[1.45rem] border border-white/[0.1] bg-card/78 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(3,10,24,0.9)] backdrop-blur-xl md:px-5">
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/75">
-            Город
-          </div>
-          <div className="mt-1.5 text-[1.15rem] font-semibold tracking-[-0.035em] text-foreground">
-            {cityLabel ?? "Не выбран"}
-          </div>
-        </div>
-
-        <button
-          type="button"
-          className="rounded-xl border border-white/[0.09] bg-background/45 px-3.5 py-2.5 text-xs font-semibold text-foreground transition-colors hover:bg-background/80"
-          disabled={orderEditSessionActive}
-          onClick={() => dispatch({ type: "city/clear" })}
-        >
-          {orderEditSessionActive ? "Город зафиксирован" : "Сменить город"}
-        </button>
-      </section>
+      {cityHeader}
 
       <section className="space-y-2.5 rounded-[1.45rem] border border-white/[0.09] bg-card/74 p-2.5 shadow-[0_14px_30px_-28px_rgba(3,10,24,0.78)] backdrop-blur-xl md:p-3">
         <div className="flex items-center gap-2">

@@ -65,6 +65,14 @@ export const DELIVERY_UPGRADES_ENABLED = readEnvBoolean(
 // require a database migration or restoring deleted catalog/inventory rows.
 export const VVO_ENABLED = readEnvBoolean("VITE_VVO_ENABLED", false);
 
+// BLG can be put behind a temporary storefront banner without touching the
+// catalog, inventory or city records. Set this back to true and redeploy web
+// to return the city immediately.
+export const BLG_STOREFRONT_ENABLED = readEnvBoolean(
+  "VITE_BLG_STOREFRONT_ENABLED",
+  false,
+);
+
 function readEnvNumber(key: string): number | null {
   const raw = readEnvString(key);
   if (!raw) return null;

@@ -43,6 +43,7 @@ export type AppConfig = {
   features: {
     deliveryUpgradesEnabled: boolean;
     vvoEnabled: boolean;
+    blgStorefrontEnabled: boolean;
   };
   security: {
     trustProxy: boolean;
@@ -268,6 +269,7 @@ export const config: AppConfig = (() => {
     features: {
       deliveryUpgradesEnabled: parseBooleanEnv("DELIVERY_UPGRADES_ENABLED", true),
       vvoEnabled: parseBooleanEnv("VVO_ENABLED", false),
+      blgStorefrontEnabled: parseBooleanEnv("BLG_STOREFRONT_ENABLED", false),
     },
     security: {
       // Hosted production deployments normally sit behind Railway/Render/etc.
