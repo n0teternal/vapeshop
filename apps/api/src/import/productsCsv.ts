@@ -875,6 +875,17 @@ export async function importProductsCsv(params: {
   }
 
   const inputRecordByRowNum = new Map(inputRecords.map((item) => [item.rowNum, item.record]));
+  // A row that names an existing UUID but cannot be parsed must never be
+  // mistaken for a deliberate request to remove that product from this city.
+  // Keep its inventory in place while importing the other valid rows. This is
+  // especially important for round-tripped XLSX files: deleting it first can
+  // leave the staff sheets referring to stock that no longer exists in city
+  // inventory.
+  const invalidSourceProductIds = new Set(
+    errors
+      .map((error) => error.id)
+      .filter((id): id is string => id !== null && parseUuid(id)),
+  );
   const detachedSourceProductIds = new Set<string>();
   const productIdRemap: Record<string, string> = {};
 
@@ -976,7 +987,8 @@ export async function importProductsCsv(params: {
       const importedProductIds = new Set(parsedProducts.map((product) => product.id));
       const cityProductIds = await fetchInventoryProductIdsForCity(params.supabase, targetCity.id);
       const obsoleteProductIds = Array.from(cityProductIds).filter(
-        (productId) => !importedProductIds.has(productId),
+        (productId) =>
+          !importedProductIds.has(productId) && !invalidSourceProductIds.has(productId),
       );
 
       if (obsoleteProductIds.length > 0) {

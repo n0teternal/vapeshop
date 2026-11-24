@@ -3922,7 +3922,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
           csvText,
           citySlug: parsedQuery.data.citySlug ?? null,
           imageBaseUrl: config.productImagesBaseUrl,
-          allowBareImageFileNames: useImagePrefix,
+          // A city XLSX is our own round-trip format. Older products in an
+          // exported workbook can contain just an image filename, so it must
+          // be accepted on re-import even if the optional CSV convenience
+          // checkbox was not ticked. Otherwise those rows are silently
+          // invalidated, their city inventory is removed by sync, and the
+          // staff tabs can no longer be reconciled.
+          allowBareImageFileNames: useImagePrefix || isSpreadsheet,
           imageItemsDir: useImagePrefix ? itemsDir : null,
           imageFileNames: config.productImagesBaseUrl ? imageFileNames : null,
         });
