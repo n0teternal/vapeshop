@@ -399,7 +399,7 @@ async function answerSafe(
   }
 }
 
-const ADMIN_CALLBACK_MEME_CHANCE = 0.24;
+const ADMIN_CALLBACK_MEME_CHANCE = 0.1;
 
 const ADMIN_CALLBACK_MEMES = {
   paymentSelection: [
