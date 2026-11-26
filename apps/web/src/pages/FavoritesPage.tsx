@@ -5,6 +5,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { useAppState } from "../state/AppStateProvider";
+import { playUiSound } from "../utils/uiSound";
 
 function formatPriceRub(value: number): string {
   return new Intl.NumberFormat("ru-RU", {
@@ -81,7 +82,7 @@ export function FavoritesPage() {
                 type="button"
                 className="w-full"
                 disabled={!item.inStock}
-                onClick={() =>
+                onClick={() => {
                   dispatch({
                     type: "cart/add",
                     item: {
@@ -92,8 +93,9 @@ export function FavoritesPage() {
                       imageUrl: item.imageUrl,
                       stockQty: item.stockQty,
                     },
-                  })
-                }
+                  });
+                  playUiSound("cart-add");
+                }}
               >
                 <ShoppingBag className="h-4 w-4" />
                 {item.inStock ? "В корзину" : "Нет в наличии"}

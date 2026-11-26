@@ -17,6 +17,7 @@ import {
 } from "../supabase/catalog";
 import { fetchProductRecommendations } from "../supabase/recommendations";
 import { buildImageCandidates } from "../utils/imageCandidates";
+import { playUiSound } from "../utils/uiSound";
 
 const CATALOG_INITIAL_RENDER_COUNT = 24;
 const CATALOG_RENDER_STEP = 20;
@@ -1626,6 +1627,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                 stockQty: item.stockQty,
               },
             });
+            playUiSound("cart-add");
             showToast("Промо-товар добавлен в корзину");
           }}
         />
@@ -1706,6 +1708,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                       stockQty: item.stockQty,
                     },
                   });
+                  playUiSound("cart-add");
                   showToast("\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u043a\u043e\u0440\u0437\u0438\u043d\u0443");
                 }}
                 onToggleFavorite={() => {

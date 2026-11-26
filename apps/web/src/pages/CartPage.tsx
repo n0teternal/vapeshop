@@ -37,6 +37,7 @@ import {
 } from "../state/AppStateProvider";
 import { fetchCatalog, type CatalogItem } from "../supabase/catalog";
 import { useTelegram } from "../telegram/TelegramProvider";
+import { playUiSound, prepareUiSound } from "../utils/uiSound";
 import {
   normalizeCatalogCategoryId,
   type CatalogFilterCategoryId,
@@ -1452,6 +1453,7 @@ export function CartPage() {
       setCouponCode("");
       setCouponPreview(null);
       setCouponError(null);
+      playUiSound("order-success");
 
       await notify(
         orderEditSession
@@ -2034,7 +2036,10 @@ export function CartPage() {
             type="button"
             className="grid h-14 w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-0 rounded-xl px-3 text-base font-bold"
             disabled={!canSubmit}
-            onClick={() => void submitOrder()}
+            onClick={() => {
+              prepareUiSound();
+              void submitOrder();
+            }}
           >
             <span className="col-start-2 justify-self-center">{checkoutButtonLabel}</span>
             <span className="col-start-3 flex min-w-0 items-baseline justify-self-end gap-1.5 pl-2">
@@ -2115,7 +2120,7 @@ export function CartPage() {
                         size="sm"
                         className="mt-2 h-8 w-full rounded-lg text-xs"
                         disabled={submitting}
-                        onClick={() =>
+                        onClick={() => {
                           dispatch({
                             type: "cart/add",
                             item: {
@@ -2126,8 +2131,9 @@ export function CartPage() {
                               imageUrl: item.imageUrl,
                               stockQty: item.stockQty,
                             },
-                          })
-                        }
+                          });
+                          playUiSound("cart-add");
+                        }}
                       >
                         Добавить
                       </Button>
