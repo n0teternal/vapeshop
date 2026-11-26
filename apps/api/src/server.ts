@@ -100,6 +100,9 @@ const PRODUCT_ANALYTICS_EVENT_NAMES = [
 ] as const;
 type ProductAnalyticsEventName = (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
 const FEEDBACK_SAMPLE_PERCENT = 15;
+// One internal account can verify the post-order experience without waiting
+// for the 15% deterministic sample. The regular 45-day cooldown still applies.
+const FEEDBACK_TEST_CUSTOMER_ID = 1208488286;
 const FEEDBACK_COOLDOWN_MS = 45 * 24 * 60 * 60 * 1_000;
 
 function assertPublicCityEnabled(citySlug: CitySlug): void {
@@ -152,6 +155,7 @@ function feedbackSampleBucket(customerId: number): number {
 }
 
 function isFeedbackSampleCustomer(customerId: number): boolean {
+  if (customerId === FEEDBACK_TEST_CUSTOMER_ID) return true;
   return feedbackSampleBucket(customerId) < FEEDBACK_SAMPLE_PERCENT;
 }
 
