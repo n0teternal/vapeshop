@@ -1,4 +1,4 @@
-import { CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
+import { ArrowRight, Check, CircleCheck, CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet, apiPost, buildApiHeaders } from "../api/client";
@@ -60,6 +60,12 @@ type OrderApiSuccess = {
 type OrderApiError = {
   ok: false;
   error: { code: string; message: string };
+};
+
+type OrderSuccessState = {
+  orderId: string;
+  notified: boolean;
+  kind: "created" | "updated";
 };
 
 type ReferralOverviewBalance = {
@@ -629,6 +635,79 @@ function isValidPhoneInput(value: string): boolean {
   return digits.length >= 7 && digits.length <= 20 && value.trim().length <= 40;
 }
 
+function formatOrderReference(orderId: string): string {
+  const compact = orderId.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return compact.length > 6 ? compact.slice(-6) : compact;
+}
+
+function OrderSuccessScreen({ order }: { order: OrderSuccessState }) {
+  const isUpdate = order.kind === "updated";
+  const title = isUpdate ? "Заказ обновлён" : "Заказ принят";
+  const description = isUpdate
+    ? "Изменения уже передали администратору."
+    : order.notified
+      ? "Мы уже передали его администратору."
+      : "Заказ сохранён — администратор увидит его в системе.";
+
+  return (
+    <section className="order-success-screen" aria-labelledby="order-success-title">
+      <div className="order-success-screen__eyebrow">
+        <span className="order-success-screen__pulse" aria-hidden="true" />
+        <span>{isUpdate ? "Изменения сохранены" : "Заказ создан"}</span>
+        <span className="order-success-screen__reference">№ {formatOrderReference(order.orderId)}</span>
+      </div>
+
+      <div className="order-success-screen__signal" aria-hidden="true">
+        <span className="order-success-screen__glow" />
+        <span className="order-success-screen__orbit order-success-screen__orbit--outer" />
+        <span className="order-success-screen__orbit order-success-screen__orbit--inner" />
+        <span className="order-success-screen__beam" />
+        <span className="order-success-screen__particle order-success-screen__particle--one" />
+        <span className="order-success-screen__particle order-success-screen__particle--two" />
+        <span className="order-success-screen__particle order-success-screen__particle--three" />
+        <span className="order-success-screen__core">
+          <Check className="h-8 w-8" strokeWidth={2.7} />
+        </span>
+      </div>
+
+      <div className="order-success-screen__copy">
+        <h1 id="order-success-title">{title}</h1>
+        <p>{description}</p>
+      </div>
+
+      <div className="order-success-screen__handoff">
+        <span className="order-success-screen__handoff-icon">
+          <CircleCheck className="h-4 w-4" strokeWidth={2.3} />
+        </span>
+        <span>
+          {isUpdate
+            ? "Новая версия заказа уже доступна в истории"
+            : "Проверить статус можно в «Моих заказах»"}
+        </span>
+      </div>
+
+      <div className="order-success-screen__actions">
+        <Button
+          asChild
+          className="h-12 w-full rounded-2xl text-[15px] font-bold shadow-[0_16px_34px_rgba(0,164,255,0.2)]"
+        >
+          <Link to="/orders">
+            Мои заказы
+            <ArrowRight className="ml-2 h-4 w-4" strokeWidth={2.4} />
+          </Link>
+        </Button>
+        <Button
+          asChild
+          variant="ghost"
+          className="h-11 w-full rounded-2xl text-sm font-semibold text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
+        >
+          <Link to="/">Вернуться в каталог</Link>
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function CartPage() {
   const { state, dispatch } = useAppState();
   const { isTelegram, webApp } = useTelegram();
@@ -636,6 +715,7 @@ export function CartPage() {
   const deliveryDateInputRef = useRef<HTMLInputElement | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [orderSuccess, setOrderSuccess] = useState<OrderSuccessState | null>(null);
   const [pointsBalance, setPointsBalance] = useState(0);
   const [pointsEnabled, setPointsEnabled] = useState(false);
   const [pointsLoading, setPointsLoading] = useState(false);
@@ -1186,18 +1266,6 @@ export function CartPage() {
     hasRequiredBlgDeliverySchedule &&
     (!isAddressDeliveryMethod || checkoutDraft.address.trim().length > 0);
 
-  async function notify(message: string): Promise<void> {
-    if (isTelegram) {
-      try {
-        webApp.showAlert(message);
-        return;
-      } catch {
-        // fallthrough
-      }
-    }
-    alert(message);
-  }
-
   function updateCheckoutDraft(
     patch: Partial<{
       deliveryMethod: DeliveryMethod;
@@ -1454,18 +1522,21 @@ export function CartPage() {
       setCouponPreview(null);
       setCouponError(null);
       playUiSound("order-success");
-
-      await notify(
-        orderEditSession
-          ? "Заказ обновлён.\nПередаём админу..."
-          : "Заказ создан.\nПередаём админу...",
-      );
+      setOrderSuccess({
+        orderId: parsed.orderId,
+        notified: parsed.notified,
+        kind: orderEditSession ? "updated" : "created",
+      });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Network error";
       setSubmitError(message);
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (orderSuccess) {
+    return <OrderSuccessScreen order={orderSuccess} />;
   }
 
   if (state.cart.length === 0) {
