@@ -307,24 +307,11 @@ async function resolveOrderDeliveryLocation(params: {
 
   try {
     return await calculateBlgDeliveryLocationFromAddress(params.address);
-  } catch (error) {
-    // Never turn a distance-calculation failure into the base tariff. That
-    // undercharges remote addresses and also lets the browser and server show
-    // different prices. The customer can retry after correcting the address
-    // or when Yandex becomes available again.
-    if (isHttpError(error) && error.code === "ADDRESS_NOT_FOUND") {
-      throw new HttpError(
-        400,
-        "DELIVERY_ADDRESS_NOT_FOUND",
-        "Не удалось найти адрес для расчёта доставки. Проверьте улицу и номер дома.",
-      );
-    }
-
-    throw new HttpError(
-      503,
-      "DELIVERY_DISTANCE_UNAVAILABLE",
-      "Не удалось рассчитать расстояние доставки. Повторите попытку через минуту.",
-    );
+  } catch {
+    // Delivery must not be blocked by Yandex geocoding. A missing point leaves
+    // distance-based rules unselected; calculateDeliveryFeeRub then applies
+    // the regular BLG base fee together with any matching peak surcharge.
+    return null;
   }
 }
 
