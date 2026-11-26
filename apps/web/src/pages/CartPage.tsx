@@ -1,9 +1,11 @@
 import { ArrowRight, CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { trackProductEvent } from "../analytics/productAnalytics";
 import { ApiError, apiGet, apiPost, buildApiHeaders } from "../api/client";
 import { useCustomerAuth } from "../auth/CustomerAuthProvider";
 import { ProductImagePreview } from "../components/ProductImagePreview";
+import { OrderFeedbackPrompt } from "../components/OrderFeedbackPrompt";
 import {
   DeliveryAddressMap,
   getDeliveryDistanceZone,
@@ -634,7 +636,15 @@ function isValidPhoneInput(value: string): boolean {
   return digits.length >= 7 && digits.length <= 20 && value.trim().length <= 40;
 }
 
-function OrderSuccessScreen({ order }: { order: OrderSuccessState }) {
+function OrderSuccessScreen({
+  order,
+  city,
+  showFeedback,
+}: {
+  order: OrderSuccessState;
+  city: City | null;
+  showFeedback: boolean;
+}) {
   const isUpdate = order.kind === "updated";
   const title = isUpdate ? "Заказ обновлён" : "Заказ принят";
   const description = isUpdate
@@ -656,6 +666,8 @@ function OrderSuccessScreen({ order }: { order: OrderSuccessState }) {
         <h1 id="order-success-title">{title}</h1>
         <p>{description}</p>
       </div>
+
+      {showFeedback && city ? <OrderFeedbackPrompt citySlug={city} /> : null}
 
       <div className="order-success-screen__actions">
         <Button
@@ -684,6 +696,7 @@ export function CartPage() {
   const { isTelegram, webApp } = useTelegram();
   const { user: websiteUser } = useCustomerAuth();
   const deliveryDateInputRef = useRef<HTMLInputElement | null>(null);
+  const checkoutEventCityRef = useRef<City | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [orderSuccess, setOrderSuccess] = useState<OrderSuccessState | null>(null);
@@ -755,6 +768,14 @@ export function CartPage() {
   const requiresBlgDeliverySchedule = showBlgDeliverySchedule && !isAdminOrderEditSession;
   const promoCodesAvailable = state.city === "blg" && discountsAllowed;
   const personalCouponsAvailable = discountsAllowed;
+
+  useEffect(() => {
+    if (!state.city || checkoutEventCityRef.current === state.city) return;
+
+    checkoutEventCityRef.current = state.city;
+    trackProductEvent("checkout_view", state.city);
+  }, [state.city]);
+
   const availableDeliveryTimeSlots = useMemo(
     () =>
       getBlgDeliveryTimeSlotsForDate(checkoutDraft.deliveryDate).filter((slot) =>
@@ -1493,6 +1514,7 @@ export function CartPage() {
       setCouponPreview(null);
       setCouponError(null);
       playUiSound("order-success");
+      if (!orderEditSession) trackProductEvent("order_created", state.city);
       setOrderSuccess({
         notified: parsed.notified,
         kind: orderEditSession ? "updated" : "created",
@@ -1506,7 +1528,13 @@ export function CartPage() {
   }
 
   if (orderSuccess) {
-    return <OrderSuccessScreen order={orderSuccess} />;
+    return (
+      <OrderSuccessScreen
+        order={orderSuccess}
+        city={state.city}
+        showFeedback={isTelegram && orderSuccess.kind === "created"}
+      />
+    );
   }
 
   if (state.cart.length === 0) {
@@ -2173,6 +2201,7 @@ export function CartPage() {
                               stockQty: item.stockQty,
                             },
                           });
+                          trackProductEvent("cart_add", state.city);
                           playUiSound("cart-add");
                         }}
                       >

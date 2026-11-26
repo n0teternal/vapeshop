@@ -1,5 +1,6 @@
 import { Heart, ShoppingBag } from "lucide-react";
 import { Link } from "react-router-dom";
+import { trackProductEvent } from "../analytics/productAnalytics";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -94,6 +95,7 @@ export function FavoritesPage() {
                       stockQty: item.stockQty,
                     },
                   });
+                  trackProductEvent("cart_add", state.city);
                   playUiSound("cart-add");
                 }}
               >

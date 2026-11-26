@@ -91,6 +91,16 @@ const DELIVERY_PRICING_ALLOWED_TG_USER_ID = 1208488286;
 const DEV_FALLBACK_TG_USER_ID = 42;
 const ADMIN_ORDER_EDIT_SESSION_MS = 100 * 365 * 24 * 60 * 60 * 1_000;
 const BLG_DELIVERY_ORIGIN = { lat: 50.258119, lon: 127.534845 };
+const PRODUCT_ANALYTICS_EVENT_NAMES = [
+  "app_open",
+  "catalog_view",
+  "cart_add",
+  "checkout_view",
+  "order_created",
+] as const;
+type ProductAnalyticsEventName = (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
+const FEEDBACK_SAMPLE_PERCENT = 15;
+const FEEDBACK_COOLDOWN_MS = 45 * 24 * 60 * 60 * 1_000;
 
 function assertPublicCityEnabled(citySlug: CitySlug): void {
   if (citySlug === "vvo" && !config.features.vvoEnabled) {
@@ -112,6 +122,43 @@ function ok<T>(data: T): ApiSuccess<T> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseOptionalCitySlug(value: unknown): CitySlug | null {
+  if (value === undefined || value === null) return null;
+  if (value === "blg" || value === "vvo") return value;
+  throw new HttpError(400, "BAD_REQUEST", "Invalid city");
+}
+
+function parseProductAnalyticsEvent(value: unknown): ProductAnalyticsEventName {
+  if (
+    typeof value === "string" &&
+    (PRODUCT_ANALYTICS_EVENT_NAMES as readonly string[]).includes(value)
+  ) {
+    return value as ProductAnalyticsEventName;
+  }
+  throw new HttpError(400, "BAD_REQUEST", "Invalid analytics event");
+}
+
+function feedbackSampleBucket(customerId: number): number {
+  // Deterministic sampling keeps the same experience for the same customer;
+  // it is not based on their order amount or personal data.
+  let hash = 2_166_136_261;
+  for (const character of String(customerId)) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return (hash >>> 0) % 100;
+}
+
+function isFeedbackSampleCustomer(customerId: number): boolean {
+  return feedbackSampleBucket(customerId) < FEEDBACK_SAMPLE_PERCENT;
+}
+
+function isWithinFeedbackCooldown(timestamp: string | null): boolean {
+  if (!timestamp) return false;
+  const value = Date.parse(timestamp);
+  return Number.isFinite(value) && Date.now() - value < FEEDBACK_COOLDOWN_MS;
 }
 
 function getHeaderString(value: unknown): string | undefined {
@@ -766,6 +813,200 @@ app.post<{
         : "Unexpected error";
 
     request.log.error({ err: e }, "Customer auth bootstrap failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+// Product analytics is intentionally coarse: the service sees only a signed-in
+// customer id, the selected city, an event name and a timestamp. No address,
+// product, search query, cart content or Telegram profile field is accepted.
+app.post<{
+  Body: unknown;
+  Reply: ApiSuccess<{ recorded: true }> | ErrorResponse;
+}>("/api/analytics/events", async (request, reply) => {
+  try {
+    const user = await requireCustomerUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+    if (!isRecord(request.body)) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid analytics payload");
+    }
+
+    const eventName = parseProductAnalyticsEvent(request.body.eventName);
+    const citySlug = parseOptionalCitySlug(request.body.citySlug);
+    const { error } = await createServiceSupabaseClient()
+      .from("product_analytics_events")
+      .insert({ customer_id: user.id, city_slug: citySlug, event_name: eventName });
+    if (error) throw new HttpError(500, "ANALYTICS_WRITE_FAILED", error.message);
+
+    return reply.code(201).send(ok({ recorded: true }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+    request.log.error({ err: e }, "Product analytics write failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.post<{
+  Body: unknown;
+  Reply: ApiSuccess<{ eligible: boolean }> | ErrorResponse;
+}>("/api/feedback/prompt", async (request, reply) => {
+  try {
+    const user = await requireCustomerUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+    if (!isRecord(request.body)) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid feedback payload");
+    }
+    // Validate the city even though it is not persisted until a rating is sent.
+    parseOptionalCitySlug(request.body.citySlug);
+
+    if (!isFeedbackSampleCustomer(user.id)) {
+      return reply.code(200).send(ok({ eligible: false }));
+    }
+
+    const supabase = createServiceSupabaseClient();
+    const { data: existing, error: readError } = await supabase
+      .from("app_feedback_prompt_states")
+      .select("last_prompted_at, prompt_count")
+      .eq("customer_id", user.id)
+      .maybeSingle();
+    if (readError) throw new HttpError(500, "FEEDBACK_READ_FAILED", readError.message);
+
+    if (isWithinFeedbackCooldown(existing?.last_prompted_at ?? null)) {
+      return reply.code(200).send(ok({ eligible: false }));
+    }
+
+    const now = new Date().toISOString();
+    const { error: writeError } = await supabase.from("app_feedback_prompt_states").upsert(
+      {
+        customer_id: user.id,
+        last_prompted_at: now,
+        prompt_count: (existing?.prompt_count ?? 0) + 1,
+        updated_at: now,
+      },
+      { onConflict: "customer_id" },
+    );
+    if (writeError) throw new HttpError(500, "FEEDBACK_WRITE_FAILED", writeError.message);
+
+    return reply.code(200).send(ok({ eligible: true }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+    request.log.error({ err: e }, "Feedback prompt eligibility failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.post<{
+  Body: unknown;
+  Reply: ApiSuccess<{ dismissed: true }> | ErrorResponse;
+}>("/api/feedback/dismiss", async (request, reply) => {
+  try {
+    const user = await requireCustomerUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+    const now = new Date().toISOString();
+    const { error } = await createServiceSupabaseClient()
+      .from("app_feedback_prompt_states")
+      .update({ last_dismissed_at: now, updated_at: now })
+      .eq("customer_id", user.id);
+    if (error) throw new HttpError(500, "FEEDBACK_WRITE_FAILED", error.message);
+
+    return reply.code(200).send(ok({ dismissed: true }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+    request.log.error({ err: e }, "Feedback dismissal failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
+});
+
+app.post<{
+  Body: unknown;
+  Reply: ApiSuccess<{ submitted: true }> | ErrorResponse;
+}>("/api/feedback", async (request, reply) => {
+  try {
+    const user = await requireCustomerUser({
+      headers: request.headers as Record<string, unknown>,
+    });
+    if (!isRecord(request.body)) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid feedback payload");
+    }
+
+    const rating = request.body.rating;
+    if (!Number.isInteger(rating) || typeof rating !== "number" || rating < 1 || rating > 5) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid rating");
+    }
+    const citySlug = parseOptionalCitySlug(request.body.citySlug);
+    const commentRaw = request.body.comment;
+    const comment =
+      commentRaw === undefined || commentRaw === null
+        ? null
+        : typeof commentRaw === "string" && commentRaw.trim().length <= 600
+          ? commentRaw.trim() || null
+          : (() => {
+              throw new HttpError(400, "BAD_REQUEST", "Invalid comment");
+            })();
+
+    const supabase = createServiceSupabaseClient();
+    const { data: promptState, error: stateError } = await supabase
+      .from("app_feedback_prompt_states")
+      .select("last_prompted_at")
+      .eq("customer_id", user.id)
+      .maybeSingle();
+    if (stateError) throw new HttpError(500, "FEEDBACK_READ_FAILED", stateError.message);
+    if (!promptState?.last_prompted_at || !isWithinFeedbackCooldown(promptState.last_prompted_at)) {
+      throw new HttpError(409, "FEEDBACK_NOT_AVAILABLE", "Feedback prompt is no longer active");
+    }
+
+    const now = new Date().toISOString();
+    const { error: insertError } = await supabase.from("app_feedback_responses").insert({
+      customer_id: user.id,
+      city_slug: citySlug,
+      prompted_at: promptState.last_prompted_at,
+      rating,
+      comment,
+    });
+    if (insertError) {
+      if (insertError.code === "23505") {
+        return reply.code(200).send(ok({ submitted: true }));
+      }
+      throw new HttpError(500, "FEEDBACK_WRITE_FAILED", insertError.message);
+    }
+
+    const { error: updateError } = await supabase
+      .from("app_feedback_prompt_states")
+      .update({ last_responded_at: now, updated_at: now })
+      .eq("customer_id", user.id);
+    if (updateError) throw new HttpError(500, "FEEDBACK_WRITE_FAILED", updateError.message);
+
+    return reply.code(201).send(ok({ submitted: true }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+    request.log.error({ err: e }, "Feedback submission failed");
     return reply.code(statusCode).send({ ok: false, error: { code, message } });
   }
 });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BadgePercent, Check, Heart } from "lucide-react";
 import { Link } from "react-router-dom";
+import { trackProductEvent } from "../analytics/productAnalytics";
 import { useCustomerAuth } from "../auth/CustomerAuthProvider";
 import { ProductImagePreview } from "../components/ProductImagePreview";
 import { VVO_ENABLED } from "../config";
@@ -992,6 +993,10 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
   const { user: websiteUser } = useCustomerAuth();
   const orderEditSessionActive = state.orderEditSession !== null;
 
+  useEffect(() => {
+    if (state.city) trackProductEvent("catalog_view", state.city);
+  }, [mode, state.city]);
+
   const [selectedCategoryId, setSelectedCategoryId] = useState<CatalogFilterCategoryId | null>(
     null,
   );
@@ -1627,6 +1632,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                 stockQty: item.stockQty,
               },
             });
+            trackProductEvent("cart_add", state.city);
             playUiSound("cart-add");
             showToast("Промо-товар добавлен в корзину");
           }}
@@ -1708,6 +1714,7 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
                       stockQty: item.stockQty,
                     },
                   });
+                  trackProductEvent("cart_add", state.city);
                   playUiSound("cart-add");
                   showToast("\u0422\u043e\u0432\u0430\u0440 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u043a\u043e\u0440\u0437\u0438\u043d\u0443");
                 }}

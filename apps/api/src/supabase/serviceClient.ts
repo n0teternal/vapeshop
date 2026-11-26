@@ -613,6 +613,87 @@ export type Database = {
         };
         Relationships: [];
       };
+      product_analytics_events: {
+        Row: {
+          id: number;
+          customer_id: number;
+          city_slug: string | null;
+          event_name: string;
+          occurred_at: string;
+        };
+        Insert: {
+          id?: number;
+          customer_id: number;
+          city_slug?: string | null;
+          event_name: string;
+          occurred_at?: string;
+        };
+        Update: {
+          id?: number;
+          customer_id?: number;
+          city_slug?: string | null;
+          event_name?: string;
+          occurred_at?: string;
+        };
+        Relationships: [];
+      };
+      app_feedback_prompt_states: {
+        Row: {
+          customer_id: number;
+          last_prompted_at: string | null;
+          last_dismissed_at: string | null;
+          last_responded_at: string | null;
+          prompt_count: number;
+          updated_at: string;
+        };
+        Insert: {
+          customer_id: number;
+          last_prompted_at?: string | null;
+          last_dismissed_at?: string | null;
+          last_responded_at?: string | null;
+          prompt_count?: number;
+          updated_at?: string;
+        };
+        Update: {
+          customer_id?: number;
+          last_prompted_at?: string | null;
+          last_dismissed_at?: string | null;
+          last_responded_at?: string | null;
+          prompt_count?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      app_feedback_responses: {
+        Row: {
+          id: number;
+          customer_id: number;
+          city_slug: string | null;
+          prompted_at: string;
+          rating: number;
+          comment: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          customer_id: number;
+          city_slug?: string | null;
+          prompted_at: string;
+          rating: number;
+          comment?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          customer_id?: number;
+          city_slug?: string | null;
+          prompted_at?: string;
+          rating?: number;
+          comment?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       inventory_movements: {
         Row: {
           id: number;

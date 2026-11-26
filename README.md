@@ -135,6 +135,7 @@ Dashboard → **SQL Editor** → выполните:
 - `supabase/alter_customer_sms_auth.sql` (базовая подготовка профилей аккаунтов сайта)
 - `supabase/alter_customer_password_auth.sql` (бесплатный вход на сайте по email и паролю)
 - `supabase/alter_product_recommendations.sql` (популярные и персональные рекомендации по успешным заказам)
+- `supabase/alter_product_analytics.sql` (DAU/воронка Mini App и редкая оценка оформления после заказа)
 
 ## Вход на сайте по email и паролю
 

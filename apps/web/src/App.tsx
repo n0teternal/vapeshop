@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { CustomerAuthProvider } from "./auth/CustomerAuthProvider";
 import { Layout } from "./app/Layout";
+import { ProductAnalyticsBootstrap } from "./components/ProductAnalyticsBootstrap";
 import { ReferralBootstrap } from "./components/ReferralBootstrap";
 import { WebsiteAuthGate } from "./components/WebsiteAuthGate";
 import { AdminPage } from "./pages/AdminPage";
@@ -18,6 +19,7 @@ export default function App() {
     <TelegramProvider>
       <CustomerAuthProvider>
         <AppStateProvider>
+          <ProductAnalyticsBootstrap />
           <ReferralBootstrap />
           <WebsiteAuthGate />
           <Routes>
