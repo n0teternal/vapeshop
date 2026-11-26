@@ -915,6 +915,87 @@ textarea {
   animation: order-success-screen-enter 440ms cubic-bezier(0.16, 1, 0.3, 1) 360ms both;
 }
 
+@keyframes order-success-mark-ring {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes order-success-mark-check {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Keep the checkout confirmation deliberately quiet: one mark, one message,
+   and a clear next step. */
+.order-success-screen {
+  min-height: min(55dvh, 31rem);
+  max-width: 22rem;
+  justify-content: center;
+  padding: clamp(1.25rem, 5vh, 2.5rem) 0;
+  overflow: visible;
+  animation-duration: 240ms;
+}
+
+.order-success-screen__mark {
+  width: 3.9rem;
+  height: 3.9rem;
+  margin-bottom: 1.35rem;
+  color: hsl(var(--primary));
+}
+
+.order-success-screen__mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.order-success-screen__mark-ring {
+  stroke: rgb(64 185 247 / 0.58);
+  stroke-width: 1.4;
+  stroke-dasharray: 120;
+  stroke-dashoffset: 120;
+  animation: order-success-mark-ring 360ms ease-out 80ms forwards;
+}
+
+.order-success-screen__mark-check {
+  stroke: currentColor;
+  stroke-width: 2.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 26;
+  stroke-dashoffset: 26;
+  animation: order-success-mark-check 280ms cubic-bezier(0.2, 0.8, 0.2, 1) 300ms forwards;
+}
+
+.order-success-screen__copy {
+  max-width: 19rem;
+  animation-duration: 280ms;
+  animation-delay: 120ms;
+}
+
+.order-success-screen__copy h1 {
+  color: hsl(var(--foreground));
+  font-size: clamp(1.45rem, 6vw, 1.8rem);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+}
+
+.order-success-screen__copy p {
+  margin-top: 0.5rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.order-success-screen__actions {
+  width: 100%;
+  margin-top: 1.9rem;
+  padding: 0;
+  animation-duration: 280ms;
+  animation-delay: 180ms;
+}
+
 @media (min-width: 64rem) {
   .order-success-screen {
     min-height: min(72dvh, 46rem);
@@ -934,7 +1015,14 @@ textarea {
   .order-success-screen__particle,
   .order-success-screen__copy,
   .order-success-screen__handoff,
-  .order-success-screen__actions {
+  .order-success-screen__actions,
+  .order-success-screen__mark-ring,
+  .order-success-screen__mark-check {
     animation: none !important;
+  }
+
+  .order-success-screen__mark-ring,
+  .order-success-screen__mark-check {
+    stroke-dashoffset: 0;
   }
 }

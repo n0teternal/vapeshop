@@ -1,4 +1,4 @@
-import { ArrowRight, Check, CircleCheck, CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
+import { ArrowRight, CalendarDays, Minus, Plus, ShoppingBag } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet, apiPost, buildApiHeaders } from "../api/client";
@@ -63,7 +63,6 @@ type OrderApiError = {
 };
 
 type OrderSuccessState = {
-  orderId: string;
   notified: boolean;
   kind: "created" | "updated";
 };
@@ -635,11 +634,6 @@ function isValidPhoneInput(value: string): boolean {
   return digits.length >= 7 && digits.length <= 20 && value.trim().length <= 40;
 }
 
-function formatOrderReference(orderId: string): string {
-  const compact = orderId.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-  return compact.length > 6 ? compact.slice(-6) : compact;
-}
-
 function OrderSuccessScreen({ order }: { order: OrderSuccessState }) {
   const isUpdate = order.kind === "updated";
   const title = isUpdate ? "Заказ обновлён" : "Заказ принят";
@@ -651,23 +645,11 @@ function OrderSuccessScreen({ order }: { order: OrderSuccessState }) {
 
   return (
     <section className="order-success-screen" aria-labelledby="order-success-title">
-      <div className="order-success-screen__eyebrow">
-        <span className="order-success-screen__pulse" aria-hidden="true" />
-        <span>{isUpdate ? "Изменения сохранены" : "Заказ создан"}</span>
-        <span className="order-success-screen__reference">№ {formatOrderReference(order.orderId)}</span>
-      </div>
-
-      <div className="order-success-screen__signal" aria-hidden="true">
-        <span className="order-success-screen__glow" />
-        <span className="order-success-screen__orbit order-success-screen__orbit--outer" />
-        <span className="order-success-screen__orbit order-success-screen__orbit--inner" />
-        <span className="order-success-screen__beam" />
-        <span className="order-success-screen__particle order-success-screen__particle--one" />
-        <span className="order-success-screen__particle order-success-screen__particle--two" />
-        <span className="order-success-screen__particle order-success-screen__particle--three" />
-        <span className="order-success-screen__core">
-          <Check className="h-8 w-8" strokeWidth={2.7} />
-        </span>
+      <div className="order-success-screen__mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" fill="none">
+          <circle className="order-success-screen__mark-ring" cx="24" cy="24" r="19" />
+          <path className="order-success-screen__mark-check" d="m16 24.5 5.2 5.1L32.5 18" />
+        </svg>
       </div>
 
       <div className="order-success-screen__copy">
@@ -675,31 +657,20 @@ function OrderSuccessScreen({ order }: { order: OrderSuccessState }) {
         <p>{description}</p>
       </div>
 
-      <div className="order-success-screen__handoff">
-        <span className="order-success-screen__handoff-icon">
-          <CircleCheck className="h-4 w-4" strokeWidth={2.3} />
-        </span>
-        <span>
-          {isUpdate
-            ? "Новая версия заказа уже доступна в истории"
-            : "Проверить статус можно в «Моих заказах»"}
-        </span>
-      </div>
-
       <div className="order-success-screen__actions">
         <Button
           asChild
-          className="h-12 w-full rounded-2xl text-[15px] font-bold shadow-[0_16px_34px_rgba(0,164,255,0.2)]"
+          className="h-12 w-full rounded-xl text-[15px] font-bold shadow-[0_12px_28px_rgba(0,164,255,0.16)]"
         >
           <Link to="/orders">
-            Мои заказы
+            Перейти к заказам
             <ArrowRight className="ml-2 h-4 w-4" strokeWidth={2.4} />
           </Link>
         </Button>
         <Button
           asChild
           variant="ghost"
-          className="h-11 w-full rounded-2xl text-sm font-semibold text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
+          className="h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
         >
           <Link to="/">Вернуться в каталог</Link>
         </Button>
@@ -1523,7 +1494,6 @@ export function CartPage() {
       setCouponError(null);
       playUiSound("order-success");
       setOrderSuccess({
-        orderId: parsed.orderId,
         notified: parsed.notified,
         kind: orderEditSession ? "updated" : "created",
       });
