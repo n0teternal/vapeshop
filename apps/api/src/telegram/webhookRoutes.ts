@@ -399,6 +399,48 @@ async function answerSafe(
   }
 }
 
+const ADMIN_CALLBACK_MEME_CHANCE = 0.24;
+
+const ADMIN_CALLBACK_MEMES = {
+  paymentSelection: [
+    "Способ оплаты выбран. Теперь найдите героя продажи.",
+    "Касса одобрила. Остался сотрудник дня.",
+    "Деньги определились. Сотрудник — следующий босс.",
+  ],
+  done: [
+    "Готово. Ещё один квест закрыт.",
+    "Готово. Касса довольно кивает.",
+    "Готово. Заказ официально стал легендой.",
+  ],
+  cancelled: [
+    "Заказ отменён. Товар вернулся домой.",
+    "Заказ отменён. Остатки снова свободны.",
+    "Заказ отменён. Эта ветка сюжета закрыта.",
+  ],
+} as const;
+
+function maybeUseAdminMeme(defaultText: string, variants: readonly string[]): string {
+  if (Math.random() >= ADMIN_CALLBACK_MEME_CHANCE || variants.length === 0) {
+    return defaultText;
+  }
+
+  return variants[Math.floor(Math.random() * variants.length)] ?? defaultText;
+}
+
+function paymentSelectionCallbackText(paymentMethod: OrderPaymentMethod): string {
+  const paymentLabel = paymentMethod === "cash" ? "Наличные" : "Карта";
+  return maybeUseAdminMeme(
+    `${paymentLabel}: выберите сотрудника`,
+    ADMIN_CALLBACK_MEMES.paymentSelection,
+  );
+}
+
+function finalOrderCallbackText(status: Extract<OrderStatus, "done" | "cancelled">): string {
+  return status === "done"
+    ? maybeUseAdminMeme("Статус: Готово", ADMIN_CALLBACK_MEMES.done)
+    : maybeUseAdminMeme("Статус: Отменён", ADMIN_CALLBACK_MEMES.cancelled);
+}
+
 type CustomerOrderRow = {
   id: string;
   status: string;
@@ -1154,7 +1196,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
 
       await answerSafe(
         parsed.callbackQueryId,
-        action.status === "done" ? "РЎС‚Р°С‚СѓСЃ: Р“РѕС‚РѕРІРѕ" : "РЎС‚Р°С‚СѓСЃ: РћС‚РјРµРЅС‘РЅ",
+        finalOrderCallbackText(action.status),
       );
       return reply.code(200).send({ ok: true });
     }
@@ -1238,7 +1280,7 @@ export async function registerTelegramWebhookRoutes(app: FastifyInstance): Promi
           }
         }
 
-        await answerSafe(parsed.callbackQueryId, "Выберите сотрудника");
+        await answerSafe(parsed.callbackQueryId, paymentSelectionCallbackText(action.paymentMethod));
       } catch (e) {
         request.log.error({ err: e, orderId: order.id }, "Failed to show staff selection");
         await answerSafe(parsed.callbackQueryId, "Не удалось загрузить сотрудников");
