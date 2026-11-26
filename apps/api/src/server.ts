@@ -99,11 +99,7 @@ const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "order_created",
 ] as const;
 type ProductAnalyticsEventName = (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
-const FEEDBACK_SAMPLE_PERCENT = 15;
-// One internal account can verify the post-order experience without waiting
-// for the 15% deterministic sample. The regular 45-day cooldown still applies.
-const FEEDBACK_TEST_CUSTOMER_ID = 1208488286;
-const FEEDBACK_COOLDOWN_MS = 45 * 24 * 60 * 60 * 1_000;
+const FEEDBACK_SAMPLE_PERCENT = 75;
 
 function assertPublicCityEnabled(citySlug: CitySlug): void {
   if (citySlug === "vvo" && !config.features.vvoEnabled) {
@@ -155,14 +151,7 @@ function feedbackSampleBucket(customerId: number): number {
 }
 
 function isFeedbackSampleCustomer(customerId: number): boolean {
-  if (customerId === FEEDBACK_TEST_CUSTOMER_ID) return true;
   return feedbackSampleBucket(customerId) < FEEDBACK_SAMPLE_PERCENT;
-}
-
-function isWithinFeedbackCooldown(timestamp: string | null): boolean {
-  if (!timestamp) return false;
-  const value = Date.parse(timestamp);
-  return Number.isFinite(value) && Date.now() - value < FEEDBACK_COOLDOWN_MS;
 }
 
 function getHeaderString(value: unknown): string | undefined {
@@ -883,7 +872,9 @@ app.post<{
       .maybeSingle();
     if (readError) throw new HttpError(500, "FEEDBACK_READ_FAILED", readError.message);
 
-    if (isWithinFeedbackCooldown(existing?.last_prompted_at ?? null)) {
+    // A customer gets exactly one chance to answer. The prompt is considered
+    // shown even if they dismiss it, so it cannot become intrusive.
+    if (existing?.last_prompted_at) {
       return reply.code(200).send(ok({ eligible: false }));
     }
 
@@ -976,7 +967,7 @@ app.post<{
       .eq("customer_id", user.id)
       .maybeSingle();
     if (stateError) throw new HttpError(500, "FEEDBACK_READ_FAILED", stateError.message);
-    if (!promptState?.last_prompted_at || !isWithinFeedbackCooldown(promptState.last_prompted_at)) {
+    if (!promptState?.last_prompted_at) {
       throw new HttpError(409, "FEEDBACK_NOT_AVAILABLE", "Feedback prompt is no longer active");
     }
 

@@ -59,7 +59,7 @@ export function OrderFeedbackPrompt({ citySlug }: { citySlug: CitySlug }) {
       className="mt-1 rounded-2xl border border-border/80 bg-card/45 px-4 py-3.5 text-center"
       aria-label="Оценка оформления заказа"
     >
-      <p className="text-sm font-semibold text-foreground">Как прошло оформление?</p>
+      <p className="text-sm font-semibold text-foreground">Как вам приложение?</p>
       <div className="mt-2 flex items-center justify-center gap-1" role="group" aria-label="Оценка от 1 до 5">
         {Array.from({ length: 5 }, (_, index) => {
           const rating = index + 1;
