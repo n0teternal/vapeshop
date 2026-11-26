@@ -13,6 +13,7 @@ import {
   type OrderPaymentMethod,
   type OrderStatus,
 } from "./telegramMessage.js";
+import { isPrivateTestOrder, privateTestOrderChatIds } from "./testOrderNotifications.js";
 
 export type FinalOrderStatus = Extract<OrderStatus, "done" | "cancelled">;
 
@@ -337,6 +338,7 @@ export async function syncFinalOrderTelegramState(params: {
   logger?: LoggerLike;
 }): Promise<void> {
   const context = await loadOrderContext(params.orderId);
+  const isPrivateTest = isPrivateTestOrder(context.order.tg_user_id);
   const cancelledOrderChatsMode = params.cancelledOrderChatsMode ?? "auto";
   const shouldDuplicateCancelledOrderChats =
     params.status === "cancelled"
@@ -404,7 +406,7 @@ export async function syncFinalOrderTelegramState(params: {
     isEdited: context.isEdited,
   });
 
-  if (!params.skipStatusChats && config.telegram.chatIdsOrderStatus) {
+  if (!isPrivateTest && !params.skipStatusChats && config.telegram.chatIdsOrderStatus) {
     for (const chatId of config.telegram.chatIdsOrderStatus) {
       try {
         await sendMessage({
@@ -423,13 +425,16 @@ export async function syncFinalOrderTelegramState(params: {
     }
   }
 
-  const notifyTargets = readNotifyTargets({
+  const savedNotifyTargets = readNotifyTargets({
     notifyTargets: context.order.notify_targets,
     notifyChatId: context.order.notify_chat_id,
     notifyMessageId: context.order.notify_message_id,
     fallbackTarget: params.fallbackTarget ?? null,
   });
-  const orderChatIds = pickOrderChatIds(context.citySlug);
+  const notifyTargets = isPrivateTest
+    ? savedNotifyTargets.filter((target) => target.chatId === context.order.tg_user_id)
+    : savedNotifyTargets;
+  const orderChatIds = isPrivateTest ? privateTestOrderChatIds() : pickOrderChatIds(context.citySlug);
   const orderTargetsByChatId = new Map<number, NotifyTarget>();
   for (const target of notifyTargets) {
     if (!orderTargetsByChatId.has(target.chatId)) {
@@ -570,6 +575,7 @@ export async function syncEditedOrderTelegramState(params: {
   logger?: LoggerLike;
 }): Promise<void> {
   const context = await loadOrderContext(params.orderId);
+  const isPrivateTest = isPrivateTestOrder(context.order.tg_user_id);
   const shouldRepostEditedOrder = !(await isRecentCityOrder({
     cityId: context.order.city_id ?? 0,
     orderId: context.order.id,
@@ -595,14 +601,19 @@ export async function syncEditedOrderTelegramState(params: {
     isEdited: true,
   });
 
-  const notifyTargets = readNotifyTargets({
+  const savedNotifyTargets = readNotifyTargets({
     notifyTargets: context.order.notify_targets,
     notifyChatId: context.order.notify_chat_id,
     notifyMessageId: context.order.notify_message_id,
     fallbackTarget: params.fallbackTarget ?? null,
   });
+  const notifyTargets = isPrivateTest
+    ? savedNotifyTargets.filter((target) => target.chatId === context.order.tg_user_id)
+    : savedNotifyTargets;
   const persistedTargets: NotifyTarget[] = shouldRepostEditedOrder ? [] : [...notifyTargets];
-  const orderChatIdsToNotify = new Set<string>(pickOrderChatIds(context.citySlug));
+  const orderChatIdsToNotify = new Set<string>(
+    isPrivateTest ? privateTestOrderChatIds() : pickOrderChatIds(context.citySlug),
+  );
   for (const target of notifyTargets) {
     orderChatIdsToNotify.add(String(target.chatId));
   }

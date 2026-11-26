@@ -41,6 +41,7 @@ import {
   isOrderDeliveryMethod,
 } from "./order/deliveryMethod.js";
 import { sendOrderNotificationToChats } from "./order/sendOrderNotification.js";
+import { isPrivateTestOrder, privateTestOrderChatIds } from "./order/testOrderNotifications.js";
 import {
   buildNotifyTargetRecords,
   syncEditedOrderTelegramState,
@@ -659,6 +660,9 @@ function pickTelegramChatIdsForOrder(params: {
   citySlug: CitySlug;
   tgUserId: number;
 }): string[] {
+  if (isPrivateTestOrder(params.tgUserId)) {
+    return privateTestOrderChatIds();
+  }
   return pickTelegramChatIds(params.citySlug);
 }
 
