@@ -339,15 +339,7 @@ export async function syncFinalOrderTelegramState(params: {
   const context = await loadOrderContext(params.orderId);
   const cancelledOrderChatsMode = params.cancelledOrderChatsMode ?? "auto";
   const shouldDuplicateCancelledOrderChats =
-    params.status === "cancelled"
-      ? cancelledOrderChatsMode === "edit_only"
-        ? false
-        : !(await isRecentCityOrder({
-            cityId: context.order.city_id ?? 0,
-            orderId: context.order.id,
-            limit: 3,
-          }))
-      : false;
+    params.status === "cancelled" && cancelledOrderChatsMode !== "edit_only";
   const shouldDeleteExistingOrderMessages =
     params.status === "done" ||
     (params.status === "cancelled" && shouldDuplicateCancelledOrderChats);
