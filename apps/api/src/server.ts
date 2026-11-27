@@ -101,6 +101,7 @@ const PRODUCT_ANALYTICS_EVENT_NAMES = [
 type ProductAnalyticsEventName = (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
 const FEEDBACK_SAMPLE_PERCENT = 85;
 const FEEDBACK_TEST_CUSTOMER_ID = 1208488286;
+const FEEDBACK_NOTIFY_TG_USER_ID = "1208488286";
 
 function assertPublicCityEnabled(citySlug: CitySlug): void {
   if (citySlug === "vvo" && !config.features.vvoEnabled) {
@@ -163,6 +164,36 @@ async function isAdminCustomer(customerId: number): Promise<boolean> {
     .limit(1);
   if (error) throw new HttpError(500, "ADMIN_LOOKUP_FAILED", error.message);
   return (data?.length ?? 0) > 0;
+}
+
+function escapeTelegramHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character] ?? character;
+  });
+}
+
+async function notifyFeedbackRating(params: {
+  customer: CustomerUser;
+  rating: number;
+}): Promise<void> {
+  const username = params.customer.username?.trim().replace(/^@+/, "") ?? "";
+  const customerLabel = username
+    ? `@${escapeTelegramHtml(username)}`
+    : `<code>${params.customer.id}</code> (без username)`;
+  const stars = "★".repeat(params.rating) + "☆".repeat(5 - params.rating);
+
+  await sendMessage({
+    botToken: config.telegram.botToken,
+    chatId: FEEDBACK_NOTIFY_TG_USER_ID,
+    text: `<b>Новая оценка приложения</b>\n${stars} <b>${params.rating}/5</b>\n${customerLabel}`,
+  });
 }
 
 function getHeaderString(value: unknown): string | undefined {
@@ -1006,6 +1037,11 @@ app.post<{
       .update({ last_responded_at: now, updated_at: now })
       .eq("customer_id", user.id);
     if (updateError) throw new HttpError(500, "FEEDBACK_WRITE_FAILED", updateError.message);
+
+    void notifyFeedbackRating({ customer: user, rating }).catch((notificationError: unknown) => {
+      // A Telegram outage must never make a customer's submitted rating disappear.
+      request.log.warn({ err: notificationError }, "Feedback rating notification failed");
+    });
 
     return reply.code(201).send(ok({ submitted: true }));
   } catch (e: unknown) {
