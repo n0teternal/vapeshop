@@ -1,5 +1,6 @@
 import { HttpError } from "../httpError.js";
 import { createServiceSupabaseClient } from "../supabase/serviceClient.js";
+import { phoneFromAuthEmail } from "./websitePhoneAuth.js";
 
 export type CustomerUser = {
   id: number;
@@ -25,8 +26,10 @@ function readBearerToken(headers: Record<string, unknown>): string | null {
 
 /**
  * Validates a browser Supabase session server-side and maps it to the existing
- * loyalty/customer key. We intentionally do not trust a user id or email
- * forwarded from the browser.
+ * loyalty/customer key. We intentionally do not trust an identifier forwarded
+ * from the browser: email accounts use their confirmed Auth email, while phone
+ * accounts use a server-owned technical Auth email that encodes the normalized
+ * Russian number.
  */
 export async function readWebsiteCustomerUser(params: {
   headers: Record<string, unknown>;
@@ -41,6 +44,34 @@ export async function readWebsiteCustomerUser(params: {
   }
 
   const email = typeof data.user.email === "string" ? data.user.email.trim().toLowerCase() : "";
+  const phone = phoneFromAuthEmail(email);
+  if (phone) {
+    const { data: profileRows, error: profileError } = await supabase.rpc(
+      "ensure_web_customer_profile",
+      {
+        p_auth_user_id: data.user.id,
+        p_phone: phone,
+      },
+    );
+
+    if (profileError) {
+      throw new HttpError(500, "DB", `Не удалось подготовить профиль покупателя: ${profileError.message}`);
+    }
+
+    const profile = profileRows?.[0];
+    if (!profile || !Number.isSafeInteger(profile.tg_user_id)) {
+      throw new HttpError(500, "DB", "Профиль покупателя вернул некорректные данные.");
+    }
+
+    return {
+      id: profile.tg_user_id,
+      username: null,
+      phone: profile.phone ?? phone,
+      email: null,
+      source: "website",
+    };
+  }
+
   if (!email) {
     throw new HttpError(
       401,

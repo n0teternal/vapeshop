@@ -2,19 +2,27 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { apiPost } from "../api/client";
 import { supabase } from "../supabase/client";
 import { useTelegram } from "../telegram/TelegramProvider";
+import {
+  isLegacyEmailInput,
+  normalizeRussianPhone,
+  phoneAuthEmail,
+  phoneFromAuthEmail,
+} from "./russianPhone";
 
 type AuthStatus = "loading" | "anonymous" | "authenticated" | "unavailable";
 
 export type WebsiteCustomer = {
   id: string;
-  email: string;
+  phone: string | null;
+  email: string | null;
+  displayName: string;
 };
 
 type CustomerAuthContextValue = {
   status: AuthStatus;
   user: WebsiteCustomer | null;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  signIn: (identifier: string, password: string) => Promise<void>;
+  signUp: (phone: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -37,11 +45,27 @@ function assertPassword(password: string): void {
 function toWebsiteCustomer(user: { id: string; email?: string | null } | null): WebsiteCustomer | null {
   const email = user?.email?.trim().toLowerCase();
   if (!user || !email) return null;
-  return { id: user.id, email };
+  const phone = phoneFromAuthEmail(email);
+  return {
+    id: user.id,
+    phone,
+    email: phone ? null : email,
+    displayName: phone ?? email,
+  };
 }
 
 async function bootstrapWebsiteCustomer(): Promise<void> {
   await apiPost<{ source: string; email: string | null }>("/api/auth/bootstrap", {});
+}
+
+function emailForSignIn(identifier: string): string {
+  if (isLegacyEmailInput(identifier)) return normalizeEmail(identifier);
+
+  const phone = normalizeRussianPhone(identifier);
+  if (!phone) {
+    throw new Error("Введите российский номер в формате +7 (999) 123-45-67.");
+  }
+  return phoneAuthEmail(phone);
 }
 
 export function CustomerAuthProvider({ children }: { children: ReactNode }) {
@@ -95,30 +119,41 @@ export function CustomerAuthProvider({ children }: { children: ReactNode }) {
     () => ({
       status,
       user,
-      async signIn(rawEmail: string, password: string): Promise<void> {
+      async signIn(identifier: string, password: string): Promise<void> {
         if (isTelegram) throw new Error("В Telegram вход уже выполнен.");
         if (!supabase) throw new Error("Вход в аккаунт сайта пока не настроен.");
 
-        const email = normalizeEmail(rawEmail);
         assertPassword(password);
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: emailForSignIn(identifier),
+          password,
+        });
         if (error || !data.session) {
-          throw new Error(error?.message ?? "Неверный email или пароль.");
+          throw new Error(error?.message ?? "Неверный номер телефона, email или пароль.");
         }
         await bootstrapWebsiteCustomer();
       },
-      async signUp(rawEmail: string, password: string): Promise<void> {
+      async signUp(rawPhone: string, password: string): Promise<void> {
         if (isTelegram) throw new Error("В Telegram вход уже выполнен.");
         if (!supabase) throw new Error("Вход в аккаунт сайта пока не настроен.");
+        if (isLegacyEmailInput(rawPhone)) {
+          throw new Error("Новые аккаунты создаются по номеру телефона. Email работает только для ранее зарегистрированных аккаунтов.");
+        }
 
-        const email = normalizeEmail(rawEmail);
+        const phone = normalizeRussianPhone(rawPhone);
+        if (!phone) {
+          throw new Error("Введите российский номер в формате +7 (999) 123-45-67.");
+        }
         assertPassword(password);
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        await apiPost<{ created: true }>("/api/auth/phone-sign-up", { phone, password });
+
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: phoneAuthEmail(phone),
+          password,
+        });
         if (error) throw new Error(error.message);
         if (!data.session) {
-          throw new Error(
-            "Не удалось войти после регистрации. Отключите Confirm email в настройках Supabase или войдите в существующий аккаунт.",
-          );
+          throw new Error("Не удалось войти после регистрации. Попробуйте войти по номеру ещё раз.");
         }
         await bootstrapWebsiteCustomer();
       },

@@ -19,6 +19,7 @@ const EXPENSIVE_API_RULE: RateLimitRule = { limit: 30, windowMs: ONE_MINUTE_MS }
 const ORDER_WRITE_RULE: RateLimitRule = { limit: 12, windowMs: ONE_MINUTE_MS };
 const ADMIN_WRITE_RULE: RateLimitRule = { limit: 45, windowMs: ONE_MINUTE_MS };
 const WEBHOOK_RULE: RateLimitRule = { limit: 120, windowMs: ONE_MINUTE_MS };
+const PHONE_SIGN_UP_RULE: RateLimitRule = { limit: 6, windowMs: ONE_MINUTE_MS };
 
 class FixedWindowRateLimiter {
   private readonly entries = new Map<string, RateLimitEntry>();
@@ -58,6 +59,7 @@ function rateLimitRule(request: FastifyRequest): RateLimitRule | null {
   const path = requestPath(request);
   if (path === "/health" || path.startsWith("/static/")) return null;
   if (path === "/api/telegram/webhook") return WEBHOOK_RULE;
+  if (path === "/api/auth/phone-sign-up") return PHONE_SIGN_UP_RULE;
   if (path === "/api/order" && request.method === "POST") return ORDER_WRITE_RULE;
   if (path.startsWith("/api/orders/") && request.method !== "GET") return ORDER_WRITE_RULE;
   if (path.startsWith("/api/admin/") && request.method !== "GET") return ADMIN_WRITE_RULE;

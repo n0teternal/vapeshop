@@ -141,7 +141,7 @@ export function ProfilePage() {
   }, [canManageDeliveryPricing]);
 
   const displayName = useMemo(() => {
-    if (!isTelegram) return websiteUser?.email ?? "Гость";
+    if (!isTelegram) return websiteUser?.displayName ?? "Гость";
     if (typeof tgUser?.username === "string" && tgUser.username.length > 0) {
       return `@${tgUser.username}`;
     }
@@ -149,7 +149,7 @@ export function ProfilePage() {
       return tgUser.first_name;
     }
     return "Гость";
-  }, [isTelegram, tgUser?.first_name, tgUser?.username, websiteUser?.email]);
+  }, [isTelegram, tgUser?.first_name, tgUser?.username, websiteUser?.displayName]);
 
   const photoUrl =
     isTelegram && typeof tgUser?.photo_url === "string" && tgUser.photo_url.length > 0

@@ -68,6 +68,7 @@ import { sendMessage } from "./telegram/api.js";
 import { registerTelegramWebhookRoutes } from "./telegram/webhookRoutes.js";
 import { ensureTelegramWebhook } from "./telegram/webhookSetup.js";
 import { readWebsiteCustomerUser, type CustomerUser } from "./auth/customerAuth.js";
+import { normalizeRussianPhone, phoneAuthEmail } from "./auth/websitePhoneAuth.js";
 import { registerSecurityHardening } from "./security/hardening.js";
 
 type ApiSuccess<T> = {
@@ -817,6 +818,55 @@ await registerTelegramWebhookRoutes(app);
 
 app.get("/health", async () => {
   return { ok: true };
+});
+
+app.post<{
+  Body: unknown;
+  Reply: ApiSuccess<{ created: true }> | ErrorResponse;
+}>("/api/auth/phone-sign-up", async (request, reply) => {
+  try {
+    if (!isRecord(request.body)) {
+      throw new HttpError(400, "BAD_REQUEST", "Invalid registration payload");
+    }
+
+    const rawPhone = request.body.phone;
+    const password = request.body.password;
+    if (typeof rawPhone !== "string") {
+      throw new HttpError(400, "PHONE_REQUIRED", "Введите российский номер телефона.");
+    }
+    const phone = normalizeRussianPhone(rawPhone);
+    if (!phone) {
+      throw new HttpError(400, "PHONE_INVALID", "Введите российский номер в формате +7 (999) 123-45-67.");
+    }
+    if (typeof password !== "string" || password.length < 8 || password.length > 128) {
+      throw new HttpError(400, "PASSWORD_INVALID", "Пароль должен содержать от 8 до 128 символов.");
+    }
+
+    const { error } = await createServiceSupabaseClient().auth.admin.createUser({
+      email: phoneAuthEmail(phone),
+      password,
+      email_confirm: true,
+      user_metadata: { phone },
+    });
+    if (error) {
+      if (/already|exists|registered|duplicate/i.test(error.message)) {
+        throw new HttpError(409, "PHONE_ALREADY_REGISTERED", "Этот номер уже зарегистрирован. Войдите в аккаунт.");
+      }
+      throw new HttpError(500, "PHONE_SIGN_UP_FAILED", error.message);
+    }
+
+    return reply.code(201).send(ok({ created: true }));
+  } catch (e: unknown) {
+    const statusCode = isHttpError(e) ? e.statusCode : 500;
+    const code = isHttpError(e) ? e.code : "INTERNAL";
+    const message = isHttpError(e)
+      ? e.message
+      : e instanceof Error
+        ? e.message
+        : "Unexpected error";
+    request.log.error({ err: e }, "Website phone registration failed");
+    return reply.code(statusCode).send({ ok: false, error: { code, message } });
+  }
 });
 
 // Called after website sign-in. It proves that the persisted

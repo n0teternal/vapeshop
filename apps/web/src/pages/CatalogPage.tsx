@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BadgePercent, Check, Heart } from "lucide-react";
+import { ArrowUpRight, BadgePercent, Check, Gift, Heart } from "lucide-react";
 import { Link } from "react-router-dom";
 import { trackProductEvent } from "../analytics/productAnalytics";
 import { useCustomerAuth } from "../auth/CustomerAuthProvider";
@@ -1482,12 +1482,30 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
 
         <Link
           to="/referrals"
-          className="group mt-4 flex items-center justify-between gap-3 border-t border-white/[0.08] pt-3 text-sm transition-colors"
+          className="group mt-4 block rounded-2xl border border-primary/25 bg-primary/[0.075] p-4 transition-colors hover:border-primary/45 hover:bg-primary/[0.11]"
         >
-          <span className="text-muted-foreground transition-colors group-hover:text-foreground">
-            Пригласить друга
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-[0_8px_20px_rgba(0,164,255,0.2)]">
+              <Gift className="h-[18px] w-[18px]" strokeWidth={2.1} aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-semibold tracking-[-0.015em] text-foreground">
+                Пригласить друга
+              </span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Другу — 10% на первый заказ
+              </span>
+            </span>
+            <ArrowUpRight
+              className="h-4 w-4 shrink-0 text-primary transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+              strokeWidth={2.1}
+              aria-hidden="true"
+            />
+          </div>
+          <span className="mt-3 flex items-center justify-between border-t border-primary/15 pt-2.5">
+            <span className="text-[11px] text-muted-foreground">После первого заказа друга</span>
+            <span className="text-sm font-bold text-primary">+200 баллов</span>
           </span>
-          <span className="shrink-0 font-medium text-primary">+200 баллов →</span>
         </Link>
       </section>
 
