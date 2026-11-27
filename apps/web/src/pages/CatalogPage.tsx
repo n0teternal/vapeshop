@@ -1492,9 +1492,6 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
               <span className="block text-[15px] font-semibold tracking-[-0.015em] text-foreground">
                 Пригласить друга
               </span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                Другу — 10% на первый заказ
-              </span>
             </span>
             <ArrowUpRight
               className="h-4 w-4 shrink-0 text-primary transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
@@ -1502,8 +1499,8 @@ export function CatalogPage({ mode = "catalog" }: { mode?: CatalogPageMode } = {
               aria-hidden="true"
             />
           </div>
-          <span className="mt-3 flex items-center justify-between border-t border-primary/15 pt-2.5">
-            <span className="text-[11px] text-muted-foreground">После первого заказа друга</span>
+          <span className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">Другу — 10% на первый заказ</span>
             <span className="text-sm font-bold text-primary">+200 баллов</span>
           </span>
         </Link>
