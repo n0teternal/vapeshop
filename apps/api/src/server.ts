@@ -99,7 +99,7 @@ const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "order_created",
 ] as const;
 type ProductAnalyticsEventName = (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
-const FEEDBACK_SAMPLE_PERCENT = 60;
+const FEEDBACK_SAMPLE_PERCENT = 85;
 const FEEDBACK_TEST_CUSTOMER_ID = 1208488286;
 
 function assertPublicCityEnabled(citySlug: CitySlug): void {
