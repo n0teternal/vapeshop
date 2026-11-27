@@ -26,8 +26,8 @@ create index if not exists product_analytics_events_city_occurred_at_idx
   on public.product_analytics_events (city_slug, occurred_at desc);
 
 -- The state prevents an otherwise helpful post-order question from becoming
--- intrusive. A customer in the deterministic sample sees it only once,
--- regardless of how many orders they make.
+-- intrusive. A customer in the deterministic sample sees it only once after
+-- opening the app, regardless of how many orders they make.
 create table if not exists public.app_feedback_prompt_states (
   customer_id bigint primary key,
   last_prompted_at timestamptz null,

@@ -99,7 +99,8 @@ const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "order_created",
 ] as const;
 type ProductAnalyticsEventName = (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
-const FEEDBACK_SAMPLE_PERCENT = 75;
+const FEEDBACK_SAMPLE_PERCENT = 60;
+const FEEDBACK_TEST_CUSTOMER_ID = 1208488286;
 
 function assertPublicCityEnabled(citySlug: CitySlug): void {
   if (citySlug === "vvo" && !config.features.vvoEnabled) {
@@ -152,6 +153,16 @@ function feedbackSampleBucket(customerId: number): number {
 
 function isFeedbackSampleCustomer(customerId: number): boolean {
   return feedbackSampleBucket(customerId) < FEEDBACK_SAMPLE_PERCENT;
+}
+
+async function isAdminCustomer(customerId: number): Promise<boolean> {
+  const { data, error } = await createServiceSupabaseClient()
+    .from("admins")
+    .select("tg_user_id")
+    .eq("tg_user_id", customerId)
+    .limit(1);
+  if (error) throw new HttpError(500, "ADMIN_LOOKUP_FAILED", error.message);
+  return (data?.length ?? 0) > 0;
 }
 
 function getHeaderString(value: unknown): string | undefined {
@@ -860,7 +871,11 @@ app.post<{
     // Validate the city even though it is not persisted until a rating is sent.
     parseOptionalCitySlug(request.body.citySlug);
 
-    if (!isFeedbackSampleCustomer(user.id)) {
+    const isTestCustomer = user.id === FEEDBACK_TEST_CUSTOMER_ID;
+    if (!isTestCustomer && (await isAdminCustomer(user.id))) {
+      return reply.code(200).send(ok({ eligible: false }));
+    }
+    if (!isTestCustomer && !isFeedbackSampleCustomer(user.id)) {
       return reply.code(200).send(ok({ eligible: false }));
     }
 

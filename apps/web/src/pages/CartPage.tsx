@@ -5,7 +5,6 @@ import { trackProductEvent } from "../analytics/productAnalytics";
 import { ApiError, apiGet, apiPost, buildApiHeaders } from "../api/client";
 import { useCustomerAuth } from "../auth/CustomerAuthProvider";
 import { ProductImagePreview } from "../components/ProductImagePreview";
-import { OrderFeedbackPrompt } from "../components/OrderFeedbackPrompt";
 import {
   DeliveryAddressMap,
   getDeliveryDistanceZone,
@@ -638,12 +637,8 @@ function isValidPhoneInput(value: string): boolean {
 
 function OrderSuccessScreen({
   order,
-  city,
-  showFeedback,
 }: {
   order: OrderSuccessState;
-  city: City | null;
-  showFeedback: boolean;
 }) {
   const isUpdate = order.kind === "updated";
   const title = isUpdate ? "Заказ обновлён" : "Заказ принят";
@@ -666,8 +661,6 @@ function OrderSuccessScreen({
         <h1 id="order-success-title">{title}</h1>
         <p>{description}</p>
       </div>
-
-      {showFeedback && city ? <OrderFeedbackPrompt citySlug={city} /> : null}
 
       <div className="order-success-screen__actions">
         <Button
@@ -1531,8 +1524,6 @@ export function CartPage() {
     return (
       <OrderSuccessScreen
         order={orderSuccess}
-        city={state.city}
-        showFeedback={isTelegram && orderSuccess.kind === "created"}
       />
     );
   }
