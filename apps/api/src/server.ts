@@ -98,6 +98,8 @@ const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "cart_add",
   "checkout_view",
   "order_created",
+  "referral_view",
+  "referral_share",
 ] as const;
 type ProductAnalyticsEventName = (typeof PRODUCT_ANALYTICS_EVENT_NAMES)[number];
 const FEEDBACK_SAMPLE_PERCENT = 85;

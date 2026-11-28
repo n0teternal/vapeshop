@@ -1,12 +1,14 @@
 import { UserPlus } from "lucide-react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet } from "../api/client";
+import { trackProductEvent } from "../analytics/productAnalytics";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { useAppState } from "../state/AppStateProvider";
 import { useTelegram } from "../telegram/TelegramProvider";
 
 type ReferralStatus =
@@ -128,8 +130,17 @@ async function copyToClipboard(value: string): Promise<void> {
 
 export function ReferralPage() {
   const { webApp } = useTelegram();
+  const { state } = useAppState();
   const [copyState, setCopyState] = useState<"idle" | "ok" | "error">("idle");
   const [historyNowMs] = useState(() => Date.now());
+  const referralViewTrackedRef = useRef(false);
+
+  useEffect(() => {
+    if (!state.city || referralViewTrackedRef.current) return;
+
+    referralViewTrackedRef.current = true;
+    trackProductEvent("referral_view", state.city);
+  }, [state.city]);
 
   const overviewQuery = useInfiniteQuery({
     queryKey: ["referrals-overview"],
@@ -174,6 +185,8 @@ export function ReferralPage() {
   }
 
   function handleInvite(link: string): void {
+    trackProductEvent("referral_share", state.city);
+
     const shareUrl = buildTelegramShareUrl(link);
     const maybeShareWebApp = webApp as ShareCapableWebApp;
 

@@ -5,7 +5,9 @@ export type ProductAnalyticsEventName =
   | "catalog_view"
   | "cart_add"
   | "checkout_view"
-  | "order_created";
+  | "order_created"
+  | "referral_view"
+  | "referral_share";
 
 type CitySlug = "blg" | "vvo";
 
